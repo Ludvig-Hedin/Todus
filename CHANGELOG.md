@@ -5,24 +5,30 @@
 ### Added
 
 #### Web → Native parity (workstream A1) — calendar event editing
+
 - **Web calendar can now create, edit, and delete events** — `/mail/calendar` was previously read-only (it rendered Google Calendar events + task due-dates but had no write UI; the `calendar.createEvent/updateEvent/deleteEvent` mutations existed server-side but nothing called them). Added an `EventEditDialog` (title, all-day toggle, start/end, location, notes — mirrors the native macOS `MacEventEditSheet` field set) wired to those mutations. A header "New event" button and tapping an empty time-grid slot open the create dialog; clicking an event opens edit; delete lives in the dialog. All-day events handle Google's exclusive `end.date` correctly (no off-by-one). Scoped to the primary calendar; multi-calendar visibility toggles are the next workstream (A2). The left-rail quick-add still creates tasks (unchanged). Date/timezone/all-day/payload logic is a pure, unit-tested module (`lib/calendar-event-form.ts`, 13 tests). Also enabled vitest for `apps/web`. See `docs/superpowers/specs/2026-06-13-web-native-parity-MASTER-design.md`. (`apps/web/app/(routes)/mail/calendar/page.tsx`, `apps/web/components/calendar/event-edit-dialog.tsx`, `apps/web/lib/calendar-event-form.ts`)
 
 #### Web → Native parity (workstream A2) — multi-calendar visibility
+
 - **The web calendar now shows all your calendars with per-calendar visibility toggles** — it previously only ever fetched the `primary` calendar (`calendarId` hardcoded). Switched to `calendar.eventsMulti` (spans all connections; each event tagged with its `calendarId`), added a left-rail "Calendars" list with color swatches + visibility toggles (persisted in localStorage, device-local like native), and replaced the `settings/calendars` placeholder with the same real toggles (kept in sync). Event edit/delete now target each event's own calendar instead of always `primary`. (`apps/web/app/(routes)/mail/calendar/page.tsx`, `apps/web/lib/calendar-visibility.ts`, `apps/web/app/(routes)/settings/calendars/page.tsx`)
 
 #### Web → Native parity (workstream B1) — AI can manage tasks
+
 - **The AI assistant can now create, update, complete, and list tasks** — `apps/server/src/routes/agent/tools.ts` previously exposed email tools only, so asking the chat (or voice) assistant to "add a task" silently did nothing. Added `createTask`/`updateTask`/`completeTask`/`listTasks` agent tools (mirroring the `tasks.create` insert, user-scoped via the resolved `userId`). **Also fixed a latent correctness gap:** the `aiCanWriteTasks` permission (Settings → AI → Permissions) was saved by the web settings page but never enforced server-side — write-task tools are now gated behind it (reads stay available). (`apps/server/src/routes/agent/tools.ts`, `apps/server/src/types.ts`)
 - **The AI assistant can now create calendar events** (B2) — added a `createEvent` agent tool that writes to the user's primary Google Calendar (reusing the calendar route's Google client, now exported), handling timed (ISO + offset) and all-day (exclusive end) events. Gated behind `aiCanWriteCalendar` (also previously saved-but-unenforced). (`apps/server/src/routes/agent/tools.ts`, `apps/server/src/trpc/routes/calendar.ts`)
 
 #### Web → Native parity (workstream E) — share-conversation UI
-- **Web can now create share links for AI conversations** — the `sharing.create` backend existed (password + expiry), and `settings/sharing` could list/revoke, but there was no UI to actually *create* a share (native has the share sheet). Added `ShareConversationDialog` (title, optional password, expiry: never/1/7/30 days) + a "Share" button in the chat header; shows a copyable `/share/:slug` link. (`apps/web/components/ai/share-conversation-dialog.tsx`, `apps/web/app/(routes)/mail/chat/page.tsx`)
+
+- **Web can now create share links for AI conversations** — the `sharing.create` backend existed (password + expiry), and `settings/sharing` could list/revoke, but there was no UI to actually _create_ a share (native has the share sheet). Added `ShareConversationDialog` (title, optional password, expiry: never/1/7/30 days) + a "Share" button in the chat header; shows a copyable `/share/:slug` link. (`apps/web/components/ai/share-conversation-dialog.tsx`, `apps/web/app/(routes)/mail/chat/page.tsx`)
 
 #### Web → Native parity (workstream C) — voice transcript
-- **Web voice now shows a live transcript** — the voice call was "blind": nothing displayed what was said. The `onMessage` handler was also attached to `startSession` instead of the `useConversation` hook (where ElevenLabs' `HookCallbacks` live), so it likely never fired. Moved it to the hook, collect the transcript into provider state, and render a compact transcript panel above the voice button. Also added the missing `connectionType: 'webrtc'` (cleared a pre-existing type error). Voice *tool execution* (create task/event during a call) is still off — it needs the ElevenLabs agent configured in the dashboard; tracked as backlog PAR-C. (`apps/web/providers/voice-provider.tsx`, `apps/web/components/voice-button.tsx`)
+
+- **Web voice now shows a live transcript** — the voice call was "blind": nothing displayed what was said. The `onMessage` handler was also attached to `startSession` instead of the `useConversation` hook (where ElevenLabs' `HookCallbacks` live), so it likely never fired. Moved it to the hook, collect the transcript into provider state, and render a compact transcript panel above the voice button. Also added the missing `connectionType: 'webrtc'` (cleared a pre-existing type error). Voice _tool execution_ (create task/event during a call) is still off — it needs the ElevenLabs agent configured in the dashboard; tracked as backlog PAR-C. (`apps/web/providers/voice-provider.tsx`, `apps/web/components/voice-button.tsx`)
 
 ### Fixed
 
 #### App Store submission audit
+
 - **iOS account deletion no longer masks backend failure as success.** If the
   `delete-user` request fails, Settings now shows a retryable error and keeps the
   session intact instead of signing out locally and implying the account was
@@ -33,7 +39,22 @@
   required pre-submission fixes. (`SettingsView.swift`, `auth.ts`,
   `ParitySmokeTests.swift`, `APP_STORE_AUDIT.md`)
 
+#### App Store submission readiness continuation
+
+- **Removed the remaining repo-fixable App Store Review blockers around iOS billing,
+  legal copy, privacy metadata, and release docs.** The iOS Billing screen no longer
+  links to web pricing or hosted billing portals while StoreKit is absent; exhausted
+  AI-credit copy no longer says "Upgrade"; the hosted privacy policy and terms now
+  describe the current server-backed Todus product; the active iOS privacy manifest
+  declares collected data categories; the tracked App Store Connect `.p8` key was
+  removed from the current tree and future `.p8` files are ignored; stale top-level
+  TestFlight WebView-wrapper docs were replaced with native SwiftUI release guidance.
+  (`BillingSettingsView.swift`, `AIChatService.swift`, `ai.ts`,
+  `PrivacyInfo.xcprivacy`, `privacy.tsx`, `terms.tsx`, `.gitignore`,
+  `README_TESTFLIGHT.md`, `TESTFLIGHT_DEPLOYMENT_GUIDE.md`, `APP_STORE_AUDIT.md`)
+
 #### Backend efficiency + correctness pass (server-only)
+
 - **B-025 — generative-UI prompt no longer forced on every client.** The ~21KB `GENERATIVE_UI_PROMPT` was injected into every `/ai/chat` system prompt regardless of whether the client could render the cards. Added an optional `supportsGenerativeUI` flag to the chat request schema (default `true`, backward compatible) and gated the injection on it; the duplicate injection in `lib/prompts.ts` (`AiChatPrompt`) is now gated behind an optional `{ generativeUI }` option (default `true`). Clients that only render markdown can now opt out and save the tokens. (`apps/server/src/routes/ai.ts`, `apps/server/src/lib/prompts.ts`)
 - **B-028 — auto-labeling is now a user-controllable automation.** Added `autoLabelThreads` (default `true`) to `assistantAutomationPolicySchema` + `defaultAssistantAutomationPolicy`, and gated `labelGenerationWorkflow` registration behind it in the thread-sync engine. `vectorizationWorkflow` stays unconditional (inbox search/RAG depends on it) with a comment noting it's intentionally always-on. (`apps/server/src/lib/schemas.ts`, `apps/server/src/thread-workflow-utils/workflow-engine.ts`)
 - **B-015 (KV-cache half) — sender-avatar resolution is cached in-isolate.** Replaced the "no KV binding available" TODO with a module-level in-memory cache (`Map` keyed by normalized email + externalImages flag, ~24h TTL, 2000-entry LRU-ish cap) around the deterministic (non-Google) resolution path in `resolveSenderAvatar`. Eliminates repeat third-party hits (favicon scrape, Gravatar, BIMI DNS, Clearbit) for the same sender within a warm isolate. Per-user Google People lookups bypass the cache (must never be shared across users). The privacy `externalImages` gate is preserved. (`apps/server/src/lib/sender-avatar.ts` + test)
@@ -41,18 +62,21 @@
 - **PAR-A2 (server half) — calendar write/read can target a non-active connection.** `createEvent`/`updateEvent`/`deleteEvent` now accept an optional `connectionId` and resolve it user-scoped via `findUserConnection` (no IDOR; omitted = active connection, backward compatible; bad id → `NOT_FOUND`). Added a `calendarsMulti` query returning calendars across ALL the user's Google connections, grouped/annotated by `connectionId` + email with per-group `scopeMissing`/`error`. (`apps/server/src/trpc/routes/calendar.ts`)
 
 #### Full-repo review pass (2026-06-13)
+
 - **macOS Billing tab could crash on a corrupted credit value** — `MacSettingsView.formatCredits` fed `aiUsageUsed`/`aiUsageLimit` straight into `Int(scaled.rounded())`, which traps on NaN/±infinity/overflow (e.g. an upstream divide-by-zero or bad decode). Added the same `scaled.isFinite` + `scaled < Double(Int.max)` guards iOS `BillingSettingsView.formatCredits` already has (render `"—"`), keeping the three platforms in sync. Also removed a stale self-contradicting `TODO` in `SupabaseSyncService.retryUnsyncedTasks` (already wired via `NetworkMonitor.onReconnect`) and a wrong "bottom-left" FAB comment in `CalendarTabView`. Remaining findings (incl. a critical offline-capture data-loss gap on server 5xx/429 and the macOS `TodusMacTests` target missing from the regenerated pbxproj) logged in `CODE_REVIEW_BACKLOG.md` (CR-0613-1…16). (`MacSettingsView.swift`, `SupabaseSyncService.swift`, `CalendarTabView.swift`)
 
 #### macOS email reliability pass (`/goal` QA session) — emails not loading, thread-open errors, hangs
-- **Connected users were parked on the "Connect Gmail" onboarding prompt (blocker)** — `EmailService.checkConnection` set `hasConnection=false` on *any* thrown error (8s timeout, offline, transient 5xx), and `ensureMailboxReady` then `guard hasConnection`'d out, so a single flaky `connections.list` call left a fully-connected user staring at the connect prompt with no error and no retry. Now only a *successful* empty response sets `hasConnection=false`; failures set a new `connectionCheckFailed` flag and preserve a known-good connection. Added a `connectionCheckFailedState` ("Couldn't reach your mailbox" + Try Again) so transient failures show a retry instead of the wrong onboarding state. (`EmailService.swift`, `MacEmailInboxView.swift`)
+
+- **Connected users were parked on the "Connect Gmail" onboarding prompt (blocker)** — `EmailService.checkConnection` set `hasConnection=false` on _any_ thrown error (8s timeout, offline, transient 5xx), and `ensureMailboxReady` then `guard hasConnection`'d out, so a single flaky `connections.list` call left a fully-connected user staring at the connect prompt with no error and no retry. Now only a _successful_ empty response sets `hasConnection=false`; failures set a new `connectionCheckFailed` flag and preserve a known-good connection. Added a `connectionCheckFailedState` ("Couldn't reach your mailbox" + Try Again) so transient failures show a retry instead of the wrong onboarding state. (`EmailService.swift`, `MacEmailInboxView.swift`)
 - **401 routed to the wrong empty state + showed no error** — `loadThreads`'s `catch APIError.unauthorized` set `hasConnection=false` (→ "Connect Gmail") and left `errorMessage` nil (silent dead inbox). Now surfaces "Your session expired. Please sign in again." and leaves connection state intact; the API client already flips `isSessionExpired` for the root view to drive re-auth. (`EmailService.swift`)
-- **The "errors when entering email threads" crash (high)** — `mail.get` returns every message of a thread in one payload, but `EmailSender.email` and `EmailMessage.sender` were *required* decodes. A single message with a null/missing sender or null email threw a `DecodingError` that aborted the **whole** thread decode → hard "couldn't load thread" error screen. Email decode is now tolerant (`email` → `""`, missing sender → "Unknown sender" placeholder), and `GetThreadResponse` decodes messages element-by-element via `FailableDecodable<EmailMessage>` so one malformed message is dropped, not fatal. (`EmailModels.swift`, `EmailService.swift`)
+- **The "errors when entering email threads" crash (high)** — `mail.get` returns every message of a thread in one payload, but `EmailSender.email` and `EmailMessage.sender` were _required_ decodes. A single message with a null/missing sender or null email threw a `DecodingError` that aborted the **whole** thread decode → hard "couldn't load thread" error screen. Email decode is now tolerant (`email` → `""`, missing sender → "Unknown sender" placeholder), and `GetThreadResponse` decodes messages element-by-element via `FailableDecodable<EmailMessage>` so one malformed message is dropped, not fatal. (`EmailModels.swift`, `EmailService.swift`)
 - **Request timeouts didn't promptly stop the underlying work** — added `try Task.checkCancellation()` at the top of `TodosAPIClient`'s retry loop so a cancelled/timed-out request stops instead of burning another attempt + full URLSession timeout. `loadThreads` now gives timeouts distinct copy and treats `CancellationError` (folder switch / view torn down) as a non-error. (`TodosAPIClient.swift`, `EmailService.swift`)
 - **Thread-open main-thread stall on large emails** — `recomputeFallbackChips` ran a full-document `<[^>]+>` regex strip on the main actor at open (visible stutter on big newsletters); input is now capped to 20k chars (verification codes/tracking numbers live near the top). `markAsRead` is gated on a successful load so a failed/cancelled open no longer marks unseen mail read. (`MacEmailThreadView.swift`)
 - **Pagination failure caused a tight backend-hammering retry loop** — a failed "load more" set an (invisible-because-list-non-empty) error and left the cursor, so the paginator's `.onAppear` re-fired immediately on every `LazyVStack` rebuild. Added a `paginationFailed` flag + an explicit "Couldn't load more — Retry" footer; auto-fire is now gated on it. (`EmailService.swift`, `MacEmailInboxView.swift`)
 - **Tests** — `TodusMacTests/EmailDecodeToleranceTests.swift` (XCTest, real types) + `scripts/run-email-decode-tests.sh` (Xcode-free runner compiling the real `EmailModels.swift`); decode-tolerance + one-bad-message regressions 11/11 green. Test target is defined in `project.yml` but not yet runnable via `xcodebuild test` — see `CODE_REVIEW_BACKLOG.md` MAC-1 (MLX C-module resolution in the testable host build). App `BUILD SUCCEEDED`.
 
 #### iOS performance + reliability pass (`/goal` QA session) — main-thread freezes, thread-open errors
+
 - **All tRPC response parsing/decoding ran on the main actor (freezes)** — `TodosAPIClient` is `@MainActor`, so `JSONSerialization` + `Decodable` work for every response — including the 50-thread inbox batch and `mail.get` payloads carrying full HTML bodies (hundreds of KB) — blocked the main thread for the whole parse. This fired on every 60s inbox poll, foreground refresh, pull-to-refresh, thread open, and the 8-thread prefetch, matching the reported "stutters and freezes when tapping/navigating". `trpcSingle` and `trpcBatchQuery` now hand the response `Data` to a detached `.userInitiated` task for parse + decode (`serializeJSONValue` made `nonisolated`; trpc generics gained `& Sendable`, zero call-site fallout). (`TodosAPIClient.swift`)
 - **`apiDecoder` allocated up to 2 `ISO8601DateFormatter` per Date field** — the custom date strategy built formatters inside the per-date closure; payloads with hundreds of dates burned visible decode time. Hoisted to shared parse-only formatters (same pattern as `EmailMessage.parseDate`). (`TodosAPIClient.swift`)
 - **Avatar disk cache did synchronous disk I/O on the main thread per row (scroll jank)** — `CachedAvatarImage.onAppear` ran `Data(contentsOf:)` + JPEG decode on main for every row scrolling into view, and the network path wrote the JPEG to disk on main. Reads/writes moved to detached background tasks; UI applies the decoded image on main. (`AppTheme.swift`)
@@ -62,20 +86,21 @@
 - **Opening a thread could flip a readable (cached) thread into "Could not load thread"** — `EmailThreadView.loadThread` paints instantly from the detail cache, but the concurrent silent `markAsRead` invalidates that cache entry, forcing the parallel refresh to the network; a transient failure then assigned `detail = nil`, replacing visible content with the error state. `detail`/`isStarred` now only update when the fetch actually returned something. (`EmailThreadView.swift`)
 - **Verification-code "Copied" label could flicker back early on rapid re-taps** — the 1.5s revert task wasn't cancelled on re-tap. Now tracked + cancelled. (`EmailThreadView.swift`)
 - **Tests** — `TodosAPIClientTests`: apiDecoder fractional/plain/garbage ISO dates; off-main envelope decode with Date fields; batch success+error positional mapping; batch count-mismatch throws. 94/94 unit tests green.
-- **XCUITest harness repairs (3 of 5 critical-flow tests were failing; all 5 now green)** — C3: the `--ui-testing` seed never set `hasSeenWelcomeTour`/`hasConfiguredTabBarPrompt`, so on a fresh test container the first launch landed on the welcome tour instead of MainTabView (the flags were only migrated to "done" from a *previous* launch's `hasReachedMainTab`); now seeded explicitly. C3/C4: the simulated pending-AI-mutation stub flipped `showsAIChat` + set `pendingMutationConfirmation` during initial mount — the sheet presentation got silently dropped (and `onDismiss` reset the flag) and `confirmationDialog` skips presenting mid-sheet-transition; the stub now stages both (sheet at +700ms, dialog at +1.6s). C3/C4 tests also assumed a Cancel button, but iOS 26 renders `confirmationDialog` as a compact alert with NO accessible Cancel — tests now match the titled dialog sheet and resolve via the visible action button. C2: `accessibilityIdentifier("email.thread.<id>")` on the thread ZStack cascaded onto leaf children with no container element, so `otherElements[...]` never matched (navigation itself worked); added `.accessibilityElement(children: .contain)`. (`AppServices.swift`, `TodosApp.swift`, `EmailThreadView.swift`, `CriticalFlowsTests.swift`)
+- **XCUITest harness repairs (3 of 5 critical-flow tests were failing; all 5 now green)** — C3: the `--ui-testing` seed never set `hasSeenWelcomeTour`/`hasConfiguredTabBarPrompt`, so on a fresh test container the first launch landed on the welcome tour instead of MainTabView (the flags were only migrated to "done" from a _previous_ launch's `hasReachedMainTab`); now seeded explicitly. C3/C4: the simulated pending-AI-mutation stub flipped `showsAIChat` + set `pendingMutationConfirmation` during initial mount — the sheet presentation got silently dropped (and `onDismiss` reset the flag) and `confirmationDialog` skips presenting mid-sheet-transition; the stub now stages both (sheet at +700ms, dialog at +1.6s). C3/C4 tests also assumed a Cancel button, but iOS 26 renders `confirmationDialog` as a compact alert with NO accessible Cancel — tests now match the titled dialog sheet and resolve via the visible action button. C2: `accessibilityIdentifier("email.thread.<id>")` on the thread ZStack cascaded onto leaf children with no container element, so `otherElements[...]` never matched (navigation itself worked); added `.accessibilityElement(children: .contain)`. (`AppServices.swift`, `TodosApp.swift`, `EmailThreadView.swift`, `CriticalFlowsTests.swift`)
 - **Local model downloads broken on iOS** — iOS Xcode project was missing the `mlx-swift-examples` Swift Package entirely, so `#if canImport(MLXLLM)` always fell through to the stub branch, surfacing "MLX is not available in this build." Added `XCRemoteSwiftPackageReference`, linked `MLXLLM` + `MLXLMCommon` products to the Todus target, and added them to the Frameworks build phase.
 - **Local model downloads broken on macOS** — `mlx-swift-examples` was referenced in `packageReferences` but no `XCSwiftPackageProductDependency` section existed, so the products were never linked. Added the missing dependency section and wired `MLXLLM` + `MLXLMCommon` into the TodusMac target.
 - **`LocalModelStateStore.initialScan` looked at the wrong directory** — scanned `Application Support/LocalModels/<id>` while downloads actually land in `Documents/huggingface/models/<repo>` (where `mlx-swift-examples` writes). Models installed across launches now show as "Installed" in the Local Models screen. Both iOS and macOS fixed; the macOS scan also falls back to the user's `~/.cache/huggingface/hub` so models pulled outside the app via `huggingface_hub` or `mlx_lm` get recognized.
 - **iOS MLXInferenceService Swift 6 strict-concurrency compile error** — captured `[Chat.Message]` in a `@Sendable` closure. Switched to the plain dict shape (`[[String: String]]` + `UserInput(messages:)`), matching the macOS implementation. Added `@unknown default` to the event switch.
 - **macOS build was broken (would not compile)** — `MacMarkdownBodyEditor.Coordinator` held `lazy var textView = NSTextView()` and called `selectedRange()`/`textStorage`/`string`/`setSelectedRange` from a nonisolated context; under the macOS 15 SDK + Swift 6 these AppKit members are `@MainActor`-isolated, producing a hard error plus 11 warnings. Annotated the `Coordinator` `@MainActor` (all access already happens on the main thread). Build now compiles.
 - **macOS `MLXInferenceService` non-exhaustive switch** — the `Generation` event stream switch handled `.chunk`/`.info` + `@unknown default` but not the known `.toolCall` case. Added `case .toolCall: continue` (local v1 doesn't surface tool calls; keep streaming).
-- **macOS chat dropped trailing tokens / cross-talk between streams** — the streaming token flush (`MacAIChatService.appendToken`) was gated by a `flushScheduled` Bool whose pending `asyncAfter` could not be cancelled. A stale flush firing ~40 ms after a stream ended could write the *next* stream's buffered tokens into the *previous* message bubble. Replaced with a cancellable `DispatchWorkItem` that `cancelStream`/`finaliseStream` cancel.
+- **macOS chat dropped trailing tokens / cross-talk between streams** — the streaming token flush (`MacAIChatService.appendToken`) was gated by a `flushScheduled` Bool whose pending `asyncAfter` could not be cancelled. A stale flush firing ~40 ms after a stream ended could write the _next_ stream's buffered tokens into the _previous_ message bubble. Replaced with a cancellable `DispatchWorkItem` that `cancelStream`/`finaliseStream` cancel.
 - **macOS voice panel observation/concurrency warnings** — `pcmBuffer`/`_micMutedAtomic` (lock-guarded, mutated on the audio thread) were `nonisolated(unsafe)` inside a `@MainActor @Observable` class, which also let SwiftUI observe background-mutated state. Marked `@ObservationIgnored nonisolated(unsafe)`.
 - **iOS `--ui-testing` launch arg signed the test session out (XCUITest blocker)** — the seeded session (`uitest@todus.app`, fake `TEST_TOKEN`) reached `MainTabView` but a tab's first authenticated request 401'd against production, triggering `AuthService.attemptSilentRefresh()` → `/auth/me` 401 → `signOut()`, bouncing back to the login screen ~1s after launch. Added `AuthService.isUITestingSession` (set by `_uiTesting_seedAuthenticatedSession`) so `attemptSilentRefresh()`/`fetchUserProfile()` skip the network and never sign out, and `TodosAPIClient` suppresses the "Session expired" banner in test mode. All guards default off in production (no behavior change). (`packages/swift-auth/.../AuthService.swift`, `apps/ios/.../TodosAPIClient.swift`)
 - **iOS thread reply bar / "Draft with AI" actionable before load** — Reply/Reply All/Forward are now `.disabled` until the thread `detail` loads; the AI-draft FAB is `.disabled` while `emailService.isSending`. Prevents acting against a nil last-message / double-submit. (`EmailThreadView.swift`, `EmailComposeView.swift`)
 - **iOS GroupChat missing loading/empty states** — group list and message list now show a spinner during first load and a "No messages yet" empty state instead of briefly flashing empty copy. (`GroupChatView.swift`)
 
 #### iOS Simulator QA pass — found by driving the app in the iPhone 17 / iOS 26 simulator (`--ui-testing`)
+
 - **Captured tasks could vanish silently (high, data-loss/trust)** — when a just-captured task fails to sync, `TaskCaptureService` rolls it back (deletes it) and publishes `lastRollbackCount`/`lastRollbackAt` "so views can surface a banner" — but no view observed them, so the task disappeared with zero feedback. `MainTabView` now shows a transient "Couldn't save your task — check your connection" banner on rollback (stacked with the offline / session-expired banners in a `VStack` so they no longer overlap). Validated in-sim: the banner appears on the seeded-token sync failure. (`MainTabView.swift`)
 - **Could not type a second email recipient (high)** — To/Cc/Bcc bound a `TextField` to a computed `Binding` over `draft.to: [String]` that re-tokenized on every keystroke, so a typed `,`/`;` separator was eaten and only the first recipient stuck (paste still worked). Each field now binds to a raw `@State` string, tokenizing into `draft` on change + before send, seeded from `draft` on appear. Validated in-sim: `a@b.com, c@d.com` both stick. (`EmailComposeView.swift`)
 - **Tasks empty-state copy pointed the wrong way** — "Tap + **above** to capture…" but the create button is the floating FAB at the bottom; changed to "Tap + to capture…". (`InboxView.swift`)
@@ -83,7 +108,8 @@
 - **Group chat failed-send clobbered newer input** — on a failed send the old message text was restored unconditionally, overwriting anything typed during the in-flight request; now restored only if the field is still empty. (`GroupChatView.swift`)
 
 #### iOS Simulator QA pass — round 2 (deferred-item fixes, email perf + security, tests)
-- **Offline task captures were silently deleted instead of queued (data loss)** — `TaskCaptureService` rolls back (DELETES) tasks whose sync ends `.failed`, and `SupabaseSyncService` marked *every* sync error `.failed` — including offline, timeout, and unconfigured-backend. Now only a reached-server **rejection** marks `.failed`; `URLError` and `BackendClientError.backendNotConfigured` keep the task `.localOnly` so it survives and re-uploads on reconnect (`retryUnsyncedTasks` via `NetworkMonitor.onReconnect`). (`SupabaseSyncService.swift`)
+
+- **Offline task captures were silently deleted instead of queued (data loss)** — `TaskCaptureService` rolls back (DELETES) tasks whose sync ends `.failed`, and `SupabaseSyncService` marked _every_ sync error `.failed` — including offline, timeout, and unconfigured-backend. Now only a reached-server **rejection** marks `.failed`; `URLError` and `BackendClientError.backendNotConfigured` keep the task `.localOnly` so it survives and re-uploads on reconnect (`retryUnsyncedTasks` via `NetworkMonitor.onReconnect`). (`SupabaseSyncService.swift`)
 - **Inbox star didn't change until a full reload** — `EmailService.toggleStar` now optimistically flips the Gmail `STARRED` label in the local thread cache, with rollback on failure, mirroring `markAsRead`/`markAsUnread`. (`EmailService.swift`)
 - **AI chat showed the wrong tab context after relaunch** — `selectedTab` is restored from `@SceneStorage` without firing `onChange`, so `currentTab`/`previousNavigationTab` stayed `.home`. `MainTabView.onAppear` now seeds them from the restored tab. (`MainTabView.swift`)
 - **Native "More" tab rendered pure black in dark mode** — the UIKit More list (Docs/Meetings overflow) painted `#000000` vs the app's `#1c1c1e`. Set an adaptive `UITableView` appearance background; the app has no other `UITableView` (SwiftUI `List` is UICollectionView-backed). (`TodosApp.swift`)
@@ -94,6 +120,7 @@
 - **Tests** — `EmailServiceTests`: `toggleStar` optimistic flip / unstar / rollback, and `parseDate` ISO-fractional / ISO-plain / RFC-2822 / invalid-fallback. `TaskCaptureServiceTests`: offline + unconfigured captures stay `.localOnly`, server-reject → `.failed`.
 
 #### iOS email deep-dive (`/bug-hunt`, 4 parallel audit agents) — forward data loss + load race + detail-cache staleness
+
 - **Forwarding an email sent only the snippet, not the body (data loss)** — the Forward action passed `lastMessage.plainText` (the `title`/snippet preview) as the body, so forwarded mail was silently truncated to a one-line preview. Forward now routes through `EmailDraft.isForward`/`originalMessage` with the **full** message body; the backend appends it as the quoted original (verified against `apps/server/.../google.ts`). (`EmailComposeView.swift`, `EmailThreadView.swift`)
 - **A superseded inbox load could clobber a newer load's state** — `performLoadThreads` gen-gated only the spinner; a slow superseded load still wrote `threads`/`errorMessage`/`hasConnection`, flashing a stale error banner over freshly-loaded mail. Added a `loadGeneration == myGen` guard before state application and on every catch-block write. (`EmailService.swift`)
 - **Opening a just-read / just-starred thread showed stale detail** — list mutations updated `threads` but not `threadDetailCache`, so the detail view showed the pre-mutation state until the cache TTL expired. Added `invalidateThreadDetail(ids:)`, called from `markAsRead` / `markAsUnread` / `toggleStar`. (`EmailService.swift`)
@@ -101,6 +128,7 @@
 - Remaining email findings (avatar-pipeline perf, dead `EmailAIDraftSheet.swift`, copy-snippet, connectGmail re-verify) logged in `CODE_REVIEW_BACKLOG.md` → "Bug Hunt — 2026-06-08 — iOS email surface".
 
 #### macOS Flow QA round — found via end-to-end code tracing of auth/email/chat/tasks/settings/voice flows
+
 - **AI chat was limited to one message per launch (critical)** — `send()` guards on `streamingTask == nil`, but `finaliseStream` never cleared `streamingTask` on normal completion (only `cancelStream`'s drain did), so every message after the first was silently dropped. `send`/`retryMessage` now clear the slot at task end under a `cancelGeneration` guard (so a cancel-then-send can't be clobbered). (`MacAIChatService.swift`)
 - **Local-model chat errors were a blank dead-end (critical)** — model-not-installed / inference-failed / runtime-unavailable set `errorMessage` (only shown on the empty state), leaving an empty assistant bubble with no retry mid-conversation. Now routed through `appendError(...)` so the error renders in the bubble and the retry row appears. (`MacAIChatService.swift`)
 - **Tasks never synced to the backend during a normal online session (critical, data loss)** — the pending-mutation flush was wired only to `networkMonitor.onReconnect`, which never fires if the user is already online. Extracted `MacAppServices.flushPendingSync()` and now also run it on app launch and on `scenePhase == .active`. Detail-sheet `saveChanges` now marks the task `.pendingUpload` so edits to already-synced tasks actually upload. (`MacAppServices.swift`, `TodusMacApp.swift`, `MacTasksView.swift`)
@@ -112,6 +140,7 @@
 - **macOS resize cursors + scroll-style walk + voice polish** — window-corner cursors now use the macOS 15 `NSCursor.frameResize` diagonal cursors (was `crosshair`); the side-pane divider uses `MacTheme.cardBorder`; `MacScrollStyle.applyToScrollableViews` got a 32-level depth cap; voice "speaking" rings now breathe. (`MacRootView.swift`, `MacScrollStyle.swift`, `MacVoiceChatPanel.swift`)
 
 #### macOS Flow QA round 2 — remaining-issue fixes + deeper hunt (Meetings/Docs/GroupChat/Sharing/Search/Widgets/Calendar-edit)
+
 - **Calendar grid edit/delete always 404'd (critical)** — `legacyCalendarEvent` used the composite `apple:`/`google:` id; `EKEventStore.event(withIdentifier:)` never matches a prefixed id, so every in-grid edit/delete failed. Now uses the raw `providerEventId`. (`UnifiedCalendarService.swift`)
 - **Generative-UI cards could crash on a cyclic spec (critical)** — `ChatUISpecView.renderElement` recursed into children with no guard; untrusted model output with a cycle stack-overflowed. Added a depth limit (`renderElement(id:depth:)`, cap 24). (`ChatUISpecView.swift`)
 - **Multi-account "From" picker didn't change the sending account (high)** — macOS sent `connectionId`, but `mail.send`'s schema only has `fromEmail` (the `connectionId` was silently dropped). Added `EmailDraft.fromEmail`, set it from the picked connection on send, and send it from both `EmailService.sendEmail` and `MacDraftService`. (`EmailModels.swift`, `MacEmailComposeView.swift`, `EmailService.swift`, `MacDraftService.swift`)
@@ -127,6 +156,7 @@
 - **Relocated a concurrent broken helper** — `ownedAddressesForReplyAll()` (added by other in-flight work) was placed inside `MacMailAssistantCard`, which has no `@Environment services`, yet it uses `services` and is called from `MacEmailThreadView`; moved it into `MacEmailThreadView` so the module compiles. (`MacEmailThreadView.swift`)
 
 #### macOS Flow QA round 3 — remaining-issue fixes + launch-crash fix
+
 - **App crashed on every launch (critical)** — `TaskSyncService.retryUnsyncedTasks` ran a compound `||` string-equality `#Predicate` fetch that traps inside SwiftData (EXC_BREAKPOINT). It now runs at launch/foreground via `flushPendingSync`, so the app SIGTRAP'd on startup. Switched to fetch-all + in-memory filter. (`TaskSyncService.swift`)
 - **Widget "Complete task" button was a no-op stub (critical)** — `CompleteTaskIntent` now queues the id via the App Group, optimistically drops it from the snapshot, and reloads timelines; the main app drains the queue on launch/foreground (`MacAppServices.drainWidgetTaskCompletions`) to mark the task done + sync. (`CompleteTaskIntent.swift`, `WidgetSnapshotStore.swift`, `MacAppServices.swift`, `TodusMacApp.swift`)
 - **Calendar & Smart-Insight widgets were always empty (high)** — `MacWidgetUpdateManager` never wrote `calendar`/`insight` (so Daily Overview "next event" was permanently "Clear schedule"). Now fetches upcoming events, packs colors, writes a calendar snapshot + a derived insight, and uses the atomic `updateSnapshot`. (`MacWidgetUpdateManager.swift`)
@@ -140,11 +170,13 @@
 - _Not fixed (need backend / larger scope):_ subscription cancel still hardcodes `pro_monthly` (backend `getStatus` doesn't return the active product id); reminder scheduling, move-to-folder, compose-card CC/BCC input, notification cold-launch queue, and event-edit location/notes prefill remain (features / untestable here).
 
 ### Accessibility / UX
+
 - **Billing credits display scale (iOS + macOS + web)** — credits now shown at 10× their internal dollar value so plans read as round, sensible numbers: Free **75**, Pro **150** (was Free 75 / Pro 15, which made the paid tier look smaller). Display-only `creditsDisplayScale`/`CREDITS_DISPLAY_SCALE = 10` applied in `formatCredits` so the usage meter matches the plan copy; actual billing/limits unchanged. Server truth: `model-pricing.ts` (Free 7.5, Pro 15). (`BillingSettingsView.swift`, `MacSettingsView.swift`, web `billing/page.tsx`)
 - **iOS VoiceOver labels** — added accessibility labels to icon-only controls: AI chat voice + settings buttons, GroupChat send, CalendarAccounts visibility toggle + default-calendar star, and the Billing usage `ProgressView` (label + % value).
 - **iOS keyboard handling** — Signatures editor gained a "Done" keyboard toolbar (was a trap on a List); compose recipient fields (To/Cc/Bcc) advance focus on return; global search submits on return and dismisses the keyboard on scroll.
 
 ### Added
+
 - macOS DMG build script (`scripts/build-mac-dmg.sh`) — archives, signs, packages, and uploads to Cloudflare R2 with pre-flight safety checks
 - `apps/macos/ExportOptions.plist` for Xcode Development-signed archive export
 - `/downloads` page updated: Mac download button now serves DMG from Cloudflare R2 with internal tester guidance
@@ -157,6 +189,7 @@
 - **Parity script surface filters** — `check-screenshots.mjs`, `capture-ios-deeplink.mjs`, `capture-ios-interactive.mjs`, `capture-macos-electron.mjs` all gained `--surface` / `--platform` / `--allow-missing` flags. The macOS capture script now builds + launches `apps/macos/TodusMac` via `xcodebuild` (Electron wrapper retired).
 
 ### Changed
+
 - **iOS BillingSettingsView + DesignSystemView** — minor touch-ups for token consistency.
 - **iOS / macOS contrast fix** — buttons no longer render white-on-white in dark mode.
 - **iOS compose** — From picker, gray placeholders, heavier scrim in CreateSheet.
@@ -164,6 +197,7 @@
 - **macOS Live Voice panel** — a failed session now shows a "Try again" button (reconnects via the view model's `.failed`-allowed path) instead of stranding the user on a dead panel; the mute control is disabled until the voice view model exists. (`apps/macos/TodusMac/Views/Voice/MacVoiceChatPanel.swift`)
 
 ### Docs
+
 - New canonical `AGENT_CONTEXT.md` — single source of truth for any agent landing in the repo (repo layout, feature map, doc map, recent work).
 - `CLAUDE.md`, `AGENTS.md`, `APPS_ARCHITECTURE.md`, `SCRIPTS_GUIDE.md`, `GEMINI.md` re-synced — fixed stale `apps/mail` references in Web Frontend / Auth / Env sections, expanded iOS feature/services map (Docs / Meetings / Voice / Local AI), corrected tRPC router list, called out the legacy `pnpm build:frontend` / `pnpm deploy:frontend` script mismatch.
 - New `FEATURES.md` per-surface feature catalog with clickable file paths, plus `FEATURE_TEST_PLAN.md` companion test checklist.
@@ -174,6 +208,7 @@
 Follow-up round (3rd review pass — review-current-implementation, ux-polish, ux-assesment, bug-hunt).
 
 **iOS:**
+
 - iPhone context-menu Delete now routes through the same confirmation dialog as swipe-delete (long-press → Delete was equally fat-fingerable).
 - Tap haptic only fires when open actually changes state (no buzz for re-tap on selected iPad row).
 - Title save: `CancellationError` + `URLError.cancelled` swallowed — debounce cancel storm no longer flashes "Save failed".
@@ -186,13 +221,16 @@ Follow-up round (3rd review pass — review-current-implementation, ux-polish, u
 - Dropped dead `if shareURL != nil` guard — `effectiveAppURL` is non-optional.
 
 **iOS WebView:**
+
 - Hide-chrome CSS injection dedupes via `document.querySelector('style[data-todus-native-chrome]')` — SPA back/forward navigation no longer accumulates `<style>` nodes.
 
 **Web:**
+
 - `saveTitle` normalizes empty/whitespace-only titles to `"Untitled"` before mutate — prevents titles silently disappearing across platforms (matches iOS native shell).
 - Divider between title and editor body wrapped in `data-doc-page-title` so native iOS shell's CSS hides it together with the title row (previously left an orphan horizontal rule above the editor body).
 
 **macOS:**
+
 - Format strip `Cmd+B` / `Cmd+I` shortcut bindings dropped — Tiptap already owns these inside the focused WebView; double-binding either doubled the toggle or stole keystrokes from the native title.
 - `tiptapButton` gains `.help` + `.accessibilityLabel` + `.disabled(wk == nil)` so format buttons can't fire before editor loads.
 - Sort menu rewritten with `Picker` + `.inline` style inside `Menu` — previous `Button` + sibling checkmark image didn't render the active state in macOS Menus.
@@ -209,6 +247,7 @@ Follow-up round (3rd review pass — review-current-implementation, ux-polish, u
 - Dropped dead `savedRevertTask` `@State`.
 
 **Items deferred to backlog** (architectural / broader UX work):
+
 - iOS body autofocus after title submit (needs JS bridge to Tiptap)
 - macOS `Cmd+K` quick-open / global search persisted across views
 - Clickable star on macOS cards/rows (broader interaction redesign)
@@ -222,6 +261,7 @@ Follow-up round (3rd review pass — review-current-implementation, ux-polish, u
 Follow-up to the docs overhaul, driven by four review passes (review-current-implementation, ux-polish, ux-assesment, bug-hunt).
 
 **iOS:**
+
 - Web doc page now exposes `data-doc-page-title` + `data-doc-sidebar` attributes; iOS WKWebView CSS injection updated to actually match them (previous selectors were no-ops — duplicate title + double sidebar were visible on iPhone).
 - Swipe-delete on iPhone now requires a `.confirmationDialog` confirmation — fat-finger no longer destroys data.
 - Recent section excludes docs already in Starred to stop the same row appearing 3× in the same List.
@@ -238,6 +278,7 @@ Follow-up to the docs overhaul, driven by four review passes (review-current-imp
 - MoreSheet 'Docs' entry no longer pushes via NavigationLink (double-stacked Docs' own NavigationStack inside MoreSheet's); now uses `onNavigate(.docs)` + `dismiss()`, mirroring Calendar.
 
 **macOS:**
+
 - Context menu parity with iOS across **all** doc surfaces (sidebar outline rows, starred rows, doc cards, table list rows): Open / Rename / Star / Copy title / Delete with confirmation. Previously only Open + Copy title — there was literally no way to delete a doc from the macOS UI.
 - `MacDocsService` gains `renameDoc(id:title:)` and `togglePin(id:)` wrappers mirroring iOS so callers don't construct full `DocUpdateInput` for the common cases.
 - Removed inline per-workspace "New document" sidebar button — used `try?` + silently swallowed errors, and was the 4th create entry point. Header `+`, All-docs toolbar `+`, and Cmd+N cover it.
@@ -247,9 +288,11 @@ Follow-up to the docs overhaul, driven by four review passes (review-current-imp
 - All-docs grid: sort-mode change animates via `Motion.base` so reorder transitions instead of snapping.
 
 **Both platforms — persistent saved badge:**
+
 - `markSaved` no longer auto-reverts to `.idle` after 2 seconds on iOS or macOS. The Saved checkmark stays visible until the next `.saving` transition — trust signal matches Google Docs' "All changes saved in Drive". The fade-out was a confidence regression.
 
 **Pre-existing bug-hunt items deferred to backlog** (added to `CODE_REVIEW_BACKLOG.md`):
+
 - Recursive `AnyView(Group)` outline pattern breaks SwiftUI identity / animation
 - Recursive `docRow` / `docOutline` has no cycle protection against corrupt server data
 - Debounce title save + flushPendingSave can theoretically race two requests
@@ -259,11 +302,13 @@ Follow-up to the docs overhaul, driven by four review passes (review-current-imp
 ## [2026-05-24] Docs feature overhaul — iOS bug fixes + Apple-Notes / Google-Docs polish (iOS + macOS)
 
 **iOS bug fixes (critical, unblocks users):**
+
 - Fix: tapping a doc row on iPhone now opens the editor. Root cause was `List(selection:)` on a `NavigationStack` swallowing taps before `NavigationLink` could push (selection is iPad-only). iPhone now uses `NavigationStack(path:)` with explicit `NavigationPath`; rows are buttons that push via `path.append(id)` (iPhone) or set `selectedDocID` (iPad).
 - Fix: `+` button on iPhone now creates **and** opens the new doc. Previously it only mutated `selectedDocID`, which iPhone's stack does not observe — the doc was created on the server but the user stayed on the list.
 - `MainTabView` no longer wraps `DocsListView` in an outer `NavigationStack` (the list owns its own nav via size-class branch; double-stacking was silently swallowing pushes).
 
 **iOS polish (Apple-Notes feel):**
+
 - Native title `TextField` with debounced (500ms) autosave + save indicator (idle / saving / saved / failed-with-retry). Mirrors `MacDocEditorPane` shell pattern.
 - Title autofocuses on newly-created docs (empty / "Untitled") so the user can start typing immediately.
 - `.searchable()` filters by title + `contentText`. Workspace sections hide during active search; flat "Results" section appears instead.
@@ -273,6 +318,7 @@ Follow-up to the docs overhaul, driven by four review passes (review-current-imp
 - Title save debounce now snapshots `titleDraft` at schedule time so a teardown-time flush can't race against the scheduled task.
 
 **macOS polish (Google-Docs feel):**
+
 - Persistent sidebar — sidebar is always visible in an `HSplitView`; right pane swaps between `MacDocsAllPane` (no doc selected) and `MacDocEditorPane` (doc selected). Previously the sidebar disappeared during edit.
 - `Cmd+N` creates and opens a new doc from anywhere in the docs view (hidden `Button` + `.keyboardShortcut`).
 - Sidebar entries (workspace outline rows, starred rows, "All documents") get a `MacTheme.accent.opacity(0.16)` fill when their target matches `selectedDocId`.
@@ -282,16 +328,19 @@ Follow-up to the docs overhaul, driven by four review passes (review-current-imp
 - "New document" / "No documents yet" copy aligned with iOS (was "New page" / "No pages yet").
 
 **Cross-platform consistency:**
+
 - Title autosave debounce aligned to 500ms iOS↔macOS.
 - One canonical term: "New document" everywhere (was mixed with "New page").
 - Empty-state copy unified.
 
 **Architecture notes:**
+
 - iOS editor body still uses the `DocsBrowserView` WKWebView (loads `/mail/docs/<id>` from the web app). Bundling the Tiptap editor into iOS for offline parity is a deferred follow-up project documented in the spec.
 - Web page's title row is hidden via injected CSS in `DocsWebView` so it doesn't duplicate the native iOS title. Selectors are forward-looking — harmless no-op if the web template doesn't expose them yet.
 - Five pre-existing docs bugs (force unwraps in `MacDocEditorPane` AI revert, `WKNavigationDelegate` weak-self gaps, leaked `Task.sleep` timers, silent flush errors, Personal-workspace auto-create races) flagged in `CODE_REVIEW_BACKLOG.md` for follow-up.
 
 **Files touched:**
+
 - `apps/ios/Todus/Todus/Features/Docs/DocsListView.swift` (rewrite)
 - `apps/ios/Todus/Todus/Features/Docs/DocEditorView.swift` (rewrite)
 - `apps/ios/Todus/Todus/Features/Docs/DocsWebView.swift` (CSS injection)
@@ -309,10 +358,12 @@ Follow-up to the docs overhaul, driven by four review passes (review-current-imp
 Full Settings gap analysis and implementation across macOS, iOS, and web.
 
 **Backend schema** (`apps/server/src/lib/schemas.ts`):
+
 - Added `aiTone: z.enum(['professional','casual','concise'])` — was `@AppStorage`-only on iOS/macOS, now synced
 - Added `taskRemindersEnabled: z.boolean()` and `calendarRemindersEnabled: z.boolean()` — same, now synced
 
 **macOS Settings** (`MacTheme.swift`, `MacSettingsView.swift`, new `MacAISettingsView.swift`):
+
 - Spacing tokens: `settingsRowVerticalPadding` 11→13, `settingsSectionSpacing` 28→32, new `settingsSubgroupSpacing = 16`
 - Avatar: 36pt → 44pt (matches iOS baseline)
 - Account card: "Delete account" removed from top card → moved to new **Danger Zone** section at bottom (matches iOS pattern)
@@ -323,9 +374,11 @@ Full Settings gap analysis and implementation across macOS, iOS, and web.
 - `aiTone` now syncs to backend via `syncSetting`
 
 **iOS Settings** (`SettingsView.swift`):
+
 - `SettingsSyncModifier` extended: `taskRemindersEnabled`, `calendarRemindersEnabled`, `aiTonePreference` now call `syncSetting` on change
 
 **Web** (`settings/notifications/page.tsx`, `settings/ai/page.tsx`):
+
 - Notifications page fully rewritten: broken preview-only form (with nonexistent backend fields) replaced with working `taskRemindersEnabled` / `calendarRemindersEnabled` toggles wired to `trpc.settings.save`
 - AI page: Response Tone `SelectRow` (Professional / Casual / Concise) added to Personalization section, wired to new `aiTone` backend key
 
@@ -340,10 +393,12 @@ Cross-platform alignment pass closing 6 tracked gaps in `DESIGN_SYSTEM_INCONSIST
 - **Screenshot regression infrastructure for DS viewers** — `scripts/parity/capture-web-playwright.mjs` (new, headless Playwright via the existing `packages/testing` install — no new dep added), `capture-macos-electron.mjs` rewritten for the native `TodusMac` SwiftUI shell (the old Electron path was dead), manifest extended with 7 DS slugs + `macos` platform, `--surface` / `--platform` / `--allow-missing` filters on `check-screenshots.mjs`. Capture commands: `pnpm parity:screenshots:capture:{web,ios,macos:auto} -- --surface design-system`. Three blockers documented (web auth tokens not in CI, iOS deep-link router missing `/settings/*`, macOS DS sidebar not deep-linkable) — infra ready, baselines deferred until those land. No pixel diff yet (presence-only check); `pixelmatch`/`odiff` is the natural next step.
 
 Also resolved in this pass (not visually impactful but tracked):
+
 - **Naming aliases on web** — `--surface-primary` etc. give cross-platform readers a shared vocab without breaking shadcn names.
 - **Web outline button parity** — `outline` variant dropped opaque `bg-background` for `bg-transparent` so it reads correctly over card surfaces, matching iOS / macOS.
 
 **Two new tracked followups** (not blocking this pass):
+
 - iOS still has dual accent stores (`@AppStorage("ios_accent_color")` synced to backend + `services.accentPreference` local-only). Both render canonical palette now but don't cross-update. Recommend consolidating around the backend-synced path.
 - iOS typography not centralized like macOS — `.font(.system(...))` literals scatter across views. macOS centralizes via `cardTitleFont` / `metaFont` etc. Worth porting.
 
@@ -444,6 +499,7 @@ Native clients (iOS + macOS) were stuck on month-old mail with no new arrivals a
 Third pass closes the "complete after small fixes" gaps from the 2026-05-17 review. **67 unit tests pass, 0 fail, 0 skipped** (was 66 / 0 / 15). UI test target compiles. All recommended hardening from the strict review landed.
 
 **Tests — zero skipped**
+
 - All 15 previously-skipped tests now active and passing, plus 1 new test (pagination dedup no-op when incoming is older). DI seams added without changing any public API:
   - `AuthService`: `AuthTransport` protocol + `URLSession` conformance; `classifyCallbackTokens` extracted from `completeAuthentication`; `beginPendingAuthFlow`/`endPendingAuthFlow`/`isPendingAuthFlowActive` helpers extracted from `signInWithGoogle`.
   - `TodosAPIClient`: internal init with custom `URLSessionConfiguration` injection.
@@ -455,26 +511,31 @@ Third pass closes the "complete after small fixes" gaps from the 2026-05-17 revi
 - All new init params have defaults pointing at real implementations; existing call sites untouched.
 
 **UI test target stood up**
+
 - `TodusUITests` target wired (xcodegen). `--ui-testing` launch-arg detected in `AppServices.init` injects fake bearer + onboarding flags + `hasReachedMainTab` so XCUITests skip auth and land on MainTab deterministically. Startup network calls (`refreshSession`, AI snapshot fetches, shared profile load) gated behind `!isUITestingMode`.
 - 3 test files in `TodusUITests/`: `TodusUITests.swift` (smoke), `CriticalFlowsTests.swift` (C1-C5 regression smoke via simulated deep link / notification / mutation pending state), `ParitySmokeTests.swift` (startup card on fresh install, voice settings accessibility, docs empty state, automation policy reachability).
 - UI test target compiles clean (`xcodebuild build-for-testing`). UI test execution requires booted simulator (sandbox blocks here — verify with `xcodebuild test -only-testing:TodusUITests` locally).
 
 **Voice race + autosave migration + policy debounce**
+
 - **Voice mic lock** ([`Services/Voice/VoiceMicLock.swift`](apps/ios/Todus/Todus/Services/Voice/VoiceMicLock.swift)) — cooperative `@MainActor @Observable` lock with `acquire(owner:)` / `release(owner:)`. Wired into both `VoiceSessionCoordinator` (owner: "coordinator") and `VoiceChatViewModel` (owner: "modal"). Siri Shortcut + modal-open at the same time can't double-attach AVAudioEngine. Same class of bug as H17.
 - **Compose autosave migration** ([`Features/Email/EmailComposeView.swift`](apps/ios/Todus/Todus/Features/Email/EmailComposeView.swift)) — `migrateLegacyAutosaveIfNeeded()` runs once on first restore: copies `reply.<threadId>` / `replyAll.<threadId>` UserDefaults blobs to the unified `compose.<threadId>` key (replyAll wins if both present), then deletes the legacy keys. Idempotent.
 - **EmailAutomationPolicyView debounced push** — 300ms debounced `saveSharedAIProfile` per change instead of `onDisappear`-only. Crash mid-edit no longer strands changes. `.onDisappear` still flushes as fallback. `AssistantAutomationPolicy` + `AssistantQuietHours` + `AssistantAutoSendScenario` gained `Equatable` for `onChange(of:)`.
 
 **Docs dedup + startup migration tightened**
+
 - `DocsService.refresh()` no longer auto-creates a "Personal" workspace when the server already has one (case-insensitive name check). On 409/422 race, refetches and uses the server's existing workspace.
 - `hasSeenStartupCard` migration: dropped unreliable `hasPersistedBearerToken` signal (Keychain survives uninstall on iOS — could silently skip card on fresh reinstall). Added new positive signal `Keys.hasReachedMainTab`, set in `MainTabView.onAppear` the first time the tab shell appears. Migration: card skipped only when `hasReachedMainTab` OR (`isAuthenticated && any prior onboarding flag`).
 
 **Verification**
+
 - `xcodebuild build` → **BUILD SUCCEEDED**
 - `xcodebuild build-for-testing` → **TEST BUILD SUCCEEDED**
 - `xcodebuild -only-testing:TodusTests test` → **TEST SUCCEEDED** (67 / 0 / 0)
 - UI tests pending booted simulator (run locally).
 
 **Manual follow-ups (user)**
+
 1. Open Xcode + run UI tests on simulator/device.
 2. AI conversation history + AppTheme avatar cache migrations run silently on first launch (transparent).
 3. Activate Siri Shortcut "Start Voice Assistant" via Shortcuts app.
@@ -486,6 +547,7 @@ Third pass closes the "complete after small fixes" gaps from the 2026-05-17 revi
 Second pass on iOS (after morning bug-hunt + ux-polish): closed remaining macOS→iOS parity gaps and stood up a real test suite. 5 parallel agents, full integration `xcodebuild` clean + `xcodebuild test` green.
 
 **New iOS features (parity with macOS)**
+
 - [Voice] **Voice assistant lifecycle on iOS** — was modal-only; now full coordinator-driven session. New `Services/Voice/`: `VoiceSessionCoordinator.swift` (391L, state machine: idle/connecting/listening/speaking/toolRunning/error, owns lifecycle + transcript persistence via `ai.saveConversation`), `VoiceSystemPromptClient.swift` (server-fetched persona with 60s TTL cache + offline fallback — replaces locally-built stale prompt), `VoiceToolRegistry.swift` (Gemini function declarations + `VoiceToolExecutor` protocol + iOS adapter calling `AIChatService.processVoiceToolCall`), `VoiceAudioCapture.swift` (AVAudioEngine 16kHz PCM16 capture). `VoiceIntent.swift` — `StartVoiceAssistantIntent` AppIntent + `TodusVoiceAppShortcuts` provider so Siri Shortcut serves as the iOS-equivalent of macOS's global hotkey. `Features/Settings/VoiceAssistantSettingsView.swift` mirrors macOS `voiceAssistantSection` (enable toggle, auto-stop idle toggle, Siri Shortcut hint with Shortcuts.app deep-link, reset persona cache, live status row). Wired into `AppServices` + `TodosApp` (`.task` subscribes to `.todusStartVoiceSession` notification, hydrates SwiftData main context, calls `coordinator.start()`).
 - [Docs] **Native iOS Docs shell** — was web shim only. New `Domain/DocTypes.swift` (DTOs mirroring macOS), `Services/Docs/DocsService.swift` (`@MainActor @Observable`, refresh/list/create/update/delete/move/star/togglePin/search, auto-creates Personal workspace), `Features/Docs/DocsListView.swift` (NavigationSplitView on iPad, NavigationStack on iPhone, recursive nested doc rows, pull-to-refresh, context menu, swipe actions, empty state, ~290L), `Features/Docs/DocEditorView.swift` (thin native nav wrapper around existing `DocsWebView` — preserves web fallback). `DocsWebView` gained optional `docId` param for deep linking; legacy callers unchanged. `MoreSheetView` exposes native Docs + "Docs (Web)" fallback (no removal of legacy).
 - [Settings] **Email automation policy controls on iOS** — `Features/Settings/EmailAutomationPolicyView.swift` (excluded-sender add/list/swipe-to-delete, auto-send experiment toggle with confirmation, workday start/end hour pickers, reset to recommended). NavigationLink added in `SettingsView.swift::emailSection`. Persists via AppServices, pushes on disappear.
@@ -493,19 +555,23 @@ Second pass on iOS (after morning bug-hunt + ux-polish): closed remaining macOS�
 - [Onboarding] **Branded startup card on iOS** — `App/StartupOnboardingView.swift` (~150L). Hero squircle logo, "Get started" + "I already have an account". Wired into `RootView` ahead of AuthView. Existing installs auto-skip via migration check (any prior onboarding flag set or authenticated session). Matches macOS `MacStartupOnboardingView` brand presence.
 
 **Tests — stood up real coverage**
+
 - Before: 2 files, 9 tests, ~5% coverage. After: 10 files, **66 tests pass, 0 fail, 15 skipped** (skipped tests document required DI seams).
 - New: `AuthServiceTests` (12 tests — C1 deep-link rejection, preloadTokens determinism, init→auth transition, token preview safety), `TodosAPIClientTests` (8 tests — superjson Date-meta envelope, omitted-meta plain payload, nested-date dotted path, batch wrap with String/Int H16 regression pin), `AIChatServiceTests` (12 tests — CRLF / LF classify, `[DONE]` with/without trailing CR H14 pin, heartbeat skip, chunk-boundary residual, replay end-to-end, malformed-JSON tolerance), `EmailServiceTests`, `AppleRemindersSyncServiceTests`, `NetworkMonitorTests`, `AppThemeAvatarCacheTests`, `RemoteFirstTaskParsingServiceTests`.
 - Minimal non-breaking seams added: `TodosAPIClient.swift` exposes `superjsonWrap_forTesting` via `TodosAPIClientTestSeam`; `AIChatService.swift` extracts `SSELineParser` enum (production loop unchanged — pure helper).
 - `TodosUITests` target stood up via xcodegen. Smoke test (`app.launch()` + window-exists). Manual follow-up: implement `--ui-testing` launch-arg stub in `AppServices` for deeper E2E.
 
 **Infrastructure**
+
 - [Build] **Duplicate `LocalModelStateStore.swift` resolved** — `App/LocalModelStateStore.swift` (51L stub placeholder) collided with `Services/AI/Local/LocalModelStateStore.swift` (188L real impl used by `ModelDownloadService` + `MLXInferenceService`). Renamed stub to `LocalModelStateStore_DEPRECATED.swift`, emptied class definition. Was blocking all builds. Safe to delete from disk in next cleanup.
 
 **Verification**
+
 - `xcodebuild -project apps/ios/Todus/Todus.xcodeproj -scheme Todus -sdk iphonesimulator build` → **BUILD SUCCEEDED**
 - `xcodebuild ... -only-testing:TodusTests test` → **TEST SUCCEEDED** (66 / 0 / 15, 0.30s)
 
 **Manual follow-ups**
+
 1. Open in Xcode + run on simulator/device (sandbox blocks CoreSimulator).
 2. Activate Siri Shortcut "Start Voice Assistant" via Shortcuts app to enable voice.
 3. Conversation history migrates Keychain → file system on first launch (transparent).
@@ -537,6 +603,7 @@ Build: `xcodebuild -project apps/macos/TodusMac.xcodeproj -scheme TodusMac -dest
 Multi-pass audit + remediation of `apps/macos/TodusMac`: critical/high bug fixes across mail, tasks, calendar, AI, voice, and auth; ~45 UX polish items; and a deliberate iOS → macOS parity push that closed the largest remaining gaps in Email, Calendar, Notifications, Tasks, and Search. Full integration `xcodebuild -project apps/macos/TodusMac.xcodeproj -scheme TodusMac -destination 'platform=macOS' build` → **BUILD SUCCEEDED** with zero errors.
 
 **Critical / high bug fixes**
+
 - [Meetings] **C1 duplicate top-level types** — resolved via existing `project.yml` exclusions; merged the secondary toolbar action into the canonical [`MacMeetingDetailView`](apps/macos/TodusMac/Views/Meetings/MacMeetingDetailView.swift) so only one symbol survives.
 - [Docs] **C2 autosave reliability** ([`MacDocEditorPane`](apps/macos/TodusMac/Views/Docs/MacDocEditorPane.swift), [`MacDocsService.swift`](apps/macos/TodusMac/Services/Docs/MacDocsService.swift)) — flush on `onDisappear` + `onChange(docId)` + debounced title autosave + 3-state save indicator (saving / saved / failed-with-retry). Replaced the placeholder "Info coming soon" popover with a real word/char count + last-updated + copyable doc id view.
 - [Auth] **C3 OAuth callback validation** ([`TodusMacApp.swift`](apps/macos/TodusMac/App/TodusMacApp.swift), [`MacAppServices.swift`](apps/macos/TodusMac/App/MacAppServices.swift)) — strict host check on `todus://` callbacks; queue inbound URLs until `ModelContainer` is ready so cold-launch deep links no longer drop into the void.
@@ -551,6 +618,7 @@ Multi-pass audit + remediation of `apps/macos/TodusMac`: critical/high bug fixes
 - [Auth] Restore-flash gone; profile fetch gated on session; folder `createdAt` drop fixed; settings now persists the full shape; voice context guard; OTP digit filter.
 
 **iOS → macOS parity features (new)**
+
 - [Email compose] **Attachments + signatures + live validation + rich text shortcuts** ([`MacEmailComposeView.swift`](apps/macos/TodusMac/Views/Email/MacEmailComposeView.swift), [`MacDraftService.swift`](apps/macos/TodusMac/Services/Email/MacDraftService.swift), [new] [`MacSignatureStore.swift`](apps/macos/TodusMac/Services/Email/MacSignatureStore.swift), [`MacSettingsView.swift`](apps/macos/TodusMac/Views/Settings/MacSettingsView.swift)) — `NSOpenPanel` attachment chips, base64 send through `MacDraftService.SendInput.attachments`; per-connection signatures stored in `MacSignatureStore` with a Settings card; live recipient validation; underline button + ⌘B / ⌘I / ⌘U shortcuts.
 - [Email thread] **Verification code + tracking info chips, smart-action toolbar, snooze reminders** ([`MacEmailThreadView.swift`](apps/macos/TodusMac/Views/Email/MacEmailThreadView.swift), [`MacNotificationService.swift`](apps/macos/TodusMac/Services/Notifications/MacNotificationService.swift)) — regex-based verification-code chip with one-shot auto-copy; UPS / FedEx / USPS / order-number tracking chip; toolbar with Create Task / Create Event / Generate Reply (inline spinners); "Remind me about this…" with preset snooze + custom date picker → `scheduleEmailReminder`.
 - [Calendar] **Native in-app event editor** ([new] [`MacEventEditSheet.swift`](apps/macos/TodusMac/Views/Calendar/MacEventEditSheet.swift)) — create / edit / delete inside the app (replaces Calendar.app delegation); "Open in Calendar.app" demoted to a context-menu fallback.
@@ -561,6 +629,7 @@ Multi-pass audit + remediation of `apps/macos/TodusMac`: critical/high bug fixes
 - [Sidebar] **Restored Meetings entry** ([`MacSidebarView.swift`](apps/macos/TodusMac/Views/MacSidebarView.swift)).
 
 **UX polish (~45 items)**
+
 - Destructive confirmations (Log Out, task delete, folder delete) across Settings + Tasks.
 - Toasts for: send failure, event creation, restore task, `openInCalendarApp` failure, `moveEvent` completion.
 - Accessibility labels on icon-only buttons across Voice / Assistant / Calendar / Local Models.
@@ -573,13 +642,16 @@ Multi-pass audit + remediation of `apps/macos/TodusMac`: critical/high bug fixes
 - Empty search → **Create task '<query>'**.
 
 **Files**
+
 - New: [`MacSignatureStore.swift`](apps/macos/TodusMac/Services/Email/MacSignatureStore.swift), [`MacEventEditSheet.swift`](apps/macos/TodusMac/Views/Calendar/MacEventEditSheet.swift), [`MacSharedConversationView.swift`](apps/macos/TodusMac/Views/Sharing/MacSharedConversationView.swift) (plus `VoiceSessionCoordinator.swift` already untracked).
 - Modified: ~35 files across `apps/macos/TodusMac/{App,Services,Views}/**` — see `git status` for the full list.
 
 **Verification**
+
 - `xcodebuild -project apps/macos/TodusMac.xcodeproj -scheme TodusMac -destination 'platform=macOS' build` → **BUILD SUCCEEDED** (zero errors, zero warnings introduced by this sweep).
 
 **Manual follow-ups (out of scope this session)**
+
 1. macOS Widget extension is wired in `project.yml`; needs a real-data verification pass through `MacWidgetUpdateManager`.
 2. `WakeWordService` still a stub — Picovoice Porcupine integration deferred to Phase 1.5.
 3. `GroupChatService` polling not yet migrated to the WebSocket Durable Object subscription (TODO in code).
@@ -593,6 +665,7 @@ Cross-reference: parity matrix added in [`PARITY_CHECKLIST.md`](PARITY_CHECKLIST
 Multi-agent audit + remediation across iOS surfaces. 5 critical + 17 high + 46 medium bugs + 84 polish items addressed. Full integration `xcodebuild` clean.
 
 **Critical/security**
+
 - [Auth] **Deep-link token-injection blocked** ([`packages/swift-auth/Sources/TodusAuth/AuthService.swift`](packages/swift-auth/Sources/TodusAuth/AuthService.swift)) — `handleAuthCallback` strictly requires unexpired `pendingAuthFlowExpiresAt` regardless of `isAuthenticated`. Apple Sign In also sets the window (was Google-only) + adds nonce. Sentinel consumed on accept → single-use deep links.
 - [Auth] **Stale refresh-token leak across re-login** (`AuthService.completeAuthentication`) — JWT-only branch clears `refreshToken`/`currentSessionId`; first two branches clear `currentSessionId` when callback omits one. Prevents cross-account session bleed.
 - [Auth] **Sign-out hardened** — best-effort server revoke + synchronous Keychain delete on `signOut()` so suspend mid-logout can't resurrect tokens.
@@ -601,6 +674,7 @@ Multi-agent audit + remediation across iOS surfaces. 5 critical + 17 high + 46 m
 - [Calendar] **Permission view stuck loading after grant** ([`Features/Calendar/CalendarPermissionView.swift`](apps/ios/Todus/Todus/Features/Calendar/CalendarPermissionView.swift)) — `.onReceive(.todusCalendarAuthorizationDidChange)` + scenePhase re-read.
 
 **High-impact**
+
 - [Email] `EmailService` actions (`toggleStar`, `markAsSpam`, `markAsRead`, `markAsUnread`, `archiveThreads`) return `Bool`; star toggle rolls back on failure; pagination dedupe replaces in-place when newer.
 - [Tasks] Capture rollback no longer races concurrent enrichment; `RemoteFirstTaskParsingService` preserves `lowConfidence`; Reminders sync bounded recursion (3 retries) + removed no-op guard.
 - [Calendar] Day view fetches unified events (was Apple-only); Google event tap no-op fixed (provider-prefix strip + retry-then-alert); `EKWrapper` deleted-calendar force-unwrap removed.
@@ -608,6 +682,7 @@ Multi-agent audit + remediation across iOS surfaces. 5 critical + 17 high + 46 m
 - [Infra] TRPC body wrapped with minimal superjson (ISO-8601 Date meta); `JSONSerialization` uses `.fragmentsAllowed`; AVAudioEngine double-attach guarded; `NetworkMonitor` seeds from `currentPath`; `SubscriptionService.cancel` re-entrancy guard; `NotificationDigestService` routes via `TodosAPIClient`; `CreateSheet` validates `endDate > startDate`; AppTheme avatar cache → SHA-256 file storage; `AppPrimaryButtonStyle` uses `Color.accentColor`.
 
 **UX polish (selected)**
+
 - Email: archive swipe not red, send/refresh haptics, "Sending…" inline label, search-feedback distinguishes loading vs done, From row hidden on single account, recent-message relative timestamps.
 - Tasks: complete/snooze haptics, context-menu delete confirmation, board column quick-add, 44pt tap targets, leading checkbox column in table view, "All clear" chip hides on truly empty, "Recent"/"Oldest" sort labels.
 - Calendar: 44pt event tap targets, list empty-state CTA, scope-banner haptic+a11y, loading skeleton, long-press haptic, grid-tap creates event.
@@ -616,10 +691,12 @@ Multi-agent audit + remediation across iOS surfaces. 5 critical + 17 high + 46 m
 - Auth: stage-1 disabled during OTP loading, error banner auto-dismiss after 6s, OTP verify/resend spinner overlay (visible above keyboard), red email-validation hint, `canOpenURL` guard on mailto, accessibilityHints on social buttons, bell-icon accessibilityHidden.
 
 **Verification**
+
 - `swift build` (packages/swift-auth): Build complete.
 - `xcodebuild -scheme Todus -sdk iphonesimulator build`: **BUILD SUCCEEDED** (full integration across all 6 surfaces).
 
 **Manual follow-ups**
+
 1. Open in Xcode and run on simulator/device — sandbox can't launch CoreSimulator for live UI smoke test.
 2. AI conversation history migrates Keychain → `Application Support/ai-conversations.json` on first launch.
 3. AppTheme avatar cache migrates UserDefaults blobs → file cache on first `loadFromCache`.

@@ -1076,7 +1076,7 @@ final class AIChatService {
                             } catch {
                                 // Best-effort body read; fall through to default copy.
                             }
-                            appendError(serverMessage ?? "Out of AI credits. Upgrade or wait for the next reset.", to: assistantMessageID)
+                            appendError(serverMessage ?? "Out of AI credits. Wait for the next reset.", to: assistantMessageID)
                         case 429:
                             // Parse Retry-After per RFC 7231: integer seconds or HTTP-date.
                             var retrySeconds: Int? = nil

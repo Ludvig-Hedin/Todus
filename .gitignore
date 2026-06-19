@@ -46,6 +46,7 @@ bun-debug.log*
 
 # Secrets & local credentials (never commit)
 *.pem
+*.p8
 *credentials*.json
 google-service-account*.json
 *-firebase-adminsdk*.json

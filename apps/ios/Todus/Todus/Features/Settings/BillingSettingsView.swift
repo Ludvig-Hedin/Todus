@@ -2,9 +2,7 @@ import SwiftUI
 
 struct BillingSettingsView: View {
     @Environment(AppServices.self) private var services
-    @Environment(\.openURL) private var openURL
 
-    @State private var isOpeningPortal = false
     @State private var isCanceling = false
     @State private var showCancelConfirm = false
     @State private var errorMessage: String?
@@ -21,7 +19,7 @@ struct BillingSettingsView: View {
             "Unlimited email connections",
             "150 credits / month of AI chat & voice",
             "Auto-labeling, thread summaries, priority models",
-            "Manage payment & cancel anytime",
+            "Cancel anytime from this screen",
         ],
         .team: [
             "Everything in Pro",
@@ -150,22 +148,6 @@ struct BillingSettingsView: View {
             }
 
             if subscription.plan.isPaid {
-                Button {
-                    Task { await openBillingPortal() }
-                } label: {
-                    HStack {
-                        Label("Manage billing", systemImage: "creditcard")
-                        Spacer()
-                        if isOpeningPortal {
-                            ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.toolbarInlineSpinner)
-                        } else {
-                            Image(systemName: "arrow.up.right")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .disabled(isOpeningPortal)
-
                 Button(role: .destructive) {
                     showCancelConfirm = true
                 } label: {
@@ -179,22 +161,17 @@ struct BillingSettingsView: View {
                 }
                 .disabled(isCanceling)
             } else {
-                Button {
-                    openUpgradeUrl()
-                } label: {
-                    HStack {
-                        Label("Upgrade to Pro", systemImage: "sparkles")
-                        Spacer()
-                        Image(systemName: "arrow.up.right")
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                Label("Paid plan changes are not available in this iOS build.", systemImage: "info.circle")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
         } header: {
             Text("Plan")
         } footer: {
             if !subscription.plan.isPaid {
-                Text("Pro unlocks 150 credits per month, unlimited connections, priority models, and more.")
+                Text("The iOS app includes the free plan. Paid plan changes are not offered in this build.")
+            } else {
+                Text("Payment-method changes are handled outside this iOS build. You can cancel your active plan here.")
             }
         }
     }
@@ -310,40 +287,6 @@ struct BillingSettingsView: View {
     }
 
     // MARK: - Actions
-
-    private func openBillingPortal() async {
-        errorMessage = nil
-        isOpeningPortal = true
-        defer { isOpeningPortal = false }
-        do {
-            if let url = try await subscription.getBillingPortalUrl() {
-                openURL(url)
-            } else {
-                errorMessage = "Couldn't open the billing portal. Try again in a moment."
-            }
-        } catch {
-            errorMessage = (error as? LocalizedError)?.errorDescription ?? "\(error)"
-        }
-    }
-
-    private func openUpgradeUrl() {
-        errorMessage = nil
-        // The web app lives at todus.app (the api.* subdomain is the backend).
-        // Strip an api. prefix when present, otherwise fall back to the prod root.
-        let base = services.configuration.effectiveBackendURL.absoluteString
-        let pricingURL: URL? = {
-            if let host = URL(string: base)?.host, host.hasPrefix("api.") {
-                let webHost = String(host.dropFirst("api.".count))
-                return URL(string: "https://\(webHost)/pricing")
-            }
-            return URL(string: "https://todus.app/pricing")
-        }()
-        if let url = pricingURL {
-            openURL(url)
-        } else {
-            errorMessage = "Couldn't open the upgrade page."
-        }
-    }
 
     private func performCancel() async {
         errorMessage = nil

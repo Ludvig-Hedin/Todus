@@ -1,20 +1,18 @@
+import { ArrowLeft, Link2, Github, type LucideIcon } from 'lucide-react';
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
-import { ArrowLeft, Link2, Github } from 'lucide-react';
 
 // Type casts for Lucide icons to resolve TS2786
-const ArrowLeftIcon = ArrowLeft as any;
-const Link2Icon = Link2 as any;
-const GithubIcon = Github as any;
+const ArrowLeftIcon = ArrowLeft as LucideIcon;
+const Link2Icon = Link2 as LucideIcon;
+const GithubIcon = Github as LucideIcon;
 
 import { Navigation } from '@/components/navigation';
 import { Button } from '@/components/ui/button';
 import Footer from '@/components/home/footer';
 import { createSectionId } from '@/lib/utils';
 
-import React from 'react';
-
-const LAST_UPDATED = 'February 13, 2025';
+const LAST_UPDATED = 'June 19, 2026';
 
 export default function TermsOfService() {
   const { copiedValue: copiedSection, copyToClipboard } = useCopyToClipboard();
@@ -37,7 +35,6 @@ export default function TermsOfService() {
               className="gap-2 text-gray-600 hover:text-gray-900 dark:text-white dark:hover:text-white/80"
             >
               <ArrowLeftIcon className="h-4 w-4" />
-
               Back
             </Button>
           </a>
@@ -72,7 +69,7 @@ export default function TermsOfService() {
                         className="text-gray-400 hover:text-gray-700 dark:text-white/60 dark:hover:text-white/80"
                         aria-label={`Copy link to ${section.title} section`}
                       >
-                        <Link2
+                        <Link2Icon
                           className={`h-4 w-4 ${copiedSection === sectionId ? 'text-green-500 dark:text-green-400' : ''}`}
                         />
                       </button>
@@ -100,34 +97,24 @@ const sections = [
     title: 'Overview',
     content: (
       <p>
-        Todus is an open-source email solution that enables users to self-host their email service
-        or integrate with external email providers. By using Todus, you agree to these terms.
+        Todus is a productivity service for email, calendar, tasks, docs, meetings, and AI
+        assistance. These terms apply to the hosted Todus web, iOS, and macOS apps. By using Todus,
+        you agree to these terms and to any policies linked from the service.
       </p>
     ),
   },
   {
     title: 'Service Description',
     content: (
-      <div className="space-y-8">
-        <div>
-          <h3 className="text-card-foreground mb-3 text-xl font-medium">Self-Hosted Service</h3>
-          <ul className="ml-4 list-disc space-y-2">
-            <li>Todus provides software that users can deploy on their own infrastructure</li>
-            <li>Users are responsible for their own hosting, maintenance, and compliance</li>
-            <li>The software is provided &quot;as is&quot; under the MIT License</li>
-          </ul>
-        </div>
-        <div>
-          <h3 className="text-card-foreground mb-3 text-xl font-medium">
-            External Email Integration
-          </h3>
-          <ul className="ml-4 list-disc space-y-2">
-            <li>Todus can integrate with third-party email providers</li>
-            <li>Users must comply with third-party providers&apos; terms of service</li>
-            <li>We are not responsible for third-party service disruptions</li>
-          </ul>
-        </div>
-      </div>
+      <ul className="ml-4 list-disc space-y-2">
+        <li>Todus can connect to third-party accounts such as email and calendar providers.</li>
+        <li>Todus can store and sync user-created workspace data across supported clients.</li>
+        <li>
+          Todus can use AI providers to process prompts and selected workspace data at your
+          direction.
+        </li>
+        <li>Some features may be experimental, limited, unavailable, or changed over time.</li>
+      </ul>
     ),
   },
   {
@@ -136,40 +123,87 @@ const sections = [
       <div className="text-muted-foreground mt-4 space-y-3">
         <p>Users agree to:</p>
         <ul className="ml-4 list-disc space-y-2">
-          <li>Comply with all applicable laws and regulations</li>
-          <li>Maintain the security of their instance</li>
-          <li>Not use the service for spam or malicious purposes</li>
-          <li>Respect intellectual property rights</li>
-          <li>Report security vulnerabilities responsibly</li>
+          <li>Comply with applicable laws and third-party provider terms.</li>
+          <li>Keep account credentials secure and promptly report unauthorized access.</li>
+          <li>
+            Not use Todus for spam, abuse, unlawful content, malware, phishing, or harassment.
+          </li>
+          <li>Respect privacy, confidentiality, and intellectual property rights.</li>
+          <li>Only connect accounts and data you are authorized to use.</li>
         </ul>
       </div>
     ),
   },
   {
-    title: 'Software License',
+    title: 'Connected Services and AI',
     content: (
       <div className="text-muted-foreground mt-4 space-y-3">
-        <p>Todus is licensed under the MIT License:</p>
+        <p>
+          Todus depends on third-party providers for connected accounts, infrastructure, billing,
+          analytics, diagnostics, and AI features.
+        </p>
         <ul className="ml-4 list-disc space-y-2">
-          <li>Users can freely use, modify, and distribute the software</li>
-          <li>The software comes with no warranties</li>
-          <li>Users must include the original license and copyright notice</li>
+          <li>Third-party services may be unavailable, rate-limited, or changed without notice.</li>
+          <li>AI outputs may be inaccurate and should be reviewed before relying on them.</li>
+          <li>
+            You are responsible for deciding what data to send to connected services and AI
+            features.
+          </li>
         </ul>
       </div>
     ),
   },
   {
-    title: 'Community Guidelines',
+    title: 'Billing',
     content: (
       <div className="text-muted-foreground mt-4 space-y-3">
-        <p>Users participating in our community agree to:</p>
+        <p>
+          Todus may offer free and paid plans depending on platform and availability. Paid iOS plan
+          changes are offered only when an App Store-compliant purchase flow is available for the
+          iOS app.
+        </p>
         <ul className="ml-4 list-disc space-y-2">
-          <li>Follow our code of conduct</li>
-          <li>Contribute constructively to discussions</li>
-          <li>Respect other community members</li>
-          <li>Report inappropriate behavior</li>
+          <li>Plan limits, pricing, and features may change over time.</li>
+          <li>Refunds and cancellations may depend on the payment provider, platform, and law.</li>
+          <li>
+            Taxes, fees, currency conversion, and payment authorization are handled by payment
+            providers.
+          </li>
         </ul>
       </div>
+    ),
+  },
+  {
+    title: 'Content and Acceptable Use',
+    content: (
+      <ul className="ml-4 list-disc space-y-2">
+        <li>
+          You retain rights to your content, subject to the permissions needed to operate Todus.
+        </li>
+        <li>
+          You must not upload, share, or generate unlawful, abusive, infringing, or harmful content.
+        </li>
+        <li>
+          We may restrict, suspend, or remove access to protect users, Todus, providers, or legal
+          compliance.
+        </li>
+      </ul>
+    ),
+  },
+  {
+    title: 'Disclaimers and Liability',
+    content: (
+      <ul className="ml-4 list-disc space-y-2">
+        <li>Todus is provided as available and may contain bugs or interruptions.</li>
+        <li>
+          We do not guarantee that AI outputs, sync results, notifications, or imported data are
+          complete or error-free.
+        </li>
+        <li>
+          To the maximum extent permitted by law, Todus is not liable for indirect, incidental,
+          special, consequential, or punitive damages.
+        </li>
+      </ul>
     ),
   },
   {
@@ -179,10 +213,16 @@ const sections = [
         <p>For questions about these terms:</p>
         <div className="flex flex-col space-y-2">
           <a
+            href="mailto:founders@todus.app"
+            className="inline-flex items-center text-blue-600 hover:text-blue-800"
+          >
+            founders@todus.app
+          </a>
+          <a
             href="https://github.com/Ludvig-Hedin/Todus"
             className="inline-flex items-center text-blue-600 hover:text-blue-800"
           >
-            <Github className="mr-2 h-4 w-4" />
+            <GithubIcon className="mr-2 h-4 w-4" />
             Open an issue on GitHub
           </a>
         </div>

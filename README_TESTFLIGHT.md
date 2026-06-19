@@ -1,122 +1,62 @@
-# 🚀 Todus App - TestFlight Deployment Complete
+# Todus TestFlight Readiness
 
-**Status:** ✅ Code Ready | Documentation Complete | Ready for Deployment
-**Date:** 2026-02-24
-**Time to TestFlight:** 1-2 hours
+Last updated: 2026-06-19
 
----
+This file tracks the current native iOS/macOS release flow. The old WebView-wrapper
+instructions are obsolete.
 
-## 📌 Quick Navigation
+## Active App Targets
 
-### 🟢 Start Here
-👉 **[TESTFLIGHT_QUICK_START.md](TESTFLIGHT_QUICK_START.md)** - 5-step process (1-2 hours)
+| Platform | Path                  | Project                                  | Bundle ID                   |
+| -------- | --------------------- | ---------------------------------------- | --------------------------- |
+| iOS      | `apps/ios/Todus`      | `apps/ios/Todus/Todus.xcodeproj`         | `com.ludvighedin.todus`     |
+| macOS    | `apps/macos/TodusMac` | `apps/macos/TodusMac/TodusMac.xcodeproj` | `com.ludvighedin.todus.mac` |
 
-### 📚 Comprehensive Guide
-👉 **[TESTFLIGHT_DEPLOYMENT_GUIDE.md](TESTFLIGHT_DEPLOYMENT_GUIDE.md)** - Detailed instructions + troubleshooting
+The iOS app is a native SwiftUI app. It uses native `URLSession` calls for backend APIs and only
+uses `WKWebView` for bounded content/editor surfaces such as rendered email or docs editor content.
 
-### 🏠 Getting Started Overview
-👉 **[GETTING_TO_TESTFLIGHT.md](GETTING_TO_TESTFLIGHT.md)** - Navigation guide + FAQ
+## Current App Store Status
 
-### 📊 Technical Details
-👉 **[APP_BUILD_STATUS.md](APP_BUILD_STATUS.md)** - Architecture & current status
+Use `APP_STORE_AUDIT.md` as the authoritative readiness tracker.
 
-### 🔧 Verify Setup
+As of 2026-06-19, the iOS codebase builds and simulator tests pass, but submission still requires
+manual owner actions:
+
+- Revoke the previously committed App Store Connect `.p8` key and purge/rotate any affected
+  credentials.
+- Complete App Store Connect metadata, screenshots, privacy labels, age rating, export compliance,
+  support URL, and App Review notes.
+- Create a reviewer account or full demo mode with reliable access.
+- Run a signed TestFlight build on physical devices.
+- Verify account deletion and connected-provider revocation in a production-like environment.
+
+## Safe Local Validation
+
+Run targeted checks instead of project-wide lint/format commands.
+
 ```bash
-bash verify-testflight-setup.sh
+plutil -lint apps/ios/Todus/Todus/Resources/Info.plist \
+  apps/ios/Todus/Todus/Resources/PrivacyInfo.xcprivacy \
+  apps/ios/Todus/Todus/Resources/Todus.entitlements
+
+pnpm ios:simulator
 ```
 
----
+For full simulator build/test validation, use Xcode or XcodeBuildMCP against:
 
-## ⚡ 30-Second Summary
+- Project: `apps/ios/Todus/Todus.xcodeproj`
+- Scheme: `Todus`
+- Configuration: `Debug` for local validation, `Release` for archive validation
 
-**What:** Native iOS/macOS app wrapper around production web app
-**Status:** Code complete, ready to build
-**Time:** 1-2 hours to get on TestFlight
-**Next Step:** Read TESTFLIGHT_QUICK_START.md
+## App Review Notes
 
----
+The final App Review notes should include:
 
-## 📋 What's Included
+- Backend URL and support URL.
+- Reviewer credentials and exact sign-in steps.
+- Which optional permissions can be skipped.
+- How to test account deletion.
+- Any disabled/beta features.
+- Billing behavior for the submitted iOS build.
 
-### Code (Ready to Deploy)
-- ✅ Native Swift app (zero external dependencies)
-- ✅ WebView wrapper for email interface
-- ✅ OAuth integration with Google
-- ✅ App icons for iOS and macOS
-- ✅ Production URLs configured
-
-### Documentation (Comprehensive)
-- ✅ TESTFLIGHT_QUICK_START.md - 5 steps to TestFlight
-- ✅ TESTFLIGHT_DEPLOYMENT_GUIDE.md - Complete guide with troubleshooting
-- ✅ APP_BUILD_STATUS.md - Technical architecture and status
-- ✅ GETTING_TO_TESTFLIGHT.md - Navigation and FAQ
-- ✅ DEPLOYMENT_SESSION_SUMMARY.md - What was accomplished
-- ✅ verify-testflight-setup.sh - Automated environment check
-
----
-
-## 🎯 The 5-Step Process
-
-| Step | What | Time |
-|------|------|------|
-| 1️⃣ | Apple Developer setup | 20 min |
-| 2️⃣ | Xcode configuration | 10 min |
-| 3️⃣ | Build archive | 15 min |
-| 4️⃣ | Upload to TestFlight | 10 min |
-| 5️⃣ | Create testers & invite | 5 min |
-
-**Total: ~60 minutes**
-
----
-
-## ✅ Current Status
-
-### Completed This Session
-- ✅ Researched entire codebase
-- ✅ Verified app code is ready
-- ✅ Created 6+ comprehensive documentation files
-- ✅ Created automated verification script
-- ✅ Documented all manual steps
-- ✅ Provided troubleshooting guide
-
-### Ready for Your Next Actions
-- ⏳ Apple Developer account setup
-- ⏳ Code signing configuration
-- ⏳ Build & upload to TestFlight
-- ⏳ Create internal tester group
-
----
-
-## 🚀 Getting Started Now
-
-**Option 1: Fast Track (Recommended)**
-1. Read: `TESTFLIGHT_QUICK_START.md` (15 min)
-2. Follow: 5-step process (60 min)
-3. Done! App is on TestFlight
-
-**Option 2: Thorough Track**
-1. Read: `GETTING_TO_TESTFLIGHT.md` (15 min)
-2. Read: `TESTFLIGHT_DEPLOYMENT_GUIDE.md` (30 min)
-3. Follow: Detailed guide
-
----
-
-## 🔑 Key Information
-
-- **App Type:** Native Swift + WKWebView wrapper
-- **Platforms:** iOS 14+, macOS 11+
-- **Bundle ID iOS:** `com.zero.nativeapp`
-- **Web App:** https://todus-production.ludvighedin15.workers.dev
-- **Features:** Email, OAuth, Settings, Compose
-
----
-
-## 📞 Next Step
-
-👉 **Open TESTFLIGHT_QUICK_START.md and follow Step 1**
-
-You can get your app on TestFlight in 1-2 hours!
-
----
-
-**Ready?** Let's go! 🚀
+Do not submit while App Store Review blockers remain open in `APP_STORE_AUDIT.md`.

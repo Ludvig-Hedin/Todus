@@ -1,28 +1,26 @@
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
 
-import { ArrowLeft, Link2, Mail, Github } from 'lucide-react';
+import { ArrowLeft, Link2, Mail, Github, type LucideIcon } from 'lucide-react';
 
 // Type casts for Lucide icons to resolve TS2786
-const ArrowLeftIcon = ArrowLeft as any;
-const Link2Icon = Link2 as any;
-const MailIcon = Mail as any;
-const GithubIcon = Github as any;
+const ArrowLeftIcon = ArrowLeft as LucideIcon;
+const Link2Icon = Link2 as LucideIcon;
+const MailIcon = Mail as LucideIcon;
+const GithubIcon = Github as LucideIcon;
 
 import { Navigation } from '@/components/navigation';
 import { Button } from '@/components/ui/button';
 import Footer from '@/components/home/footer';
 import { createSectionId } from '@/lib/utils';
 
-import React from 'react';
-
-const LAST_UPDATED = 'May 16, 2025';
+const LAST_UPDATED = 'June 19, 2026';
 
 export default function PrivacyPolicy() {
   const { copiedValue: copiedSection, copyToClipboard } = useCopyToClipboard();
 
   const handleCopyLink = (sectionId: string) => {
-    const url = `${window.location.origin}${window.location.pathname} #${sectionId} `;
+    const url = `${window.location.origin}${window.location.pathname}#${sectionId}`;
     copyToClipboard(url, sectionId);
   };
 
@@ -38,7 +36,6 @@ export default function PrivacyPolicy() {
               className="gap-2 text-gray-600 hover:text-gray-900 dark:text-white dark:hover:text-white/80"
             >
               <ArrowLeftIcon className="h-4 w-4" />
-
               Back
             </Button>
           </a>
@@ -77,7 +74,6 @@ export default function PrivacyPolicy() {
                           className={`h-4 w-4 ${copiedSection === sectionId ? 'text-green-500 dark:text-green-400' : ''}`}
                         />
                       </button>
-
                     </div>
                     <div className="prose prose-sm prose-a:text-blue-600 hover:prose-a:text-blue-800 dark:prose-a:text-blue-400 dark:hover:prose-a:text-blue-300 max-w-none text-gray-600 dark:text-white/80">
                       {section.content}
@@ -103,207 +99,95 @@ const sections = [
     content: (
       <div className="space-y-4">
         <p>
-          At Todus, we believe that privacy is a fundamental right. Our open-source email solution is
-          built with privacy at its core, and we&apos;re committed to being transparent about how we
-          handle your data.
+          Todus is a productivity service for email, calendar, tasks, docs, meetings, and AI
+          assistance. We process account and workspace data to provide those features, keep your
+          account secure, sync across devices, and improve reliability.
         </p>
-        <p className="font-semibold">
-          Important: Todus is a client-only email application. We DO NOT store your emails on our
-          servers. All email data is processed directly between your browser and Gmail.
+        <p>
+          This policy describes the hosted Todus web, iOS, and macOS apps. Self-hosted deployments
+          are controlled by the person or organization operating that deployment.
         </p>
-        <p>Our verified privacy commitments:</p>
+      </div>
+    ),
+  },
+  {
+    title: 'Data We Collect',
+    content: (
+      <div className="space-y-4">
+        <p>Depending on the features you use, Todus may collect or process:</p>
         <ul className="ml-4 list-disc space-y-2">
           <li>
-            Todus Email Storage: We never store your emails - they remain in your Gmail account
+            Account information such as name, email address, profile image, and sign-in method.
           </li>
-          <li>Client-Side Processing: All email processing happens in your browser</li>
-          <li>Open Source: Our entire codebase is public and can be audited</li>
-          <li>Minimal Data: We only request essential Gmail API permissions</li>
-          <li>User Control: You can revoke our access to your Gmail at any time</li>
+          <li>
+            Authentication data such as sessions, OAuth tokens, verification codes, and
+            device/session metadata.
+          </li>
+          <li>
+            Email data you connect to Todus, including message content, headers, recipients, labels,
+            attachments, drafts, and thread metadata.
+          </li>
+          <li>
+            Calendar, reminders, task, folder, note, document, meeting, template, and sharing data
+            you create or connect.
+          </li>
+          <li>
+            AI prompts, assistant messages, tool results, generated summaries, writing-style data,
+            and usage/credit counters.
+          </li>
+          <li>
+            Billing and subscription state such as plan, status, customer identifiers, payment
+            processor events, and invoices or receipts handled by payment providers.
+          </li>
+          <li>
+            Diagnostics, logs, crash/error reports, feature usage, approximate device/app
+            information, and support communications.
+          </li>
         </ul>
       </div>
     ),
   },
   {
-    title: 'Google Account Integration',
+    title: 'How We Use Data',
     content: (
-      <>
-        <p className="mb-4">When you use Todus with your Google Account:</p>
+      <ul className="ml-4 list-disc space-y-2">
+        <li>Provide, sync, secure, troubleshoot, and improve Todus features.</li>
+        <li>Authenticate users and protect accounts from unauthorized access.</li>
+        <li>
+          Connect to email, calendar, reminder, notification, AI, and billing providers at your
+          direction.
+        </li>
+        <li>
+          Generate AI assistance, summaries, labels, search results, drafts, and task suggestions.
+        </li>
+        <li>
+          Measure usage limits, subscription status, reliability, abuse prevention, and service
+          health.
+        </li>
+        <li>Respond to support, legal, security, and compliance requests.</li>
+      </ul>
+    ),
+  },
+  {
+    title: 'Connected Accounts and Google User Data',
+    content: (
+      <div className="space-y-4">
+        <p>
+          Todus requests access to connected accounts only after you authorize the connection. For
+          Google accounts, Todus uses OAuth and requests the scopes needed for the email, calendar,
+          profile, and related productivity features you enable.
+        </p>
         <ul className="ml-4 list-disc space-y-2">
-          <li>We request access to your Gmail data only after receiving your explicit consent</li>
-          <li>We access only the necessary Gmail API scopes required for email functionality</li>
-          <li>We use secure OAuth 2.0 authentication provided by Google</li>
+          <li>Google user data is used to provide and improve user-facing Todus features.</li>
+          <li>We do not sell Google user data or use it for advertising.</li>
           <li>
-            You can revoke our access to your Google account at any time through your Google Account
-            settings
+            We do not allow humans to read Google user data except when you ask for support, when
+            required for security or abuse investigation, or when required by law.
+          </li>
+          <li>
+            You can revoke Google access through Todus settings or your Google Account settings.
           </li>
         </ul>
-      </>
-    ),
-  },
-  {
-    title: 'Data Collection and Usage',
-    content: (
-      <div className="space-y-6">
-        <div>
-          <h3 className="mb-3 text-lg font-medium">Google Services Data Handling</h3>
-          <ul className="ml-4 list-disc space-y-2">
-            <li>Email data is processed in accordance with Google API Services User Data Policy</li>
-            <li>
-              We only process and display email data - we don&apos;t store copies of your emails
-            </li>
-            <li>
-              All data transmission between our service and Google is encrypted using
-              industry-standard TLS 1.3 protocols
-            </li>
-            <li>
-              We maintain limited temporary caches only as necessary for application functionality,
-              with a maximum retention period of 24 hours
-            </li>
-            <li>Cached data is encrypted at rest using AES-256 encryption</li>
-            <li>
-              We collect basic usage analytics (page views, feature usage) to improve the service,
-              but this data is anonymized
-            </li>
-            <li>Error logs are retained for 30 days to help diagnose and fix issues</li>
-          </ul>
-        </div>
-        <div>
-          <h3 className="mb-3 text-lg font-medium">Self-Hosted Instances</h3>
-          <ul className="ml-4 list-disc space-y-2">
-            <li>When you self-host Todus, your email data remains entirely under your control</li>
-            <li>No data is sent to our servers or third parties without your explicit consent</li>
-            <li>You maintain complete ownership and responsibility for your data</li>
-            <li>We provide detailed documentation on secure self-hosting practices</li>
-            <li>You can configure your own data retention and backup policies</li>
-            <li>Optional telemetry can be enabled to help us improve the platform</li>
-          </ul>
-        </div>
-        <div>
-          <h3 className="mb-3 text-lg font-medium">Data Processing Locations</h3>
-          <ul className="ml-4 list-disc space-y-2">
-            <li>All data processing occurs in secure data centers in the United States</li>
-            <li>Self-hosted instances can choose their own data processing location</li>
-            <li>We comply with international data transfer regulations</li>
-            <li>Data processing agreements are available for enterprise users</li>
-          </ul>
-        </div>
-      </div>
-    ),
-  },
-  {
-    title: 'Data Protection and Security',
-    content: (
-      <div className="space-y-6">
-        <div>
-          <h3 className="mb-3 text-lg font-medium">Security Measures</h3>
-          <ul className="ml-4 list-disc space-y-2">
-            <li>
-              End-to-end encryption for all email communications using industry-standard protocols
-            </li>
-            <li>
-              Secure OAuth 2.0 authentication for Google services with strict scope limitations
-            </li>
-            <li>Regular third-party security audits and penetration testing</li>
-            <li>Open-source codebase for transparency and community security review</li>
-            <li>Compliance with Google API Services User Data Policy and security requirements</li>
-            <li>Real-time monitoring for suspicious activities and potential security threats</li>
-            <li>Automated security patches and dependency updates</li>
-          </ul>
-        </div>
-        <div>
-          <h3 className="mb-3 text-lg font-medium">Infrastructure Security</h3>
-          <ul className="ml-4 list-disc space-y-2">
-            <li>All servers are hosted in SOC 2 Type II certified data centers</li>
-            <li>Network-level security with enterprise-grade firewalls</li>
-            <li>Regular backup and disaster recovery testing</li>
-            <li>Multi-factor authentication required for all administrative access</li>
-            <li>Encryption at rest for all stored data using AES-256</li>
-          </ul>
-        </div>
-        <div>
-          <h3 className="mb-3 text-lg font-medium">Security Response</h3>
-          <ul className="ml-4 list-disc space-y-2">
-            <li>24/7 security incident response team</li>
-            <li>Bug bounty program for responsible security disclosure</li>
-            <li>Incident response plan with clear notification procedures</li>
-            <li>Regular security training for all team members</li>
-          </ul>
-        </div>
-      </div>
-    ),
-  },
-  {
-    title: 'Google User Data Handling',
-    content: (
-      <div className="space-y-6">
-        <div>
-          <h3 className="mb-3 text-lg font-medium">Data Access and Usage</h3>
-          <ul className="ml-4 list-disc space-y-2">
-            <li>
-              We access the following Google user data through the Gmail API:
-              <ul className="ml-4 mt-2 list-disc space-y-1">
-                <li>Email content and attachments</li>
-                <li>Email metadata (subject, dates, recipients)</li>
-                <li>Labels and folder structure</li>
-                <li>Basic profile information</li>
-              </ul>
-            </li>
-            <li>This data is used exclusively for providing email functionality within Todus</li>
-            <li>No Google user data is used for advertising, marketing, or profiling purposes</li>
-            <li>We maintain detailed audit logs of all data access for security and compliance</li>
-            <li>Access to user data is strictly limited to essential personnel</li>
-          </ul>
-        </div>
-        <div>
-          <h3 className="mb-3 text-lg font-medium">Data Sharing and Transfer</h3>
-          <ul className="ml-4 list-disc space-y-2">
-            <li>
-              Google user data is never shared with third parties except as required for core
-              service functionality
-            </li>
-            <li>
-              When necessary, we only work with service providers who comply with Google API
-              Services User Data Policy
-            </li>
-            <li>All service providers are bound by strict confidentiality agreements</li>
-            <li>
-              We maintain a current list of all third-party service providers with access to Google
-              user data
-            </li>
-            <li>Data sharing agreements are reviewed annually</li>
-            <li>Users are notified of any material changes to our data sharing practices</li>
-          </ul>
-        </div>
-        <div>
-          <h3 className="mb-3 text-lg font-medium">Data Retention and Deletion</h3>
-          <ul className="ml-4 list-disc space-y-2">
-            <li>Email data is processed in real-time and not permanently stored</li>
-            <li>Temporary caches are automatically cleared after 24 hours</li>
-            <li>Users can request immediate deletion of their cached data</li>
-            <li>
-              Account deletion process:
-              <ul className="ml-4 mt-2 list-disc space-y-1">
-                <li>All user data is immediately marked for deletion</li>
-                <li>Cached data is purged within 24 hours</li>
-                <li>Audit logs are retained for 30 days then permanently deleted</li>
-                <li>Backup data is removed within 7 days</li>
-              </ul>
-            </li>
-            <li>We provide a data export tool for users to download their settings</li>
-          </ul>
-        </div>
-        <div>
-          <h3 className="mb-3 text-lg font-medium">User Rights and Controls</h3>
-          <ul className="ml-4 list-disc space-y-2">
-            <li>Right to access: Request a copy of your data</li>
-            <li>Right to rectification: Correct inaccurate data</li>
-            <li>Right to erasure: Request deletion of your data</li>
-            <li>Right to restrict processing: Limit how we use your data</li>
-            <li>Right to data portability: Export your data</li>
-            <li>Right to object: Opt-out of certain data processing</li>
-          </ul>
-        </div>
       </div>
     ),
   },
@@ -334,94 +218,136 @@ const sections = [
     ),
   },
   {
-    title: 'Your Rights and Controls',
+    title: 'AI Processing',
+    content: (
+      <div className="space-y-4">
+        <p>
+          AI features may send the content you choose, or content needed to complete your request,
+          to AI infrastructure and model providers. This can include emails, calendar events, tasks,
+          docs, meeting notes, attachments, and assistant conversation history.
+        </p>
+        <ul className="ml-4 list-disc space-y-2">
+          <li>
+            You control whether to use AI features and whether to connect optional data sources.
+          </li>
+          <li>
+            We use AI outputs to show responses, drafts, summaries, labels, and other requested
+            results in Todus.
+          </li>
+          <li>AI provider availability may vary by feature and configuration.</li>
+          <li>
+            You should not submit sensitive information to AI features unless you want it processed
+            for the requested task.
+          </li>
+        </ul>
+      </div>
+    ),
+  },
+  {
+    title: 'Service Providers',
+    content: (
+      <div className="space-y-4">
+        <p>
+          Todus relies on service providers to operate the product. These providers process data
+          only for the services they provide to Todus, subject to their agreements and policies.
+        </p>
+        <ul className="ml-4 list-disc space-y-2">
+          <li>Cloud hosting, databases, storage, queues, workflows, and content delivery.</li>
+          <li>Authentication, email delivery, OAuth providers, and connected account APIs.</li>
+          <li>AI model and search providers used to answer user requests.</li>
+          <li>
+            Payment, subscription, analytics, diagnostics, error reporting, and support tools.
+          </li>
+        </ul>
+      </div>
+    ),
+  },
+  {
+    title: 'Billing',
     content: (
       <ul className="ml-4 list-disc space-y-2">
-        <li>Right to revoke access to your Google account at any time</li>
-        <li>Right to request deletion of any cached data</li>
-        <li>Right to export your data</li>
-        <li>Right to lodge complaints about data handling</li>
+        <li>Todus may offer free and paid plans depending on platform and availability.</li>
+        <li>
+          Payment details are processed by payment providers; Todus stores billing identifiers, plan
+          status, invoices or receipts, and subscription events needed to operate the service.
+        </li>
+        <li>
+          iOS paid plan changes are offered only when an App Store-compliant purchase flow is
+          available for the iOS app.
+        </li>
+        <li>
+          Refunds, cancellations, and subscription management may be subject to the payment
+          provider, platform, and applicable law.
+        </li>
       </ul>
     ),
   },
   {
-    title: 'Pricing and Refund Policy',
+    title: 'Retention and Deletion',
     content: (
-      <div className="space-y-6">
-        <div>
-          <h3 className="mb-3 text-lg font-medium">Free Plan and Trial Period</h3>
-          <ul className="ml-4 list-disc space-y-2">
-            <li>
-              Todus offers a free plan with basic features that requires no payment information
-            </li>
-            <li>For premium features, we offer a 7-day free trial period</li>
-            <li>A valid credit card is required to start the premium free trial</li>
-            <li>During the trial period, you have full access to all premium features</li>
-            <li>You can cancel at any time during the trial period without any charges</li>
-            <li>
-              If you don't cancel before the trial ends, you'll be automatically charged for the
-              premium subscription
-            </li>
-          </ul>
-        </div>
-        <div>
-          <h3 className="mb-3 text-lg font-medium">Payment and Billing</h3>
-          <ul className="ml-4 list-disc space-y-2">
-            <li>
-              After the 7-day free trial period ends, subscription charges will begin automatically
-            </li>
-            <li>Subscription fees are billed in advance on a monthly or annual basis</li>
-            <li>Current pricing information is available on our pricing page</li>
-            <li>All payments are processed securely through our trusted payment partners</li>
-            <li>Subscription charges will appear on your billing statement as "Todus"</li>
-            <li>
-              We accept major credit cards and other payment methods as available in your region
-            </li>
-          </ul>
-        </div>
-        <div>
-          <h3 className="mb-3 text-lg font-medium">Non-Refundable Policy</h3>
-          <ul className="ml-4 list-disc space-y-2">
-            <li className="font-semibold">
-              Important: All subscription fees are non-refundable once the 7-day free trial period
-              has ended
-            </li>
-            <li>
-              This policy applies to all premium subscription plans (monthly, annual, and enterprise
-              plans)
-            </li>
-            <li>Refunds are not provided for partial subscription periods</li>
-            <li>Refunds are not available for unused portions of your subscription</li>
-            <li>
-              In exceptional circumstances, refunds may be considered on a case-by-case basis at our
-              sole discretion
-            </li>
-          </ul>
-        </div>
-        <div>
-          <h3 className="mb-3 text-lg font-medium">Subscription Management</h3>
-          <ul className="ml-4 list-disc space-y-2">
-            <li>You can cancel your subscription at any time through your account settings</li>
-            <li>Cancellation takes effect at the end of your current billing period</li>
-            <li>
-              You will continue to have access to premium features until the end of your paid period
-            </li>
-            <li>No partial refunds are provided for early cancellation</li>
-            <li>Reactivation of cancelled subscriptions may be subject to current pricing</li>
-          </ul>
-        </div>
-        <div>
-          <h3 className="mb-3 text-lg font-medium">Price Changes</h3>
-          <ul className="ml-4 list-disc space-y-2">
-            <li>We reserve the right to modify subscription pricing at any time</li>
-            <li>
-              Existing subscribers will be notified of price changes at least 30 days in advance
-            </li>
-            <li>Price changes will take effect at your next billing cycle</li>
-            <li>You may cancel your subscription before the price change takes effect</li>
-          </ul>
-        </div>
+      <div className="space-y-4">
+        <p>
+          We keep data for as long as needed to provide Todus, comply with legal obligations,
+          resolve disputes, maintain security, and enforce agreements. Retention periods vary by
+          data type.
+        </p>
+        <ul className="ml-4 list-disc space-y-2">
+          <li>You can disconnect connected accounts to stop future syncing from that provider.</li>
+          <li>You can delete many user-created items directly in the app.</li>
+          <li>
+            You can request or initiate account deletion from settings. Deletion removes or
+            de-identifies account data unless retention is required for security, legal, billing, or
+            compliance reasons.
+          </li>
+          <li>
+            Backups and logs may persist for a limited time before automatic deletion according to
+            operational retention schedules.
+          </li>
+        </ul>
       </div>
+    ),
+  },
+  {
+    title: 'Your Rights and Controls',
+    content: (
+      <ul className="ml-4 list-disc space-y-2">
+        <li>Access, update, export, or delete account information where the app supports it.</li>
+        <li>Disconnect Google or other providers at any time.</li>
+        <li>
+          Change device permissions such as Calendar, Reminders, Notifications, Microphone, Speech,
+          Camera, and Photos in system settings.
+        </li>
+        <li>
+          Contact us to request access, correction, deletion, portability, or restriction where
+          required by applicable law.
+        </li>
+        <li>Lodge a complaint with your local data protection authority where applicable.</li>
+      </ul>
+    ),
+  },
+  {
+    title: 'Security',
+    content: (
+      <ul className="ml-4 list-disc space-y-2">
+        <li>We use HTTPS/TLS for data in transit.</li>
+        <li>
+          We use access controls and operational safeguards to limit access to production systems.
+        </li>
+        <li>
+          No system is perfectly secure. Please contact us promptly if you believe your account or
+          Todus data has been compromised.
+        </li>
+      </ul>
+    ),
+  },
+  {
+    title: 'Children',
+    content: (
+      <p>
+        Todus is not intended for children under 13, and we do not knowingly collect personal data
+        from children under 13. If you believe a child provided personal data to Todus, contact us
+        so we can take appropriate action.
+      </p>
     ),
   },
   {
@@ -445,7 +371,6 @@ const sections = [
             <GithubIcon className="mr-2 h-4 w-4" />
             Open an issue on GitHub
           </a>
-
         </div>
       </div>
     ),

@@ -1,26 +1,32 @@
-import { hasAiCredits, trackAiUsage } from '../lib/billing';
-import { getCachedMemories, formatMemoriesForPrompt, addMemories, invalidateMemoryCache, preloadMemories } from '../lib/mem0';
-import { injectMentionContextIntoMessages, mentionRefSchema } from '../lib/mentions';
+import {
+  getCachedMemories,
+  formatMemoriesForPrompt,
+  addMemories,
+  invalidateMemoryCache,
+  preloadMemories,
+} from '../lib/mem0';
 import {
   type AISource,
   webSourceToAISource,
   mentionToAISource,
   memoriesToAISource,
 } from '../lib/ai-sources';
-import { systemPrompt } from '../services/call-service/system-prompt';
-import { getSharedAIProfilePromptForUser } from '../lib/ai-profile';
-import { GENERATIVE_UI_PROMPT } from '../lib/generative-ui-contract';
-import { perplexity } from '@ai-sdk/perplexity';
+import { injectMentionContextIntoMessages, mentionRefSchema } from '../lib/mentions';
 import { resolveModel, isLocalInference } from '../lib/ai-model-resolver';
+import { systemPrompt } from '../services/call-service/system-prompt';
+import { GENERATIVE_UI_PROMPT } from '../lib/generative-ui-contract';
+import { getSharedAIProfilePromptForUser } from '../lib/ai-profile';
+import { hasAiCredits, trackAiUsage } from '../lib/billing';
+import { serializedFileSchema } from '../lib/schemas';
+import { perplexity } from '@ai-sdk/perplexity';
+import type { HonoContext } from '../ctx';
 import { tools } from './agent/tools';
 import { generateText } from 'ai';
 import { Tools } from '../types';
 import { createDb } from '../db';
 import { env } from '../env';
-import type { HonoContext } from '../ctx';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { serializedFileSchema } from '../lib/schemas';
 
 type ToolsReturnType = Awaited<ReturnType<typeof tools>>;
 
@@ -63,6 +69,39 @@ interface WebSearchSource {
   title: string;
   snippet: string;
 }
+
+type OpenRouterChatResponse = {
+  choices?: Array<{
+    message?: {
+      content?: unknown;
+    };
+  }>;
+  [key: string]: unknown;
+};
+
+type ProviderMetadataResult = {
+  experimental_providerMetadata?: {
+    perplexity?: {
+      citations?: string[];
+    };
+  };
+};
+
+type GeminiClientTurn = {
+  parts?: Array<{
+    text?: unknown;
+  }>;
+};
+
+type GeminiClientFrame = {
+  realtimeInput?: {
+    audio?: { data?: unknown };
+    media?: { data?: unknown };
+  };
+  clientContent?: {
+    turns?: GeminiClientTurn[];
+  };
+};
 
 /** Heuristic: does this user message likely need current web information?
  *  Two-tier check: time-sensitive keywords trigger immediately,
@@ -110,7 +149,10 @@ async function performWebSearch(
 }
 
 /** Tavily: fast structured search, returns title + url + content snippet per result. */
-async function searchWithTavily(query: string, apiKey: string): Promise<{ text: string; sources: WebSearchSource[] }> {
+async function searchWithTavily(
+  query: string,
+  apiKey: string,
+): Promise<{ text: string; sources: WebSearchSource[] }> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
 
@@ -123,14 +165,16 @@ async function searchWithTavily(query: string, apiKey: string): Promise<{ text: 
         api_key: apiKey,
         query,
         search_depth: 'basic', // 'basic' uses 1 credit, 'advanced' uses 2
-        include_answer: true,  // Tavily's own short answer — useful for the summary
+        include_answer: true, // Tavily's own short answer — useful for the summary
         include_raw_content: false,
         max_results: 5,
       }),
       signal: controller.signal,
     });
-  } catch (err: any) {
-    if (err?.name === 'AbortError') throw new Error('Tavily API request timed out');
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('Tavily API request timed out');
+    }
     throw err;
   } finally {
     clearTimeout(timeoutId);
@@ -157,7 +201,9 @@ async function searchWithTavily(query: string, apiKey: string): Promise<{ text: 
 }
 
 /** Perplexity sonar fallback: LLM-powered search, returns citations but no per-source snippets. */
-async function searchWithPerplexity(query: string): Promise<{ text: string; sources: WebSearchSource[] }> {
+async function searchWithPerplexity(
+  query: string,
+): Promise<{ text: string; sources: WebSearchSource[] }> {
   const result = await generateText({
     model: perplexity('sonar'),
     system: 'You are a research assistant. Provide factual, well-sourced answers.',
@@ -166,10 +212,17 @@ async function searchWithPerplexity(query: string): Promise<{ text: string; sour
   });
 
   // Perplexity returns citation URLs in experimental provider metadata
-  const rawCitations: string[] = (result as any).experimental_providerMetadata?.perplexity?.citations ?? [];
+  const rawCitations: string[] =
+    (result as ProviderMetadataResult).experimental_providerMetadata?.perplexity?.citations ?? [];
   const sources: WebSearchSource[] = rawCitations.map((url: string) => ({
     url,
-    title: (() => { try { return new URL(url).hostname.replace('www.', ''); } catch { return url; } })(),
+    title: (() => {
+      try {
+        return new URL(url).hostname.replace('www.', '');
+      } catch {
+        return url;
+      }
+    })(),
     snippet: '',
   }));
 
@@ -177,15 +230,17 @@ async function searchWithPerplexity(query: string): Promise<{ text: string; sour
 }
 
 /** Inject search results into the message array as a system message before the last user message. */
-function injectSearchContext(
-  messages: { role: string; content: string }[],
+function injectSearchContext<T extends { role: string }>(
+  messages: T[],
   searchText: string,
   sources: WebSearchSource[],
-): { role: string; content: string }[] {
+): T[] {
   if (sources.length === 0) return messages;
 
   const sourcesBlock = sources
-    .map((s, i) => `[${i + 1}] "${s.title}" — ${s.url}\n${s.snippet || '(see search summary below)'}`)
+    .map(
+      (s, i) => `[${i + 1}] "${s.title}" — ${s.url}\n${s.snippet || '(see search summary below)'}`,
+    )
     .join('\n\n');
 
   const searchContext = `## Web Search Results
@@ -203,7 +258,7 @@ ${searchText}`;
   if (lastUserIdx === -1) return messages;
 
   const result = [...messages];
-  result.splice(lastUserIdx, 0, { role: 'system', content: searchContext });
+  result.splice(lastUserIdx, 0, { role: 'system', content: searchContext } as T);
   return result;
 }
 
@@ -233,6 +288,8 @@ const chatMessageSchema = z
     name: z.string().optional(),
   })
   .passthrough();
+
+type ChatMessage = z.infer<typeof chatMessageSchema>;
 
 const chatRequestSchema = z.object({
   messages: z.array(chatMessageSchema),
@@ -413,7 +470,7 @@ aiRouter.post('/chat', async (c) => {
       const allowed = await hasAiCredits(user.id);
       if (!allowed) {
         return c.json(
-          { error: 'ai_credits_exhausted', message: 'Out of AI credits. Upgrade or wait for the next reset.' },
+          { error: 'ai_credits_exhausted', message: 'Out of AI credits. Wait for the next reset.' },
           402,
         );
       }
@@ -463,17 +520,20 @@ aiRouter.post('/chat', async (c) => {
   const lastMsg = parsed.data.messages[parsed.data.messages.length - 1];
   const isFollowUpStep =
     lastMsg?.role === 'tool' ||
-    parsed.data.messages.some((m) => m.role === 'tool' || (m as any).tool_calls);
+    parsed.data.messages.some((m) => m.role === 'tool' || Boolean(m.tool_calls));
 
   if (!isFollowUpStep) {
-    enrichedMessages = injectMentionContextIntoMessages(enrichedMessages as any, parsed.data.mentions);
+    const mentionMessages = enrichedMessages.map((message) => ({
+      ...message,
+      content: typeof message.content === 'string' ? message.content : '',
+    }));
+    enrichedMessages = injectMentionContextIntoMessages(mentionMessages, parsed.data.mentions);
   }
 
   // ── Web Search: detect, search, inject sources ──────────────────────────
   // Check if the user's last message would benefit from current web information.
   // If so, call Perplexity sonar and inject results + citation instructions.
   const rawLastUserMsg = parsed.data.messages.filter((m) => m.role === 'user').pop();
-  const lastUserMsg = enrichedMessages.filter((m) => m.role === 'user').pop();
   const searchQuery = typeof rawLastUserMsg?.content === 'string' ? rawLastUserMsg.content : '';
   const needsSearch = !isFollowUpStep && searchQuery ? shouldSearchWeb(searchQuery) : false;
   let searchSources: WebSearchSource[] = [];
@@ -483,7 +543,11 @@ aiRouter.post('/chat', async (c) => {
       const searchResult = await performWebSearch(searchQuery, env);
       searchSources = searchResult.sources;
       if (searchSources.length > 0) {
-        enrichedMessages = injectSearchContext(enrichedMessages as any, searchResult.text, searchSources);
+        enrichedMessages = injectSearchContext<ChatMessage>(
+          enrichedMessages,
+          searchResult.text,
+          searchSources,
+        );
       }
     } catch (error) {
       // Web search failure must never block the AI flow — proceed without sources
@@ -522,7 +586,10 @@ aiRouter.post('/chat', async (c) => {
           content: `${enrichedMessages[systemIdx].content}\n\n${sharedAIProfilePrompt}`,
         };
       } else {
-        enrichedMessages = [{ role: 'system', content: sharedAIProfilePrompt }, ...enrichedMessages];
+        enrichedMessages = [
+          { role: 'system', content: sharedAIProfilePrompt },
+          ...enrichedMessages,
+        ];
       }
     }
   } catch (error) {
@@ -546,10 +613,7 @@ aiRouter.post('/chat', async (c) => {
         content: `${enrichedMessages[systemIdx].content}\n\n${GENERATIVE_UI_PROMPT}`,
       };
     } else {
-      enrichedMessages = [
-        { role: 'system', content: GENERATIVE_UI_PROMPT },
-        ...enrichedMessages,
-      ];
+      enrichedMessages = [{ role: 'system', content: GENERATIVE_UI_PROMPT }, ...enrichedMessages];
     }
   }
 
@@ -635,13 +699,19 @@ aiRouter.post('/chat', async (c) => {
         type: 'function',
         function: {
           name: 'create_calendar_event',
-          description: 'Create a new calendar event on the user\'s device calendar',
+          description: "Create a new calendar event on the user's device calendar",
           parameters: {
             type: 'object',
             properties: {
               title: { type: 'string', description: 'Event title' },
-              startDate: { type: 'string', description: 'ISO 8601 start datetime, e.g. 2025-04-01T09:00:00' },
-              endDate: { type: 'string', description: 'ISO 8601 end datetime (optional, defaults to 1 hour after start)' },
+              startDate: {
+                type: 'string',
+                description: 'ISO 8601 start datetime, e.g. 2025-04-01T09:00:00',
+              },
+              endDate: {
+                type: 'string',
+                description: 'ISO 8601 end datetime (optional, defaults to 1 hour after start)',
+              },
               notes: { type: 'string', description: 'Optional notes or description for the event' },
             },
             required: ['title', 'startDate'],
@@ -652,7 +722,8 @@ aiRouter.post('/chat', async (c) => {
         type: 'function',
         function: {
           name: 'update_calendar_event',
-          description: 'Update an existing calendar event. Use the event identifier from the calendar context.',
+          description:
+            'Update an existing calendar event. Use the event identifier from the calendar context.',
           parameters: {
             type: 'object',
             properties: {
@@ -696,7 +767,10 @@ aiRouter.post('/chat', async (c) => {
               },
               subject: { type: 'string', description: 'Email subject line' },
               body: { type: 'string', description: 'Email body in plain text or simple HTML' },
-              threadId: { type: 'string', description: 'Thread ID to reply to (omit for new email)' },
+              threadId: {
+                type: 'string',
+                description: 'Thread ID to reply to (omit for new email)',
+              },
             },
             required: ['to', 'subject', 'body'],
           },
@@ -742,7 +816,10 @@ aiRouter.post('/chat', async (c) => {
     if (!mem0Key || !userId || !mem0LastUserMsg || assistantContent.length <= 10) return;
 
     await addMemories(mem0Key, userId, [
-      { role: 'user', content: typeof mem0LastUserMsg.content === 'string' ? mem0LastUserMsg.content : '' },
+      {
+        role: 'user',
+        content: typeof mem0LastUserMsg.content === 'string' ? mem0LastUserMsg.content : '',
+      },
       { role: 'assistant', content: assistantContent },
     ]);
     await invalidateMemoryCache(userId, env.prompts_storage);
@@ -753,10 +830,13 @@ aiRouter.post('/chat', async (c) => {
     const upstreamResponse = await fetchUpstreamResponse();
     if (!upstreamResponse.ok || !upstreamResponse.body) {
       const errorText = await upstreamResponse.text().catch(() => 'Unknown error');
-      return c.json({ error: `AI provider error: ${upstreamResponse.status}`, details: errorText }, 502);
+      return c.json(
+        { error: `AI provider error: ${upstreamResponse.status}`, details: errorText },
+        502,
+      );
     }
 
-    const responseData = (await upstreamResponse.json()) as Record<string, any>;
+    const responseData = (await upstreamResponse.json()) as OpenRouterChatResponse;
     const assistantContent =
       typeof responseData?.choices?.[0]?.message?.content === 'string'
         ? responseData.choices[0].message.content
@@ -794,23 +874,33 @@ aiRouter.post('/chat', async (c) => {
       try {
         // Emit a tiny bootstrap event immediately so the client receives bytes even
         // if the upstream model spends a long time planning tools before first token.
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'stream_status', status: 'connecting' })}\n\n`));
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({ type: 'stream_status', status: 'connecting' })}\n\n`,
+          ),
+        );
 
         // 1. Write web search custom events before the LLM answer.
         //    Already gated by needsSearch (which is false on follow-up steps),
         //    so this block won't fire on round-2+ tool-result replays.
         if (needsSearch && searchQuery) {
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: 'search_status', status: 'searching', queries: [searchQuery] })}\n\n`),
+            encoder.encode(
+              `data: ${JSON.stringify({ type: 'search_status', status: 'searching', queries: [searchQuery] })}\n\n`,
+            ),
           );
         }
         if (searchSources.length > 0) {
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: 'sources', sources: searchSources })}\n\n`),
+            encoder.encode(
+              `data: ${JSON.stringify({ type: 'sources', sources: searchSources })}\n\n`,
+            ),
           );
         } else if (needsSearch && searchQuery) {
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: 'search_status', status: 'idle', queries: [searchQuery] })}\n\n`),
+            encoder.encode(
+              `data: ${JSON.stringify({ type: 'search_status', status: 'idle', queries: [searchQuery] })}\n\n`,
+            ),
           );
         }
 
@@ -819,7 +909,9 @@ aiRouter.post('/chat', async (c) => {
         // the legacy `sources` event only for `[n]` citation numbering.
         if (contextSources.length > 0) {
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: 'context_sources', sources: contextSources })}\n\n`),
+            encoder.encode(
+              `data: ${JSON.stringify({ type: 'context_sources', sources: contextSources })}\n\n`,
+            ),
           );
         }
 
@@ -873,7 +965,9 @@ aiRouter.post('/chat', async (c) => {
           }
           const obj = sseChunk as {
             usage?: { prompt_tokens?: number; completion_tokens?: number };
-            choices?: { delta?: { content?: string; reasoning?: string; reasoning_content?: string } }[];
+            choices?: {
+              delta?: { content?: string; reasoning?: string; reasoning_content?: string };
+            }[];
           };
           const delta = obj.choices?.[0]?.delta;
 
@@ -892,7 +986,9 @@ aiRouter.post('/chat', async (c) => {
             }
             try {
               controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ type: 'reasoning', content: reasoningToken })}\n\n`),
+                encoder.encode(
+                  `data: ${JSON.stringify({ type: 'reasoning', content: reasoningToken })}\n\n`,
+                ),
               );
             } catch {
               // Controller closed (client gone). Stop trying to enqueue.
@@ -903,7 +999,9 @@ aiRouter.post('/chat', async (c) => {
             const durationMs = Date.now() - reasoningStartTime;
             try {
               controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ type: 'reasoning_done', duration_ms: durationMs })}\n\n`),
+                encoder.encode(
+                  `data: ${JSON.stringify({ type: 'reasoning_done', duration_ms: durationMs })}\n\n`,
+                ),
               );
             } catch {
               // Controller closed.
@@ -949,11 +1047,7 @@ aiRouter.post('/chat', async (c) => {
         // it), we skip — better than charging a guess. Local-inference
         // requests (Ollama / on-device curated models) are exempt — see
         // `isLocalInference` and `skipBilling` above.
-        if (
-          !skipBilling &&
-          userId &&
-          (usagePromptTokens > 0 || usageCompletionTokens > 0)
-        ) {
+        if (!skipBilling && userId && (usagePromptTokens > 0 || usageCompletionTokens > 0)) {
           c.executionCtx?.waitUntil?.(
             trackAiUsage({
               userId,
@@ -970,8 +1064,15 @@ aiRouter.post('/chat', async (c) => {
       } catch (error) {
         // Aborts (client disconnect) are an expected unwind path — bail without
         // emitting a fake "stream failed" payload to a socket that's already gone.
-        if ((error as { name?: string })?.name === 'AbortError' || upstreamAbortController.signal.aborted) {
-          try { controller.close(); } catch { /* already closed */ }
+        if (
+          (error as { name?: string })?.name === 'AbortError' ||
+          upstreamAbortController.signal.aborted
+        ) {
+          try {
+            controller.close();
+          } catch {
+            /* already closed */
+          }
           return;
         }
         const message = error instanceof Error ? error.message : 'Unknown stream error';
@@ -986,8 +1087,16 @@ aiRouter.post('/chat', async (c) => {
     cancel(reason) {
       // Client disconnected. Abort the upstream fetch so OpenRouter stops
       // generating tokens we're no longer reading (and that we'd be billed for).
-      try { upstreamReader?.cancel(reason).catch(() => {}); } catch { /* noop */ }
-      try { upstreamAbortController.abort(reason); } catch { /* noop */ }
+      try {
+        upstreamReader?.cancel(reason).catch(() => {});
+      } catch {
+        /* noop */
+      }
+      try {
+        upstreamAbortController.abort(reason);
+      } catch {
+        /* noop */
+      }
     },
   });
 
@@ -1166,11 +1275,7 @@ aiRouter.get('/voice-ws', async (c) => {
   try {
     const allowed = await hasAiCredits(user.id);
     if (!allowed) {
-      return fail(
-        4402,
-        'ai_credits_exhausted',
-        'Out of AI credits. Upgrade or wait for the next reset.',
-      );
+      return fail(4402, 'ai_credits_exhausted', 'Out of AI credits. Wait for the next reset.');
     }
   } catch (error) {
     console.error('[voice-ws] hasAiCredits check failed (allowing through)', error);
@@ -1192,19 +1297,21 @@ aiRouter.get('/voice-ws', async (c) => {
     if (!text) return;
 
     try {
-      const parsed = JSON.parse(text) as Record<string, any>;
+      const parsed = JSON.parse(text) as GeminiClientFrame;
       const hasRealtimeAudio =
         typeof parsed?.realtimeInput?.audio?.data === 'string' &&
         parsed.realtimeInput.audio.data.length > 0;
       const hasRealtimeMedia =
         typeof parsed?.realtimeInput?.media?.data === 'string' &&
         parsed.realtimeInput.media.data.length > 0;
-      const hasClientText = Array.isArray(parsed?.clientContent?.turns)
-        && parsed.clientContent.turns.some((turn: any) =>
-          Array.isArray(turn?.parts)
-          && turn.parts.some(
-            (part: any) => typeof part?.text === 'string' && part.text.trim().length > 0,
-          ),
+      const hasClientText =
+        Array.isArray(parsed?.clientContent?.turns) &&
+        parsed.clientContent.turns.some(
+          (turn) =>
+            Array.isArray(turn?.parts) &&
+            turn.parts.some(
+              (part) => typeof part?.text === 'string' && part.text.trim().length > 0,
+            ),
         );
 
       if (hasRealtimeAudio || hasRealtimeMedia || hasClientText) {
@@ -1243,7 +1350,11 @@ aiRouter.get('/voice-ws', async (c) => {
   serverWs.addEventListener('message', (event) => {
     maybeMarkVoiceSessionStarted(event.data);
     if (upstreamReady && upstreamRef) {
-      try { upstreamRef.send(event.data); } catch { /* upstream already closed */ }
+      try {
+        upstreamRef.send(event.data);
+      } catch {
+        /* upstream already closed */
+      }
     } else {
       // Upstream not ready yet — queue for replay once connected
       earlyMessages.push(event.data);
@@ -1293,12 +1404,20 @@ aiRouter.get('/voice-ws', async (c) => {
       // Forward Gemini → client BEFORE flushing buffered client messages so we
       // don't miss the immediate setupComplete (or an error on bad setup).
       upstream.addEventListener('message', (event) => {
-        try { serverWs.send(event.data); } catch { /* client already closed */ }
+        try {
+          serverWs.send(event.data);
+        } catch {
+          /* client already closed */
+        }
       });
 
       // Replay anything the client sent while we were connecting.
       for (const msg of earlyMessages) {
-        try { upstream.send(msg); } catch { break; }
+        try {
+          upstream.send(msg);
+        } catch {
+          break;
+        }
       }
       earlyMessages.length = 0;
       upstreamReady = true;
@@ -1306,21 +1425,43 @@ aiRouter.get('/voice-ws', async (c) => {
       // Propagate close events in both directions. Empty catches are intentional:
       // close() throws if the other side is already closed.
       serverWs.addEventListener('close', (event) => {
-        try { upstream.close(event.code, event.reason || ''); } catch { /* already closed */ }
+        try {
+          upstream.close(event.code, event.reason || '');
+        } catch {
+          /* already closed */
+        }
         trackVoiceUsage();
       });
       upstream.addEventListener('close', (event) => {
-        try { serverWs.close(event.code, event.reason || ''); } catch { /* already closed */ }
+        try {
+          serverWs.close(event.code, event.reason || '');
+        } catch {
+          /* already closed */
+        }
         trackVoiceUsage();
       });
 
       serverWs.addEventListener('error', (event) => {
-        console.error('[voice-ws] client error', { userId: user.id, event: String((event as ErrorEvent).message ?? '') });
-        try { upstream.close(1011, 'Client error'); } catch { /* already closed */ }
+        console.error('[voice-ws] client error', {
+          userId: user.id,
+          event: String((event as ErrorEvent).message ?? ''),
+        });
+        try {
+          upstream.close(1011, 'Client error');
+        } catch {
+          /* already closed */
+        }
       });
       upstream.addEventListener('error', (event) => {
-        console.error('[voice-ws] upstream error', { userId: user.id, event: String((event as ErrorEvent).message ?? '') });
-        try { serverWs.close(1011, 'Upstream error'); } catch { /* already closed */ }
+        console.error('[voice-ws] upstream error', {
+          userId: user.id,
+          event: String((event as ErrorEvent).message ?? ''),
+        });
+        try {
+          serverWs.close(1011, 'Upstream error');
+        } catch {
+          /* already closed */
+        }
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1369,8 +1510,7 @@ aiRouter.post('/do/:action', async (c) => {
 
     const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
     const dbUser = await db.query.user.findFirst({
-      where: (u, { eq, and }) =>
-        and(eq(u.phoneNumber, caller), eq(u.phoneNumberVerified, true)),
+      where: (u, { eq, and }) => and(eq(u.phoneNumber, caller), eq(u.phoneNumberVerified, true)),
     });
     await conn.end();
 
@@ -1403,9 +1543,10 @@ aiRouter.post('/do/:action', async (c) => {
       messages: [],
     });
     return c.json({ success: true, result });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error(`Error executing tool '${c.req.param('action')}':`, error);
-    return c.json({ success: false, error: error.message }, 400);
+    const message = error instanceof Error ? error.message : String(error);
+    return c.json({ success: false, error: message }, 400);
   }
 });
 
@@ -1466,7 +1607,11 @@ aiRouter.post('/call', async (c) => {
         sharedAIProfilePrompt ? `${systemPrompt}\n\n${sharedAIProfilePrompt}` : systemPrompt,
       )
       .catch((error) => {
-        console.warn('[AIProfile] Failed to build system prompt with profile for user:', user.id, error);
+        console.warn(
+          '[AIProfile] Failed to build system prompt with profile for user:',
+          user.id,
+          error,
+        );
         return systemPrompt;
       }),
     prompt: data.query,
