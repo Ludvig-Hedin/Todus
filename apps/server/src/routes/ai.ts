@@ -258,7 +258,7 @@ ${searchText}`;
   if (lastUserIdx === -1) return messages;
 
   const result = [...messages];
-  result.splice(lastUserIdx, 0, { role: 'system', content: searchContext } as T);
+  result.splice(lastUserIdx, 0, { role: 'system', content: searchContext } as unknown as T);
   return result;
 }
 

@@ -1028,3 +1028,31 @@ Scoped bug review of the iOS app's main-flow surfaces (auth, email, tasks, calen
 - `Features/Voice/VoiceChatViewModel.swift:135` (trailing-event state resurrection) — already guarded by `if case .failed = connectionState { return }` at the top of `handleEvent`. (Overlaps the broader, still-open `CR-0613-7` TODO; left as-is.)
 - `Navigation/MainTabView.swift:87` (capture-failure dismiss timer) — idiomatic cancel-and-replace `Task` on the main actor; `guard !Task.isCancelled` + `try?` handle cancellation correctly.
 - `App/AppServices.swift:806` (`Task { @MainActor … }` after `Task.yield()`) — class is `@MainActor`; the closure is explicitly `@MainActor`; mutated properties have no `didSet`. Correct as written.
+
+---
+
+# Pre-push full-repo review — 2026-06-20
+
+Reviewed the 21 unpushed commits (`origin/main..HEAD`, 134 files, +5273/-14244) before pushing to prod. Two parallel senior reviewers (server + web) + empirical build/bundle validation. **Verdict: SAFE TO DEPLOY — 0 blockers, 0 majors.**
+
+## Validation evidence
+
+- **Web** `react-router build` → exit 0, full prerender of all marketing routes.
+- **Server** `wrangler deploy --env production --dry-run` → clean esbuild bundle, all production bindings resolved (VECTORIZE, HYPERDRIVE, AI, queues, KV, R2).
+- **pnpm hygiene** — commit `f5e6f240` deleted `bun.lock` + bun-style `workspaces.catalog`/`patchedDependencies` from `package.json`. Verified safe: `pnpm-workspace.yaml` holds the identical `catalog:`, `patchedDependencies: novel`, and workspace globs (the source of truth). Not a breakage.
+- **No DB schema changes** → no production migration required (only Zod `lib/schemas.ts` changed, not `db/schema.ts`).
+
+## Auto-fixed this pass (1)
+
+- `apps/server/src/routes/ai.ts:261` (`injectSearchContext`) — generic cast `{ role, content } as T` tripped TS2352 (the one diff-introduced type error; esbuild-harmless but flagged). Changed to the canonical `as unknown as T`; runtime identical, touched file now tsc-clean.
+
+## Deferred MINOR findings (cosmetic — not behavior-changing, no backlog action required)
+
+- `apps/server/src/trpc/routes/subscription.ts:34` — `getActiveProduct` adds a synchronous Autumn round-trip to the `getStatus` hot path for non-free users. Fails soft (no correctness risk). Could cache product id alongside the existing subscription cache.
+- `apps/server/src/lib/auth.ts:677` — revoke-failure log wording still reads "Failed to revoke some accounts" even when one account failed. Cosmetic.
+- `apps/web/components/ui/bimi-avatar.tsx:181` — `MAX_FAVICON_URLS` raised 6→8 now also caps the primary photo + fallbacks, so the constant name is slightly misleading. Behavior fine.
+- `apps/web/app/(routes)/mail/tasks/page.tsx:268` — removed post-create `invalidateQueries`; new tasks insert at list head and reconcile sort on next natural refetch. Acceptable.
+
+## Pre-existing (not introduced by these commits — out of scope, left as-is)
+
+- Server `tsc --noEmit` reports type errors in `routes/agent/mcp.ts`, `thread-workflow-utils/workflow-functions.ts`, `lib/driver/microsoft.ts`, `lib/bulk-delete.ts`, `lib/analyze/interests.ts`, `lib/server-utils.ts` — all in files **not** touched by this diff, mostly stale wrangler-`Env` binding noise. Do not block `wrangler deploy` (CF bundles via esbuild, no tsc gate). Pre-existing on `origin/main`.
