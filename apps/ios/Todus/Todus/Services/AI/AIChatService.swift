@@ -1297,7 +1297,10 @@ final class AIChatService {
                 appendToolFailureChip(toolName: call.name, message: "Invalid update_task arguments", to: assistantMessageID)
                 return encodeToolResult(success: false, message: "Invalid update_task arguments")
             }
-            applyUpdateTask(taskID: taskID, args: args, modelContext: modelContext)
+            guard applyUpdateTask(taskID: taskID, args: args, modelContext: modelContext) else {
+                appendToolFailureChip(toolName: call.name, message: "Task not found", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Task not found or could not be updated")
+            }
             appendMutation(AIChatTaskMutation(action: .update, taskID: taskID, title: args.title), to: assistantMessageID)
             return encodeToolResult(success: true, message: "Task updated")
 
@@ -1327,7 +1330,10 @@ final class AIChatService {
                 )
                 return encodeToolResult(success: false, message: "Delete cancelled by user")
             }
-            applyDeleteTask(taskID: taskID, modelContext: modelContext)
+            guard applyDeleteTask(taskID: taskID, modelContext: modelContext) else {
+                appendToolFailureChip(toolName: call.name, message: "Task not found", title: titleForChip, to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Task not found or could not be deleted")
+            }
             appendMutation(AIChatTaskMutation(action: .delete, taskID: taskID, title: titleForChip), to: assistantMessageID)
             return encodeToolResult(success: true, message: "Task deleted")
 
@@ -1794,9 +1800,12 @@ final class AIChatService {
 
     // MARK: - Tool Call Processing
 
-    private func applyUpdateTask(taskID: UUID, args: UpdateTaskArgs, modelContext: ModelContext) {
+    /// Returns `true` only when the task was found and the change persisted, so
+    /// the caller can avoid reporting a false "Task updated" success when the AI
+    /// supplied a stale/hallucinated id or the save failed.
+    private func applyUpdateTask(taskID: UUID, args: UpdateTaskArgs, modelContext: ModelContext) -> Bool {
         let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID })
-        guard let task = (try? modelContext.fetch(descriptor))?.first else { return }
+        guard let task = (try? modelContext.fetch(descriptor))?.first else { return false }
 
         if let title = args.title { task.title = title }
         if let dueDateStr = args.dueDate { task.dueDate = ISO8601DateFormatter().date(from: dueDateStr) }
@@ -1804,13 +1813,22 @@ final class AIChatService {
         if let priorityStr = args.priority { task.priority = AppTaskPriority(rawValue: priorityStr) ?? task.priority }
         task.updatedAt = .now
         task.syncState = .pendingUpload
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+            return true
+        } catch {
+            log.error("applyUpdateTask save failed: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
     }
 
-    private func applyDeleteTask(taskID: UUID, modelContext: ModelContext) {
+    /// Returns `true` only when a matching task existed and was deleted, so the
+    /// caller does not report a false "Task deleted" success on a missing id.
+    private func applyDeleteTask(taskID: UUID, modelContext: ModelContext) -> Bool {
         let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID })
-        guard let task = (try? modelContext.fetch(descriptor))?.first else { return }
+        guard let task = (try? modelContext.fetch(descriptor))?.first else { return false }
         captureService.delete(task, in: modelContext)
+        return true
     }
 
     // MARK: - Message Mutation Helpers
