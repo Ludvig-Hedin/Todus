@@ -126,6 +126,10 @@ final class NotificationService {
 
     func cancelTaskReminder(taskID: String) {
         center.removePendingNotificationRequests(withIdentifiers: ["task-\(taskID)"])
+        // Also clear an already-fired reminder from the tray. Completing or
+        // deleting a task whose reminder already fired must not leave a stale
+        // notification that deep-links back to a task that no longer exists.
+        center.removeDeliveredNotifications(withIdentifiers: ["task-\(taskID)"])
     }
 
     /// Reschedule a task reminder 1 hour from now (used by the "Snooze" action).
@@ -211,6 +215,9 @@ final class NotificationService {
         )
 
         center.removePendingNotificationRequests(withIdentifiers: ["email-reminder-\(threadId)"])
+        // The replacement reminder fires at a future date, so a previously-fired
+        // reminder for this thread would otherwise linger in the tray until then.
+        center.removeDeliveredNotifications(withIdentifiers: ["email-reminder-\(threadId)"])
         do {
             try await center.add(request)
             return true

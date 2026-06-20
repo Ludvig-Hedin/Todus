@@ -27,6 +27,23 @@
 
 ### Fixed
 
+#### iOS bug-hunt pass — core-flow correctness (2026-06-20)
+
+- **AI chat no longer reports a false "Task updated"/"Task deleted" success when
+  the model targets a missing or stale task id.** `applyUpdateTask`/`applyDeleteTask`
+  silently returned on a not-found task (and update swallowed save errors via
+  `try?`) while the tool-call handler unconditionally appended a success chip and
+  told the model the mutation landed. Both helpers now return `Bool`; the handler
+  gates the success chip behind it and surfaces a failure chip + honest tool
+  result otherwise. (`apps/ios/Todus/Todus/Services/AI/AIChatService.swift`)
+- **Completing or deleting a task whose reminder already fired now clears the
+  stale notification from the tray.** `cancelTaskReminder` removed only *pending*
+  requests, so an already-delivered reminder lingered and deep-linked back to a
+  task that no longer exists; it now also calls `removeDeliveredNotifications`
+  (matching `enqueueTaskReminder` and `cancelAIResponseNotification`). The
+  email-reminder reschedule path (future trigger) got the same delivered-cleanup.
+  (`apps/ios/Todus/Todus/Services/Notifications/NotificationService.swift`)
+
 #### App Store submission audit
 
 - **iOS account deletion no longer masks backend failure as success.** If the
