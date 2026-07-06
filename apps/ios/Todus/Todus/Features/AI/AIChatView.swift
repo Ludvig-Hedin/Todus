@@ -1300,6 +1300,7 @@ struct AIChatView: View {
             .buttonStyle(.plain)
             .background(AppTheme.surfacePrimary, in: Circle())
             .overlay(Circle().stroke(AppTheme.strongBorder, lineWidth: 1))
+            .accessibilityLabel("Attach photos, files, and calendar")
 
             chatInputBox
         }

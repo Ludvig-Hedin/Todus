@@ -116,21 +116,25 @@ struct AISourcesListSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                ForEach(sources) { source in
-                    Button {
-                        if canNavigate(source) {
-                            onSelect(source)
-                        } else {
-                            // Web rows + memory / document / note / company —
-                            // surface in a follow-up sheet so taps never silently no-op.
-                            detailSource = source
+                Section {
+                    ForEach(sources) { source in
+                        Button {
+                            if canNavigate(source) {
+                                onSelect(source)
+                            } else {
+                                // Web rows + memory / document / note / company —
+                                // surface in a follow-up sheet so taps never silently no-op.
+                                detailSource = source
+                            }
+                        } label: {
+                            AISourceRow(source: source)
                         }
-                    } label: {
-                        AISourceRow(source: source)
+                        .buttonStyle(.plain)
+                        .listRowSeparator(.visible)
+                        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
                     }
-                    .buttonStyle(.plain)
-                    .listRowSeparator(.visible)
-                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+                } header: {
+                    Text("Sources (\(sources.count))")
                 }
             }
             .listStyle(.plain)
@@ -193,6 +197,9 @@ struct AISourceRow: View {
                     Text(platformName)
                         .font(.system(size: 13))
                         .foregroundStyle(AppTheme.mutedText)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(platformName)
                 }
                 .padding(.top, 2)
             }

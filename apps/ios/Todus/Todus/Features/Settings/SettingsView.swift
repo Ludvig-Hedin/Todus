@@ -467,9 +467,12 @@ struct SettingsView: View {
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 18))
-                    .foregroundStyle(.secondary.opacity(0.5))
+                    .foregroundStyle(.secondary.opacity(0.7))
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Disconnect \(connection.email)")
         }
         .padding(.vertical, 2)
     }
@@ -812,6 +815,14 @@ struct SettingsView: View {
                 FolderManagementView()
             } label: {
                 Label("Manage Folders", systemImage: "folder")
+            }
+
+            // Also reachable from the More sheet (MoreSheetView) — kept here too
+            // since it's a settings-shaped preference, not a one-off action.
+            NavigationLink {
+                TabBarCustomizationView()
+            } label: {
+                Label("Customize Tab Bar", systemImage: "square.bottomhalf.filled")
             }
 
             if services.isDeveloperModeUIAvailable {

@@ -27,6 +27,13 @@ final class TaskCaptureService {
     /// Timestamp of the most recent rollback, paired with `lastRollbackCount` so the UI
     /// can debounce repeated banner displays.
     private(set) var lastRollbackAt: Date?
+    /// Number of lines dropped from the most recent bulk-capture submission because it
+    /// exceeded `maxBulkCaptureLines`. Views observe this to surface a truncation banner;
+    /// remains 0 until a truncation occurs. Mirrors `lastRollbackCount`/`lastRollbackAt`.
+    private(set) var lastTruncatedCount: Int = 0
+    /// Timestamp of the most recent truncation, paired with `lastTruncatedCount` so the
+    /// UI can debounce repeated banner displays.
+    private(set) var lastTruncatedAt: Date?
     private var lastSharedFolderSyncAt: Date?
     private(set) var isSyncingSharedFolders = false
     private let sharedFolderSyncInterval: TimeInterval = 60
@@ -64,6 +71,20 @@ final class TaskCaptureService {
     ) {
         let lines = Self.splitInputLines(rawComposerText)
         guard !lines.isEmpty else { return }
+
+        // Surface truncation to observers so the UI can tell the user some lines were
+        // dropped instead of silently accepting only the first `maxBulkCaptureLines`.
+        // Recompute the pre-cap line count the same way `splitInputLines` does rather
+        // than changing that function's (pure, tested) signature.
+        let rawLineCount = rawComposerText
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .count
+        if rawLineCount > Self.maxBulkCaptureLines {
+            lastTruncatedCount = rawLineCount - Self.maxBulkCaptureLines
+            lastTruncatedAt = Date()
+        }
 
         var mutations: [SyncMutation] = []
         // Capture (taskID, rawInput) pairs so enrichment can only run for the
@@ -526,7 +547,8 @@ final class TaskCaptureService {
     /// submission. A flatfile paste of hundreds of lines would otherwise spawn
     /// hundreds of sync mutations + Reminders writes synchronously here.
     /// (Medium bug — TaskCaptureService no cap on splitInputLines.)
-    /// TODO: surface a UI confirmation when extras are dropped.
+    /// UI confirmation when extras are dropped: see `lastTruncatedCount`/`lastTruncatedAt`
+    /// below, surfaced via `MainTabView`'s truncation banner.
     nonisolated static let maxBulkCaptureLines = 50
 
     nonisolated static func splitInputLines(_ rawText: String) -> [String] {

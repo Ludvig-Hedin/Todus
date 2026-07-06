@@ -43,6 +43,15 @@ struct MainTabView: View {
     @State private var captureFailureCount = 0
     @State private var captureFailureDismiss: Task<Void, Never>? = nil
 
+    /// Transient banner shown when a bulk-capture paste exceeded
+    /// `TaskCaptureService.maxBulkCaptureLines` and extra lines were silently dropped.
+    /// `TaskCaptureService` publishes `lastTruncatedCount`/`lastTruncatedAt` for this
+    /// banner, mirroring the capture-failure banner above. Auto-dismisses after a few
+    /// seconds.
+    @State private var captureTruncatedVisible = false
+    @State private var captureTruncatedCount = 0
+    @State private var captureTruncatedDismiss: Task<Void, Never>? = nil
+
     @ScaledMetric(relativeTo: .body) private var fabSize: CGFloat = 58
 
     /// Vertical room a scroll view needs at its bottom edge so the last row stays
@@ -78,12 +87,18 @@ struct MainTabView: View {
                     captureFailureBanner
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
+
+                if captureTruncatedVisible {
+                    captureTruncatedBanner
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
             .padding(.top, 4)
         }
         .animation(.easeInOut(duration: 0.3), value: services.networkMonitor.isConnected)
         .animation(.easeInOut(duration: 0.3), value: services.authService.isSessionExpired)
         .animation(.easeInOut(duration: 0.3), value: captureFailureVisible)
+        .animation(.easeInOut(duration: 0.3), value: captureTruncatedVisible)
         .onChange(of: services.captureService.lastRollbackAt) { _, newValue in
             guard newValue != nil else { return }
             captureFailureCount = services.captureService.lastRollbackCount
@@ -93,6 +108,17 @@ struct MainTabView: View {
                 try? await Task.sleep(for: .seconds(5))
                 guard !Task.isCancelled else { return }
                 captureFailureVisible = false
+            }
+        }
+        .onChange(of: services.captureService.lastTruncatedAt) { _, newValue in
+            guard newValue != nil else { return }
+            captureTruncatedCount = services.captureService.lastTruncatedCount
+            captureTruncatedVisible = true
+            captureTruncatedDismiss?.cancel()
+            captureTruncatedDismiss = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled else { return }
+                captureTruncatedVisible = false
             }
         }
         // Single overlay for both FABs. The VStack + ignoresSafeArea anchors to the
@@ -418,6 +444,27 @@ struct MainTabView: View {
             Text(captureFailureCount > 1
                  ? "Couldn’t save \(captureFailureCount) tasks — check your connection"
                  : "Couldn’t save your task — check your connection")
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.orange.opacity(0.92), in: Capsule())
+        .accessibilityElement(children: .combine)
+    }
+
+    // MARK: - Capture Truncated Banner
+
+    /// Shown briefly when a bulk paste exceeded the per-submission line cap and the
+    /// extra lines were dropped. Tells the user only the first N were captured so they
+    /// know to re-paste the rest, instead of the previous silent drop.
+    private var captureTruncatedBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "text.badge.xmark")
+                .font(.system(size: 12, weight: .semibold))
+            Text("Captured first \(TaskCaptureService.maxBulkCaptureLines) — \(captureTruncatedCount) more weren't added")
                 .font(.system(size: 13, weight: .semibold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)

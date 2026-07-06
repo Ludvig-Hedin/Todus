@@ -112,6 +112,13 @@ struct DocEditorView: View {
                 .onChange(of: titleDraft) { _, _ in
                     scheduleDebouncedTitleSave()
                 }
+                .onChange(of: titleFocused) { wasFocused, isFocused in
+                    // Flush immediately when focus LEAVES the title field — don't
+                    // make the user wait for the 500ms debounce or hit Return.
+                    if wasFocused && !isFocused {
+                        Task { await saveTitleNow() }
+                    }
+                }
             // Reserve width only when the indicator is visible — avoids a layout
             // shift that would continuously shrink the TextField while typing.
             saveIndicator
@@ -208,7 +215,7 @@ struct DocEditorView: View {
         guard trimmed.isEmpty || trimmed == "Untitled" else { return }
         autofocusTask?.cancel()
         autofocusTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 150_000_000)
+            try? await Task.sleep(nanoseconds: 20_000_000)
             guard !Task.isCancelled else { return }
             titleFocused = true
         }

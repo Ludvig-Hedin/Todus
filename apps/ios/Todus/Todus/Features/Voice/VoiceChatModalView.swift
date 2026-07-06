@@ -23,6 +23,15 @@ struct VoiceChatModalView: View {
 
     @State private var viewModel: VoiceChatViewModel?
     @State private var textInput = ""
+    @State private var isDisconnecting = false
+    /// Briefly shows a "Done" success capsule after a tool call finishes without
+    /// error, instead of the status just vanishing with no confirmation.
+    @State private var showsToolCallSuccess = false
+
+    private var isFailed: Bool {
+        if case .failed = viewModel?.connectionState { return true }
+        return false
+    }
 
     var body: some View {
         ZStack {
@@ -34,12 +43,43 @@ struct VoiceChatModalView: View {
                 header
                 transcriptArea
                 Spacer(minLength: 16)
-                centerIndicator
-                toolCallStatusView
+                if isFailed {
+                    errorCard
+                } else {
+                    centerIndicator
+                    toolCallStatusView
+                }
+                if isDisconnecting {
+                    Text("Closing…")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(AppTheme.mutedText)
+                        .transition(.opacity)
+                        .padding(.bottom, 8)
+                }
                 Spacer(minLength: 24)
-                controlBar
+                if isFailed {
+                    errorControlBar
+                } else {
+                    controlBar
+                }
             }
             .padding(.bottom, 16)
+            .animation(.easeOut(duration: 0.15), value: isDisconnecting)
+        }
+        .onChange(of: viewModel?.toolCallStatus) { oldValue, newValue in
+            // A non-nil status that clears without ever containing "failed" reads as
+            // a successful tool call — show a brief "Done" confirmation instead of
+            // letting the capsule just vanish.
+            guard newValue == nil, let old = oldValue, !old.lowercased().contains("fail") else { return }
+            withAnimation(.snappy(duration: 0.15)) {
+                showsToolCallSuccess = true
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(1.2))
+                withAnimation(.easeOut(duration: 0.15)) {
+                    showsToolCallSuccess = false
+                }
+            }
         }
         .onAppear {
             let vm = VoiceChatViewModel(tokenService: tokenService, chatService: chatService)
@@ -60,10 +100,7 @@ struct VoiceChatModalView: View {
         HStack {
             // Close button
             Button {
-                Task {
-                    await viewModel?.disconnect()
-                    dismiss()
-                }
+                closeAndDismiss()
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .semibold))
@@ -72,6 +109,8 @@ struct VoiceChatModalView: View {
                     .background(AppTheme.surfaceSecondary, in: Circle())
             }
             .buttonStyle(.plain)
+            .disabled(isDisconnecting)
+            .opacity(isDisconnecting ? 0.5 : 1.0)
             .accessibilityLabel("Close voice chat")
 
             Spacer()
@@ -244,6 +283,8 @@ struct VoiceChatModalView: View {
             Text(stateLabel)
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(AppTheme.mutedText)
+                .transition(.opacity)
+                .animation(.easeOut(duration: 0.18), value: stateLabel)
         }
     }
 
@@ -259,6 +300,10 @@ struct VoiceChatModalView: View {
                     Image(systemName: "waveform")
                         .font(.system(size: 24, weight: .medium))
                         .foregroundStyle(aiGradient)
+                } else if viewModel?.isMicMuted == true {
+                    Image(systemName: "mic.slash")
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundStyle(AppTheme.mutedText)
                 } else {
                     Image(systemName: "ear")
                         .font(.system(size: 24, weight: .medium))
@@ -274,6 +319,8 @@ struct VoiceChatModalView: View {
                     .foregroundStyle(AppTheme.mutedText)
             }
         }
+        .transition(.opacity)
+        .animation(.easeOut(duration: 0.18), value: viewModel?.isMicMuted)
     }
 
     private var stateLabel: String {
@@ -290,6 +337,79 @@ struct VoiceChatModalView: View {
         }
     }
 
+    // MARK: - Error Card (connection failure)
+
+    /// Shown in place of the normal center indicator when `connectionState == .failed`.
+    /// Regular (non-dev) users previously saw a blank listening indicator with no
+    /// recovery path on connection failure — this surfaces the error + retry/close.
+    private var errorCard: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 32, weight: .medium))
+                .foregroundStyle(.red)
+
+            Text("Couldn't connect")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.primary)
+
+            if case .failed(let message) = viewModel?.connectionState {
+                Text(message)
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(AppTheme.mutedText)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 24)
+            }
+        }
+        .padding(.vertical, 24)
+        .transition(.opacity)
+    }
+
+    private var errorControlBar: some View {
+        HStack(spacing: 16) {
+            Button {
+                closeAndDismiss()
+            } label: {
+                Text("Close")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(isDisconnecting)
+
+            Button {
+                Task { await viewModel?.connect() }
+            } label: {
+                Text("Retry")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(isDisconnecting)
+        }
+        .padding(.horizontal, 40)
+    }
+
+    // MARK: - Dismiss Helpers
+
+    /// Shared close path for the header close button and the "Close" button in the
+    /// error state. Shows a brief "Closing…" state via `isDisconnecting` before
+    /// dismissing so the user gets feedback instead of an instant, silent close.
+    private func closeAndDismiss() {
+        guard !isDisconnecting else { return }
+        isDisconnecting = true
+        Task {
+            await viewModel?.disconnect()
+            dismiss()
+        }
+    }
+
     // MARK: - Tool Call Status
 
     @ViewBuilder
@@ -300,6 +420,19 @@ struct VoiceChatModalView: View {
                     .scaleEffect(0.7)
                     .tint(AppTheme.mutedText)
                 Text(status)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(AppTheme.subtleText)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(AppTheme.surfaceSecondary, in: Capsule())
+            .transition(.scale.combined(with: .opacity))
+            .padding(.top, 8)
+        } else if showsToolCallSuccess {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text("Done")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(AppTheme.subtleText)
             }
@@ -338,25 +471,29 @@ struct VoiceChatModalView: View {
                 }
             }
             .buttonStyle(.plain)
+            .sensoryFeedback(.selection, trigger: viewModel?.isMicMuted)
 
             // End call — red circle
             Button {
-                Task {
-                    await viewModel?.disconnect()
-                    dismiss()
-                }
+                closeAndDismiss()
             } label: {
                 ZStack {
                     Circle()
                         .fill(Color.red)
                         .frame(width: 64, height: 64)
 
-                    Image(systemName: "phone.down.fill")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.white)
+                    if isDisconnecting {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Image(systemName: "phone.down.fill")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
                 }
             }
             .buttonStyle(.plain)
+            .disabled(isDisconnecting)
         }
         .padding(.horizontal, 40)
     }

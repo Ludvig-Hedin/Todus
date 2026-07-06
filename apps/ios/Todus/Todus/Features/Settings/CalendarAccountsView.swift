@@ -170,14 +170,18 @@ struct CalendarAccountsView: View {
                 .accessibilityLabel("Set as default for new events")
             }
 
+            // Visible "Show" label so the toggle is self-describing on its own —
+            // sighted users previously saw only a bare knob (`.labelsHidden()`
+            // with an empty label string).
             Toggle(
-                "",
+                "Show",
                 isOn: Binding(
                     get: { isVisible },
                     set: { _ in services.toggleCalendarVisibility(source.id) }
                 )
             )
-            .labelsHidden()
+            .font(.caption)
+            .fixedSize()
             .accessibilityLabel("Show \(source.displayName)")
         }
         .padding(.vertical, 2)

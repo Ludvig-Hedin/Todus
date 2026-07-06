@@ -16,6 +16,10 @@ struct EmailComposeView: View {
     /// the user reference them in the body.
     @State private var seededAttachmentNames: [String] = []
     @State private var pendingAttachmentRemovals: Set<String> = []
+    /// Attachment chip awaiting a remove confirmation. Setting this presents
+    /// the confirmation dialog — removal was previously instant on tap, which
+    /// is one accidental tap away from silently dropping a file from the draft.
+    @State private var attachmentPendingRemoval: String?
     @State private var showSendError = false
     /// Set when the draft's chosen From connection no longer resolves to a real
     /// account at send time (e.g. the connection was removed while composing). The
@@ -382,6 +386,9 @@ struct EmailComposeView: View {
             // bumped right before dismissal so the haptic fires reliably even
             // though the sheet is about to tear down.
             .sensoryFeedback(.success, trigger: sendSuccessTick)
+            // Tactile confirmation when a send fails — mirrors the success haptic
+            // above so a failed send isn't silent on the touch/feedback channel too.
+            .sensoryFeedback(.error, trigger: showSendError)
         }
     }
 
@@ -480,6 +487,11 @@ struct EmailComposeView: View {
         .background(AppTheme.sheetBackground)
         .disabled(focusedField != .body)
         .opacity(focusedField == .body ? 1.0 : 0.4)
+        // Greyed-out buttons with no explanation read as broken rather than
+        // "not applicable right now" — a hint (VoiceOver + long-press tooltip
+        // on iPadOS/pointer) clarifies why they're inactive.
+        .help("Tap in the body to format")
+        .accessibilityHint(focusedField == .body ? "" : "Tap in the body to format")
     }
 
     /// Inline note shown above the From row when the device has no connection.
@@ -591,10 +603,22 @@ struct EmailComposeView: View {
     /// To row with a disclosure chevron that reveals CC/BCC
     private var toRow: some View {
         HStack(spacing: 8) {
-            Text("To")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(AppTheme.mutedText)
-                .frame(width: 60, alignment: .trailing)
+            HStack(spacing: 3) {
+                Text("To")
+                    .font(.system(size: 14, weight: .medium))
+                if isToInvalid {
+                    // Subtle indicator — the send button's `canSend` gating already
+                    // blocks send on invalid recipients, but previously gave no hint
+                    // about WHICH field was the problem. Small red exclamation next
+                    // to the label, no layout shift.
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.red)
+                        .accessibilityLabel("Invalid recipient address")
+                }
+            }
+            .foregroundStyle(isToInvalid ? .red : AppTheme.mutedText)
+            .frame(width: 60, alignment: .trailing)
 
             // Use prompt: to control placeholder color — avoids the default blue tint.
             // Bound to a raw @State string (not a computed binding over `draft.to`)
@@ -632,6 +656,7 @@ struct EmailComposeView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(showCcBcc ? "Hide CC and BCC" : "Show CC and BCC")
+            .accessibilityHint("Toggles additional recipient fields")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -731,8 +756,7 @@ struct EmailComposeView: View {
                             .truncationMode(.middle)
                             .frame(maxWidth: 160)
                         Button {
-                            seededAttachmentNames.removeAll { $0 == filename }
-                            pendingAttachmentRemovals.insert(filename)
+                            attachmentPendingRemoval = filename
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 13))
@@ -749,6 +773,26 @@ struct EmailComposeView: View {
             .padding(.horizontal, 16)
         }
         .padding(.vertical, 8)
+        // Removal was previously instant on tap — one mis-tap silently dropped a
+        // file from the draft. Require an explicit confirmation before removing.
+        .confirmationDialog(
+            "Remove attachment?",
+            isPresented: Binding(
+                get: { attachmentPendingRemoval != nil },
+                set: { if !$0 { attachmentPendingRemoval = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: attachmentPendingRemoval
+        ) { filename in
+            Button("Remove", role: .destructive) {
+                seededAttachmentNames.removeAll { $0 == filename }
+                pendingAttachmentRemovals.insert(filename)
+                attachmentPendingRemoval = nil
+            }
+            Button("Cancel", role: .cancel) { attachmentPendingRemoval = nil }
+        } message: { filename in
+            Text("\"\(filename)\" will be removed from this email.")
+        }
     }
 
     /// Body area — the full minHeight region is tappable to focus the text input.
@@ -898,6 +942,16 @@ struct EmailComposeView: View {
         guard !trimmed.isEmpty else { return false }
         let pattern = #"^[^\s@]+@[^\s@]+\.[^\s@]+$"#
         return trimmed.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    /// True when the user has typed something into To but it doesn't tokenize to at
+    /// least one valid address. Drives the inline red indicator on the To label so
+    /// the user knows *which* field is blocking send — `canSend`'s gating logic is
+    /// untouched, this is purely a visual hint computed from the same raw string.
+    private var isToInvalid: Bool {
+        guard !toRaw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        let tokens = Self.tokenizeRecipients(toRaw)
+        return tokens.isEmpty || !tokens.allSatisfy { isValidEmail($0) }
     }
 
     // MARK: - Draft Autosave

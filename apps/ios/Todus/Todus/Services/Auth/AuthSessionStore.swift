@@ -39,28 +39,25 @@ final class AuthSessionStore {
         }
     }
 
-    // Map HTTP status codes to user-friendly error messages
+    // Map HTTP status codes to user-friendly error messages. These are shown
+    // directly to end users, so they must never leak backend/provider
+    // implementation details (Supabase, SMTP, dashboards, etc.) — previously
+    // this surfaced developer-facing setup instructions to real users.
     private func friendlyErrorMessage(for statusCode: Int, supabaseError: SupabaseError) -> String {
-        let apiMessage = supabaseError.displayMessage
-
         switch statusCode {
         case 429:
             // Rate limited — likely hit email quota
-            return "Too many attempts. You've exceeded the daily email limit. Try again tomorrow, or configure a custom email provider in Supabase."
-        case 402, 403:
-            // Payment required or forbidden
-            return "Email service quota exceeded. Upgrade your Supabase plan or configure a custom email provider (AWS SES, SendGrid, etc.)."
+            return "Too many attempts. Please wait a bit and try again."
+        case 402:
+            return "Email service quota exceeded. Please contact support."
+        case 403:
+            return "We couldn't complete that request. Please try again in a few minutes."
         case 404:
-            return "Email service not configured. Enable Email OTP in Supabase Dashboard → Auth → Email."
+            return "We're having trouble reaching our email service. Please try again in a few minutes."
         case 500...599:
-            // For server errors, include the actual Supabase message for debugging
-            if apiMessage.contains("error") || apiMessage.count > 10 {
-                return "Server error: \(apiMessage)"
-            }
-            return "Supabase server error. Check your SMTP configuration and try again."
+            return "Server error — check your connection and try again."
         default:
-            // Return Supabase's own message for other errors
-            return apiMessage
+            return "Something went wrong. Please try again."
         }
     }
 

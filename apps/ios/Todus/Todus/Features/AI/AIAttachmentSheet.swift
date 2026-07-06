@@ -325,37 +325,10 @@ private struct PhotoThumbnail: View {
             guard !isLoadingFullSize else { return }
             requestFullSize()
         } label: {
-            ZStack(alignment: .topTrailing) {
-                if let image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 110, height: 110)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                } else {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(.quaternary)
-                        .frame(width: 110, height: 110)
-                }
-
-                // Selection circle in top-right — visual cue matching the design.
-                Circle()
-                    .strokeBorder(Color.white, lineWidth: 1.5)
-                    .background(Circle().fill(Color.black.opacity(0.20)))
-                    .frame(width: 22, height: 22)
-                    .padding(8)
-
-                if isLoadingFullSize {
-                    ZStack {
-                        Color.black.opacity(0.25)
-                        ProgressView().tint(.white)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .frame(width: 110, height: 110)
-                }
-            }
+            photoThumbnailContent
         }
         .buttonStyle(.plain)
+        .disabled(isLoadingFullSize)
         .onAppear { loadThumbnail() }
         .alert(
             "Couldn't load photo",
@@ -369,6 +342,38 @@ private struct PhotoThumbnail: View {
             }
         } message: {
             Text(loadErrorMessage ?? "The selected photo is no longer available.")
+        }
+    }
+
+    private var photoThumbnailContent: some View {
+        ZStack(alignment: .topTrailing) {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 110, height: 110)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            } else {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(.quaternary)
+                    .frame(width: 110, height: 110)
+            }
+
+            // Selection circle in top-right — visual cue matching the design.
+            Circle()
+                .strokeBorder(Color.white, lineWidth: 1.5)
+                .background(Circle().fill(Color.black.opacity(0.20)))
+                .frame(width: 22, height: 22)
+                .padding(8)
+
+            if isLoadingFullSize {
+                ZStack {
+                    Color.black.opacity(0.25)
+                    ProgressView().tint(.white)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .frame(width: 110, height: 110)
+            }
         }
     }
 

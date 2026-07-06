@@ -32,9 +32,15 @@ struct TaskDetailSheet: View {
     @State private var isShowingPhotoPicker = false
     @State private var isShowingCamera = false
     @State private var selectedPhotoItem: PhotosPickerItem?
+    /// Attachment awaiting delete confirmation — nil hides the dialog.
+    @State private var pendingDeleteAttachment: String?
     /// Guards the Save button from double-fires while the SwiftData write +
     /// subsequent task reschedule are in flight.
     @State private var isSaving = false
+    /// Surfaces a persist failure instead of silently closing the sheet — mirrors
+    /// the folder-creation error alert already in this view.
+    @State private var showSaveErrorAlert = false
+    @State private var saveErrorMessage = ""
 
     init(task: TaskRecord) {
         self.task = task
@@ -143,6 +149,30 @@ struct TaskDetailSheet: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(folderCreationErrorMessage)
+        }
+        .alert("Unable to Save Task", isPresented: $showSaveErrorAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(saveErrorMessage)
+        }
+        .confirmationDialog(
+            "Remove attachment?",
+            isPresented: Binding(
+                get: { pendingDeleteAttachment != nil },
+                set: { if !$0 { pendingDeleteAttachment = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let name = pendingDeleteAttachment {
+                    attachmentNames.removeAll { $0 == name }
+                    AttachmentService.shared.delete(filename: name)
+                }
+                pendingDeleteAttachment = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDeleteAttachment = nil
+            }
         }
     }
 
@@ -299,12 +329,13 @@ struct TaskDetailSheet: View {
                             .font(.system(size: 13, weight: .medium))
                             .lineLimit(1)
                             .truncationMode(.middle)
+                            .help(name)
+                            .accessibilityLabel("Attachment: \(name)")
 
                         Spacer()
 
                         Button(role: .destructive) {
-                            attachmentNames.removeAll { $0 == name }
-                            AttachmentService.shared.delete(filename: name)
+                            pendingDeleteAttachment = name
                         } label: {
                             Image(systemName: "minus.circle.fill")
                         }
@@ -369,7 +400,20 @@ struct TaskDetailSheet: View {
             attachmentNames: attachmentNames,
             in: modelContext
         )
-        dismiss()
+        // `updateTaskDetails` persists internally but swallows save errors. Re-save here
+        // so a disk-full / corrupt-store failure surfaces to the user instead of the sheet
+        // silently closing with unsaved edits. If the internal save already succeeded this
+        // is a harmless no-op (nothing left pending to flush).
+        do {
+            try modelContext.save()
+            isSaving = false
+            dismiss()
+        } catch {
+            AppLogger.shared.log("TaskDetailSheet.saveTask: save failed: \(error.localizedDescription)")
+            isSaving = false
+            saveErrorMessage = "Your changes couldn't be saved. Please try again."
+            showSaveErrorAlert = true
+        }
     }
 }
 

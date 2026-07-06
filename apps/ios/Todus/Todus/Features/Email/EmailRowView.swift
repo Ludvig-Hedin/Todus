@@ -35,6 +35,12 @@ struct EmailRowView: View {
                         .font(.system(size: 15, weight: thread.unread ? .bold : .semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
+                        // `.lineLimit(1)` truncates long sender names. VoiceOver already
+                        // gets the untruncated name via the row's combined
+                        // accessibilityLabel below, but `.help` additionally surfaces it
+                        // as a hover/long-press tooltip (pointer/Catalyst), which the row
+                        // label doesn't cover.
+                        .help(thread.from.name)
 
                     Spacer(minLength: 8)
 
@@ -49,6 +55,9 @@ struct EmailRowView: View {
                         .font(.system(size: 14, weight: thread.unread ? .semibold : .medium))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
+                        // Same rationale as the sender name above — full subject on
+                        // hover/long-press even though it's truncated to one line.
+                        .help(thread.subject)
 
                     Spacer(minLength: 0)
 

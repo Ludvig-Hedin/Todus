@@ -102,13 +102,25 @@ struct MeetingsListView: View {
                 }
                 if let synced = services.meetingsService.lastSyncedAt {
                     Section {
-                        HStack {
-                            Spacer()
-                            Label(syncedAgoText(synced), systemImage: "arrow.clockwise")
-                                .font(.caption2)
-                                .foregroundStyle(.quaternary)
-                            Spacer()
+                        Button {
+                            Task { await services.meetingsService.syncFromCalendar() }
+                        } label: {
+                            HStack {
+                                Spacer()
+                                if services.meetingsService.isSyncing {
+                                    ButtonInlineProgressView(tint: .secondary, side: AppTheme.Metrics.compactInlineSpinner)
+                                } else {
+                                    Label(syncedAgoText(synced), systemImage: "arrow.clockwise")
+                                        .font(.caption2)
+                                        .foregroundStyle(.quaternary)
+                                }
+                                Spacer()
+                            }
                         }
+                        .buttonStyle(.plain)
+                        .disabled(services.meetingsService.isSyncing)
+                        .accessibilityLabel("Sync calendar")
+                        .accessibilityHint(syncedAgoText(synced))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                     }
@@ -233,6 +245,8 @@ struct MeetingRowView: View {
                 Text(meeting.title)
                     .font(.system(size: 15, weight: .medium))
                     .lineLimit(1)
+                    .help(meeting.title)
+                    .accessibilityLabel(meeting.title)
 
                 HStack(spacing: 4) {
                     Text(relativeTime(meeting.startsAt))

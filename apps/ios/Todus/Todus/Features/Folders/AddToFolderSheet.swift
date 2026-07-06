@@ -64,6 +64,7 @@ struct AddToFolderSheet: View {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(AppTheme.surfaceSecondary)
                 )
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.system(size: 14, weight: .semibold))
                 Text(subtitle).font(.system(size: 11, weight: .medium)).foregroundStyle(AppTheme.mutedText)
@@ -100,11 +101,12 @@ private struct FilterChip: View {
 
 private struct AddButton: View {
     let count: Int
+    let folderName: String
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Text("Add \(count) \(count == 1 ? "item" : "items")")
+            Text("Add \(count) \(count == 1 ? "item" : "items") to \(folderName)")
                 .font(.system(size: 14, weight: .semibold))
         }
     }
@@ -210,7 +212,7 @@ private struct TaskFolderPicker: View {
         .toolbar {
             if !selectedIDs.isEmpty {
                 ToolbarItem(placement: .confirmationAction) {
-                    AddButton(count: selectedIDs.count) { commitTasks() }
+                    AddButton(count: selectedIDs.count, folderName: folder.name) { commitTasks() }
                 }
             }
         }
@@ -370,7 +372,7 @@ private struct EmailFolderPicker: View {
         .toolbar {
             if !selectedIDs.isEmpty {
                 ToolbarItem(placement: .confirmationAction) {
-                    AddButton(count: selectedIDs.count) { commitEmails() }
+                    AddButton(count: selectedIDs.count, folderName: folder.name) { commitEmails() }
                 }
             }
         }
@@ -461,7 +463,7 @@ private struct ChatFolderPicker: View {
         .toolbar {
             if !selectedIDs.isEmpty {
                 ToolbarItem(placement: .confirmationAction) {
-                    AddButton(count: selectedIDs.count) { commitChats() }
+                    AddButton(count: selectedIDs.count, folderName: folder.name) { commitChats() }
                 }
             }
         }
@@ -568,7 +570,7 @@ private struct EventFolderPicker: View {
         .toolbar {
             if !selectedIDs.isEmpty {
                 ToolbarItem(placement: .confirmationAction) {
-                    AddButton(count: selectedIDs.count) { commitEvents() }
+                    AddButton(count: selectedIDs.count, folderName: folder.name) { commitEvents() }
                 }
             }
         }
@@ -689,7 +691,7 @@ private struct DocFolderPicker: View {
         .toolbar {
             if !selectedIDs.isEmpty {
                 ToolbarItem(placement: .confirmationAction) {
-                    AddButton(count: selectedIDs.count) { commitDocs() }
+                    AddButton(count: selectedIDs.count, folderName: folder.name) { commitDocs() }
                 }
             }
         }

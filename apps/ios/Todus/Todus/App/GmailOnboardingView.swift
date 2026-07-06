@@ -5,6 +5,10 @@ struct GmailOnboardingView: View {
     @Environment(AppServices.self) private var services
     @State private var isConnecting = false
     @State private var errorMessage: String?
+    /// True while the initial "is Gmail already connected?" check runs, so we
+    /// can show lightweight feedback instead of silently sitting there before
+    /// either rendering this screen or auto-advancing past it.
+    @State private var isCheckingExistingConnection = true
 
     var body: some View {
         ZStack {
@@ -82,6 +86,7 @@ struct GmailOnboardingView: View {
                     }
                     .buttonStyle(AppPrimaryButtonStyle())
                     .disabled(isConnecting)
+                    .sensoryFeedback(.selection, trigger: isConnecting)
 
                     Button {
                         services.hasConfiguredGmailPrompt = true
@@ -100,11 +105,21 @@ struct GmailOnboardingView: View {
                     .accessibilityHint("Skip connecting Gmail for now")
                 }
                 .padding(.horizontal, 24)
+                // Fade the content in only once we know we're not about to
+                // auto-advance — otherwise this screen would flash briefly
+                // before being replaced by the next onboarding step.
+                .opacity(isCheckingExistingConnection ? 0 : 1)
+                .overlay {
+                    if isCheckingExistingConnection {
+                        ProgressView()
+                    }
+                }
 
                 Spacer()
             }
             .padding(.vertical, 32)
         }
+        .animation(AppTheme.Motion.fast, value: isCheckingExistingConnection)
         // Auto-advance if Gmail is already connected (e.g. sign-in with Google
         // auto-created a connection via the server accountCreateHook).
         .task {
@@ -118,6 +133,7 @@ struct GmailOnboardingView: View {
                 return
             }
             await services.emailService.checkConnection(force: true)
+            isCheckingExistingConnection = false
             if services.emailService.hasConnection {
                 services.hasConfiguredGmailPrompt = true
             }

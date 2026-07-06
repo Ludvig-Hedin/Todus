@@ -75,6 +75,10 @@ struct NotificationsOnboardingView: View {
                             HStack(spacing: 10) {
                                 Image(systemName: "bell.fill")
                                     .font(.system(size: 20, weight: .semibold))
+                                    // Decorative — the text label already announces the
+                                    // action; without this VoiceOver read "bell fill" and
+                                    // the button title as two separate elements.
+                                    .accessibilityHidden(true)
                                 if isRequesting {
                                     ButtonInlineProgressView()
                                 }

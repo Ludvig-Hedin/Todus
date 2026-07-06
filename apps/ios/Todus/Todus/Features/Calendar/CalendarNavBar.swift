@@ -20,8 +20,8 @@ struct CalendarNavBar: View {
         HStack(spacing: 8) {
             // Navigation arrows
             HStack(spacing: 2) {
-                navButton(icon: "chevron.left") { navigate(by: -1) }
-                navButton(icon: "chevron.right") { navigate(by: 1) }
+                navButton(icon: "chevron.left", accessibilityLabel: String(localized: "Previous")) { navigate(by: -1) }
+                navButton(icon: "chevron.right", accessibilityLabel: String(localized: "Next")) { navigate(by: 1) }
             }
 
             Text(headerTitle)
@@ -95,7 +95,7 @@ struct CalendarNavBar: View {
         }
     }
 
-    private func navButton(icon: String, action: @escaping () -> Void) -> some View {
+    private func navButton(icon: String, accessibilityLabel: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 13, weight: .semibold))
@@ -103,9 +103,13 @@ struct CalendarNavBar: View {
                 .frame(width: 32, height: 32)
         }
         .buttonStyle(LiquidGlassButtonStyle(cornerRadius: AppTheme.Radius.row))
+        .accessibilityLabel(accessibilityLabel)
     }
 
     private func navigate(by offset: Int) {
+        // Light haptic gives tap feedback on par with the Calendars/Today
+        // buttons alongside it, which already fire via their own action closures.
+        AppHaptic.light.play()
         let cal = Calendar.current
         let animated = viewMode != .month
         if animated {

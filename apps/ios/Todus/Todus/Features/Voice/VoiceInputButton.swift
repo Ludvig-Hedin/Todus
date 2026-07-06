@@ -440,6 +440,7 @@ struct VoiceInputButton: View {
         .buttonStyle(.plain)
         .minTouchTarget()
         .disabled(controller.recordingState == .starting || controller.recordingState == .transcribing)
+        .opacity(controller.recordingState == .starting || controller.recordingState == .transcribing ? 0.5 : 1.0)
         .accessibilityLabel({
             switch controller.recordingState {
             case .idle: return "Start voice input"

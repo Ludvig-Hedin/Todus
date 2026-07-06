@@ -132,6 +132,7 @@ struct CalendarListView: View {
         )
 
         Button {
+            AppHaptic.selection.play()
             onEventTap?(event)
         } label: {
             HStack(spacing: 10) {
@@ -145,6 +146,8 @@ struct CalendarListView: View {
                     .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
+                    .accessibilityLabel(event.title)
+                    .help(event.title)
 
                 Spacer()
 
@@ -165,6 +168,7 @@ struct CalendarListView: View {
             }
             Button {
                 UIPasteboard.general.string = event.title
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
             } label: {
                 Label("Copy title", systemImage: "doc.on.doc")
             }
@@ -172,6 +176,7 @@ struct CalendarListView: View {
                 let start = event.startDate.formatted(date: .abbreviated, time: .shortened)
                 let end = event.endDate.formatted(date: .omitted, time: .shortened)
                 UIPasteboard.general.string = "\(event.title) — \(start) – \(end)"
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
             } label: {
                 Label("Copy event summary", systemImage: "text.quote")
             }

@@ -482,8 +482,12 @@ struct MeetingDetailView: View {
                 Button {
                     Task { await askQuestion() }
                 } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
+                    if isAskingQuestion {
+                        ButtonInlineProgressView(tint: .secondary, side: AppTheme.Metrics.toolbarInlineSpinner)
+                    } else {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.title2)
+                    }
                 }
                 .disabled(qaInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isAskingQuestion)
                 .accessibilityLabel("Send question")

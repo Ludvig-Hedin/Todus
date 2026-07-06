@@ -388,6 +388,7 @@ struct InboxView<Footer: View>: View {
                 .foregroundStyle(AppTheme.mutedText)
                 .strikethrough(color: AppTheme.mutedText.opacity(0.45))
                 .lineLimit(1)
+                .truncationMode(.tail)
             Spacer()
         }
         .padding(.horizontal, 4)

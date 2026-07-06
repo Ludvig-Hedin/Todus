@@ -110,6 +110,7 @@ struct FolderCardView: View {
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
+                            .accessibilityLabel(item.title)
                         Spacer(minLength: 4)
                     }
                 }

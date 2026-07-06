@@ -42,6 +42,9 @@ struct CreateSheet: View {
     @State private var isShowingCamera = false
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var pendingAttachments: [String] = []
+    /// Attachment awaiting delete confirmation before its disk file is removed — nil hides
+    /// the dialog. Mirrors `TaskDetailSheet.pendingDeleteAttachment`.
+    @State private var pendingDeleteAttachment: String?
 
     // Slash command menu
     @State private var showsSlashMenu = false
@@ -50,6 +53,12 @@ struct CreateSheet: View {
     /// the user can choose between saving as a task and dismissing — instead
     /// of having a phantom task silently appear.
     @State private var eventSaveFallbackPrompt: EventSaveFallback? = nil
+
+    /// Guards the send button from double-fires while `handleCreate`'s async work is in
+    /// flight — without this, a double-tap during the create Task could create duplicate
+    /// tasks/events. Reset when the sheet closes or the fallback prompt fires (both are
+    /// terminal states for the in-flight attempt).
+    @State private var isSending = false
 
     private struct EventSaveFallback: Identifiable {
         let id = UUID()
@@ -218,6 +227,25 @@ struct CreateSheet: View {
                 },
                 secondaryButton: .cancel(Text("Dismiss"))
             )
+        }
+        .confirmationDialog(
+            "Remove attachment?",
+            isPresented: Binding(
+                get: { pendingDeleteAttachment != nil },
+                set: { if !$0 { pendingDeleteAttachment = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let filename = pendingDeleteAttachment {
+                    pendingAttachments.removeAll { $0 == filename }
+                    AttachmentService.shared.delete(filename: filename)
+                }
+                pendingDeleteAttachment = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDeleteAttachment = nil
+            }
         }
     }
 
@@ -690,7 +718,12 @@ struct CreateSheet: View {
             }
 
             // Send button
-            let sendDisabled = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pendingAttachments.isEmpty
+            // Email additionally requires a non-empty To — otherwise Send silently no-ops
+            // downstream in ComposeEmail with nothing to address the message to.
+            let missingRecipient = selectedType == .email
+                && recipientText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let sendDisabled = (text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pendingAttachments.isEmpty)
+                || missingRecipient
             Button(action: handleCreate) {
                 Image(systemName: "arrow.up")
                     .font(.system(size: 14, weight: .bold))
@@ -699,7 +732,7 @@ struct CreateSheet: View {
             }
             .buttonStyle(AppPrimaryButtonStyle())
             .clipShape(Circle())
-            .disabled(sendDisabled)
+            .disabled(sendDisabled || isSending)
             .opacity(sendDisabled ? 0.4 : 1)
             .animation(.easeOut(duration: 0.12), value: sendDisabled)
         }
@@ -860,8 +893,7 @@ struct CreateSheet: View {
                     )
             }
             Button {
-                pendingAttachments.removeAll { $0 == filename }
-                AttachmentService.shared.delete(filename: filename)
+                pendingDeleteAttachment = filename
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 14))
@@ -957,12 +989,14 @@ struct CreateSheet: View {
     // MARK: - Actions
 
     private func close() {
+        isSending = false
         withAnimation(.spring(response: 0.25, dampingFraction: 0.95)) {
             isPresented = false
         }
     }
 
     private func handleCreate() {
+        guard !isSending else { return }
         let input = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty || !pendingAttachments.isEmpty else { return }
 
@@ -992,6 +1026,7 @@ struct CreateSheet: View {
         let attachments = pendingAttachments
         pendingAttachments = []
         text = ""
+        isSending = true
 
         Task {
             // In auto mode: check for compound intents first (e.g. "Träffa Johan kl 13 imorgon och maila honom presentationen innan")
@@ -1012,7 +1047,10 @@ struct CreateSheet: View {
                             // createEvent set eventSaveFallbackPrompt and returned. Stop here so
                             // we don't keep creating the remaining intents and then close() the
                             // sheet out from under the alert the user still needs to act on.
-                            if eventSaveFallbackPrompt != nil { return }
+                            if eventSaveFallbackPrompt != nil {
+                                isSending = false
+                                return
+                            }
                         case .task:
                             createTask(intent.title, dueDate: intent.date ?? selectedDate, attachments: itemAttachments)
                         case .email:
@@ -1046,7 +1084,10 @@ struct CreateSheet: View {
                 await createEvent(eventTitle, startDate: eventStart, attachments: attachments)
                 // createEvent may set eventSaveFallbackPrompt on failure (permission denied or
                 // EventKit error). If it did, keep the sheet open so the alert can render.
-                if eventSaveFallbackPrompt != nil { return }
+                if eventSaveFallbackPrompt != nil {
+                    isSending = false
+                    return
+                }
             case .email:
                 services.composeEmailSeedBody = input.isEmpty ? nil : input
                 services.composeEmailSeedTo = recipientText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

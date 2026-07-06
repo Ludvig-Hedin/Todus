@@ -13,6 +13,14 @@ struct AuthView: View {
     @State private var code = ""
     @FocusState private var isEmailFocused: Bool
     @FocusState private var isCodeFocused: Bool
+    /// Tracks whether the email field has ever lost focus after being edited —
+    /// gates the "Enter a valid email" hint so it doesn't flash on every
+    /// keystroke while the user is still mid-type.
+    @State private var emailFieldDidEndEditing = false
+    /// Resend cooldown (seconds remaining). Started after every successful
+    /// send/resend so the resend button can't be hammered.
+    @State private var resendCooldown = 0
+    private let resendCooldownDuration = 60
     private let otpHelpMessage = "You can keep using tasks without email and connect it later in Settings."
 
     /// Blue accent used for primary action buttons (matches todo app).
@@ -164,16 +172,34 @@ struct AuthView: View {
                     Capsule()
                         .stroke(Color(UIColor.separator), lineWidth: 1)
                 )
+                .accessibilityLabel("Email address")
+                .accessibilityHint("Enter your email to sign in or create an account")
                 .onSubmit {
                     guard isValidEmail else { return }
                     isEmailFocused = false
                     Task { await authService.sendEmailOTP(email: email) }
                 }
+                .onChange(of: isEmailFocused) { _, isFocused in
+                    // Only start showing the validation hint once the user has
+                    // left the field after typing — avoids flashing "Enter a
+                    // valid email" on every keystroke while still mid-type.
+                    if !isFocused && !email.isEmpty {
+                        emailFieldDidEndEditing = true
+                    }
+                }
+                .onChange(of: email) { _, newValue in
+                    // A fresh edit after a prior "invalid" state should hide the
+                    // hint again until the user leaves the field once more.
+                    if newValue.isEmpty {
+                        emailFieldDidEndEditing = false
+                    }
+                }
 
-            // Inline validation hint — only when the user has typed something that
-            // doesn't structurally look like an email. Silent while empty so the
+            // Inline validation hint — only after the user has left the field
+            // (not on every keystroke) and only when the text doesn't
+            // structurally look like an email. Silent while empty so the
             // first-impression state stays clean.
-            if !email.isEmpty && !isValidEmail {
+            if emailFieldDidEndEditing && !isEmailFocused && !email.isEmpty && !isValidEmail {
                 Text("Enter a valid email")
                     .font(.caption)
                     .foregroundStyle(.red)
@@ -181,29 +207,45 @@ struct AuthView: View {
                     .padding(.horizontal, 20)
             }
 
-            // Send code button — only visible when email looks valid
-            if isValidEmail {
-                Button {
-                    isEmailFocused = false
-                    Task { await authService.sendEmailOTP(email: email) }
-                } label: {
-                    Text("Send code")
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 48)
-                        .background(accentBlue, in: Capsule())
-                        .foregroundStyle(.white)
-                        .opacity(authService.isLoading ? 0.6 : 1)
+            // Send code button — always rendered so the primary action is
+            // discoverable; disabled + dimmed until the email looks valid.
+            Button {
+                isEmailFocused = false
+                Task {
+                    await authService.sendEmailOTP(email: email)
+                    startResendCooldown()
                 }
-                .buttonStyle(.plain)
-                .disabled(authService.isLoading)
-                .overlay {
-                    // Match the spinner pattern used by socialButtons so the user gets
-                    // visual feedback while sendEmailOTP awaits the network round-trip
-                    if authService.isLoading {
-                        ButtonInlineProgressView()
-                    }
+            } label: {
+                Text("Send code")
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    .background(accentBlue, in: Capsule())
+                    .foregroundStyle(.white)
+                    .opacity((isValidEmail && !authService.isLoading) ? 1 : 0.5)
+            }
+            .buttonStyle(.plain)
+            .disabled(!isValidEmail || authService.isLoading)
+            .overlay {
+                // Match the spinner pattern used by socialButtons so the user gets
+                // visual feedback while sendEmailOTP awaits the network round-trip
+                if authService.isLoading {
+                    ButtonInlineProgressView()
                 }
+            }
+        }
+    }
+
+    /// Starts (or restarts) the 60s resend cooldown after a successful send.
+    /// Guarded by an id-based Task so a superseded countdown doesn't keep
+    /// ticking after a newer send restarts it.
+    private func startResendCooldown() {
+        guard authService.lastErrorMessage == nil else { return }
+        resendCooldown = resendCooldownDuration
+        Task {
+            while resendCooldown > 0 {
+                try? await Task.sleep(for: .seconds(1))
+                if resendCooldown > 0 { resendCooldown -= 1 }
             }
         }
     }
@@ -234,6 +276,14 @@ struct AuthView: View {
                 .accessibilityLabel("Verification code")
                 .accessibilityHint("Enter the 6-digit code sent to your email")
                 .onChange(of: code) { _, newValue in
+                    // Strip any pasted non-digit characters (e.g. from a paste
+                    // that includes surrounding text) before the length check
+                    // below, so auto-submit only fires on a clean 6-digit code.
+                    let digitsOnly = newValue.filter(\.isNumber)
+                    if digitsOnly != newValue {
+                        code = digitsOnly
+                        return
+                    }
                     // Guard: skip if already verifying (prevents double-submit when iOS
                     // auto-fill fires onChange multiple times in rapid succession)
                     if newValue.count >= expectedCodeLength && !authService.isLoading {
@@ -294,18 +344,21 @@ struct AuthView: View {
                 }
             } else {
                 Button {
-                    Task { await authService.sendEmailOTP(email: email) }
+                    Task {
+                        await authService.sendEmailOTP(email: email)
+                        startResendCooldown()
+                    }
                 } label: {
-                    Text("Resend code")
+                    Text(resendCooldown > 0 ? "Resend in \(resendCooldown)s" : "Resend code")
                         .font(.system(size: 16, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .frame(height: 48)
                         .background(Color(UIColor.systemBackground), in: Capsule())
                         .overlay(Capsule().stroke(Color(UIColor.separator), lineWidth: 1))
-                        .opacity(authService.isLoading ? 0.6 : 1)
+                        .opacity((authService.isLoading || resendCooldown > 0) ? 0.6 : 1)
                 }
                 .buttonStyle(.plain)
-                .disabled(authService.isLoading)
+                .disabled(authService.isLoading || resendCooldown > 0)
                 .overlay {
                     if authService.isLoading {
                         ButtonInlineProgressView(tint: .primary)

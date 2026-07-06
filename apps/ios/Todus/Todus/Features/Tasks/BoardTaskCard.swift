@@ -23,6 +23,8 @@ struct BoardTaskCard: View {
                         .strikethrough(task.completed, color: .primary.opacity(0.2))
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .help(task.title)
+                        .accessibilityLabel("Task: \(task.title)")
                 }
 
                 if task.dueDate != nil || task.priority != .none || task.folder != nil {

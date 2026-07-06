@@ -27,7 +27,7 @@ struct FolderPickerSheet: View {
             List {
                 if folders.isEmpty {
                     Section {
-                        Text("You don't have any folders yet.")
+                        Text("Tap + to create your first folder.")
                             .font(.system(size: 13))
                             .foregroundStyle(AppTheme.mutedText)
                     }

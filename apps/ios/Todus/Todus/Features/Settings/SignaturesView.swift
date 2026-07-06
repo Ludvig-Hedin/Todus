@@ -7,6 +7,9 @@ import SwiftUI
 struct SignaturesView: View {
     @Environment(AppServices.self) private var services
     @State private var showsAddSheet = false
+    /// Signature id pending swipe-to-delete confirmation. Set by `.onDelete`,
+    /// consumed (and cleared) by the `.confirmationDialog` below.
+    @State private var pendingDeleteID: EmailSignature.ID?
 
     var body: some View {
         List {
@@ -42,14 +45,10 @@ struct SignaturesView: View {
                         }
                     }
                     .onDelete { indexSet in
-                        for idx in indexSet {
-                            let sig = services.signatures[idx]
-                            // Clear selected if we're deleting the active one
-                            if services.selectedSignatureID == sig.id {
-                                services.selectedSignatureID = nil
-                            }
-                        }
-                        services.signatures.remove(atOffsets: indexSet)
+                        // Deleting a signature is destructive and irreversible — confirm
+                        // before removing rather than deleting on swipe alone.
+                        guard let idx = indexSet.first else { return }
+                        pendingDeleteID = services.signatures[idx].id
                     }
                 }
             } else {
@@ -95,6 +94,29 @@ struct SignaturesView: View {
             }
             .preferredColorScheme(services.appearancePreference.colorScheme)
         }
+        .confirmationDialog(
+            "Delete this signature?",
+            isPresented: Binding(
+                get: { pendingDeleteID != nil },
+                set: { if !$0 { pendingDeleteID = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) { deletePendingSignature() }
+            Button("Cancel", role: .cancel) { pendingDeleteID = nil }
+        } message: {
+            Text("This cannot be undone.")
+        }
+    }
+
+    private func deletePendingSignature() {
+        guard let id = pendingDeleteID else { return }
+        // Clear selected if we're deleting the active one
+        if services.selectedSignatureID == id {
+            services.selectedSignatureID = nil
+        }
+        services.signatures.removeAll { $0.id == id }
+        pendingDeleteID = nil
     }
 
     @ViewBuilder

@@ -194,6 +194,8 @@ struct NotificationCenterView: View {
                         .font(.system(size: 14, weight: .semibold))
                         .lineLimit(1)
                         .foregroundStyle(.primary)
+                        .help(item.title)
+                        .accessibilityLabel(item.title)
 
                     Text(item.description)
                         .font(.system(size: 13))
@@ -230,6 +232,7 @@ struct NotificationCenterView: View {
     }
 
     private func handleNotificationTap(_ item: NotificationItem) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         dismiss()
         // Navigate to the relevant tab based on notification type
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {

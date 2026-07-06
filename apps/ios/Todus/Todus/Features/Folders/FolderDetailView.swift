@@ -62,6 +62,7 @@ struct FolderDetailView: View {
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
+                .accessibilityLabel("More options")
             }
         }
         .overlay(alignment: .bottomTrailing) {
@@ -231,6 +232,7 @@ struct FolderDetailView: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Add item to \(folder.name)")
     }
 
     // MARK: Loading
@@ -238,6 +240,11 @@ struct FolderDetailView: View {
     private func load() async {
         isLoading = true
         defer { isLoading = false }
+        // TODO: fetchFolderContents swallows network errors internally (falls back to
+        // local-only data on failure — see TaskCaptureService.fetchFolderContents) and
+        // always returns a non-throwing array, so a failed fetch is indistinguishable
+        // from a genuinely empty folder here. Surfacing a distinct error state needs
+        // fetchFolderContents to report a success/failure signal to its caller.
         let fetched = await services.captureService.fetchFolderContents(folder, in: modelContext)
         items = fetched
         // Refresh card cache opportunistically.

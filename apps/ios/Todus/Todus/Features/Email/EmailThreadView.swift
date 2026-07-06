@@ -84,6 +84,12 @@ struct EmailThreadView: View {
     /// boolean avoids the "stuck true" pattern where consecutive taps don't
     /// re-trigger the feedback.
     @State private var topBarActionTick: Int = 0
+    /// Monotonic counter bumped on every successful assistant action (task/event/
+    /// follow-up created, verification code copied) so `.sensoryFeedback(.success,
+    /// trigger:)` fires a confirming haptic. These actions already show a visual
+    /// confirmation (inline "✓ Created" / toast) but previously had no tactile cue,
+    /// unlike EmailComposeView's send-success haptic.
+    @State private var assistantSuccessTick: Int = 0
 
     private var emailService: EmailService { services.emailService }
 
@@ -302,6 +308,10 @@ struct EmailThreadView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        // Tactile confirmation for assistant actions that succeed (task/event/
+        // follow-up created, verification code copied) — matches the send-success
+        // haptic pattern in EmailComposeView.
+        .sensoryFeedback(.success, trigger: assistantSuccessTick)
     }
 
     // MARK: - Main Layout
@@ -486,6 +496,7 @@ struct EmailThreadView: View {
                         VerificationCodeAction(code: code) {
                             UIPasteboard.general.string = code.replacingOccurrences(of: " ", with: "")
                             assistantToast = .success("Code copied")
+                            assistantSuccessTick &+= 1
                         }
                         .padding(.horizontal, 16)
                         .padding(.top, 12)
@@ -1095,6 +1106,9 @@ struct EmailThreadView: View {
     /// new completion will overwrite this one anyway.
     private func markRecentlyCompleted(_ action: ThreadAction) {
         recentlyCompletedAction = action
+        // Bump the haptic trigger alongside the visual "✓ Created" confirmation —
+        // covers task/followUp/event, the three callers of this helper.
+        assistantSuccessTick &+= 1
         let captured = action
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(recentCompletionDuration))
@@ -1569,11 +1583,15 @@ private struct ReceiptInfoChip: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
+                    // `.lineLimit(1)` can truncate a long vendor name — surface the
+                    // full value on long-press/pointer-hover so it isn't lost.
+                    .help(receipt.vendor)
                 HStack(spacing: 6) {
                     if let amount = receipt.amount, !amount.isEmpty {
                         Text(amount)
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(AppTheme.subtleText)
+                            .help(amount)
                     }
                     if receipt.amount != nil, formattedDate != nil {
                         Text("·")

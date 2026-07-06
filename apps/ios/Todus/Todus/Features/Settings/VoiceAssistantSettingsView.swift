@@ -17,6 +17,10 @@ struct VoiceAssistantSettingsView: View {
     /// Touched after a successful "Reset voice persona cache" tap so we can
     /// briefly show a confirmation hint inline. Auto-clears after a few seconds.
     @State private var didResetPersonaCacheAt: Date?
+    /// Monotonic counter bumped on a successful cache reset so the
+    /// `.sensoryFeedback(.success, trigger:)` modifier below fires a haptic —
+    /// matches the pattern in EmailComposeView / EmailThreadView.
+    @State private var resetPersonaCacheTick: Int = 0
 
     var body: some View {
         List {
@@ -29,7 +33,8 @@ struct VoiceAssistantSettingsView: View {
         .scrollContentBackground(.hidden)
         .background(AppTheme.sheetBackground)
         .navigationTitle("Voice Assistant")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
+        .sensoryFeedback(.success, trigger: resetPersonaCacheTick)
     }
 
     // MARK: - Sections
@@ -95,13 +100,18 @@ struct VoiceAssistantSettingsView: View {
         Section {
             Button {
                 services.voiceSystemPromptClient.invalidateCache()
-                didResetPersonaCacheAt = Date()
+                withAnimation(AppTheme.Motion.base) {
+                    didResetPersonaCacheAt = Date()
+                }
+                resetPersonaCacheTick &+= 1
                 // Auto-clear the confirmation hint after a few seconds.
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 4_000_000_000)
                     if let at = didResetPersonaCacheAt,
                        Date().timeIntervalSince(at) >= 4 {
-                        didResetPersonaCacheAt = nil
+                        withAnimation(AppTheme.Motion.base) {
+                            didResetPersonaCacheAt = nil
+                        }
                     }
                 }
             } label: {
@@ -112,6 +122,7 @@ struct VoiceAssistantSettingsView: View {
                 Text("Cache cleared — the next voice session will fetch a fresh persona and memories.")
                     .font(.footnote)
                     .foregroundStyle(.green)
+                    .transition(.opacity)
             }
         } header: {
             Text("Persona")

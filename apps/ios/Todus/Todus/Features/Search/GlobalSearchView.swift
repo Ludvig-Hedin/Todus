@@ -149,7 +149,7 @@ struct GlobalSearchView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
                 if !taskResults.isEmpty {
-                    resultSection(title: "Tasks", icon: "checklist") {
+                    resultSection(title: "Tasks", icon: "checklist", total: taskResults.count, seeAllTab: .tasks) {
                         ForEach(taskResults.prefix(5)) { task in
                             taskRow(task)
                         }
@@ -157,7 +157,7 @@ struct GlobalSearchView: View {
                 }
 
                 if !emailResults.isEmpty {
-                    resultSection(title: "Emails", icon: "envelope.fill") {
+                    resultSection(title: "Emails", icon: "envelope.fill", total: emailResults.count, seeAllTab: .email) {
                         ForEach(emailResults.prefix(5)) { thread in
                             emailRow(thread)
                         }
@@ -165,7 +165,7 @@ struct GlobalSearchView: View {
                 }
 
                 if !calendarResults.isEmpty {
-                    resultSection(title: "Events", icon: "calendar") {
+                    resultSection(title: "Events", icon: "calendar", total: calendarResults.count, seeAllTab: .calendar) {
                         ForEach(calendarResults.prefix(5)) { event in
                             eventRow(event)
                         }
@@ -173,7 +173,7 @@ struct GlobalSearchView: View {
                 }
 
                 if !peopleResults.isEmpty {
-                    resultSection(title: "People", icon: "person.2.fill") {
+                    resultSection(title: "People", icon: "person.2.fill", total: peopleResults.count, seeAllTab: nil) {
                         ForEach(peopleResults.prefix(5), id: \.email) { sender in
                             personRow(sender)
                         }
@@ -190,10 +190,17 @@ struct GlobalSearchView: View {
 
     // MARK: - Section Header
 
+    /// - Parameters:
+    ///   - total: Full match count before the `.prefix(5)` truncation applied to `content`.
+    ///   - seeAllTab: Tab to jump to when there are more than 5 results. Pre-filling the
+    ///     query into that tab's own search would need a new cross-tab seed property, so
+    ///     for now this only navigates + dismisses; the count still communicates truncation.
     @ViewBuilder
     private func resultSection<Content: View>(
         title: String,
         icon: String,
+        total: Int,
+        seeAllTab: AppTab?,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -206,6 +213,26 @@ struct GlobalSearchView: View {
                     .foregroundStyle(.secondary)
             }
             content()
+
+            if total > 5 {
+                if let tab = seeAllTab {
+                    Button {
+                        services.navigateTo = tab
+                        dismiss()
+                    } label: {
+                        Text("See all \(total) in \(tab.title)")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(AppTheme.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 2)
+                } else {
+                    Text("Showing 5 of \(total)")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
+                }
+            }
         }
     }
 
@@ -213,12 +240,12 @@ struct GlobalSearchView: View {
 
     private func taskRow(_ task: TaskRecord) -> some View {
         Button {
+            // Set navigation state before dismissing so the tab switch + task
+            // detail open happen immediately instead of after a fixed delay —
+            // avoids the ~350ms flicker of landing on the wrong tab first.
+            services.navigateTo = .tasks
+            services.pendingTaskId = task.id
             dismiss()
-            // Navigate to tasks tab and open the task detail
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                services.navigateTo = .tasks
-                services.pendingTaskId = task.id
-            }
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
@@ -255,11 +282,9 @@ struct GlobalSearchView: View {
 
     private func emailRow(_ thread: EmailThread) -> some View {
         Button {
+            services.navigateTo = .email
+            services.pendingEmailThreadId = thread.id
             dismiss()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                services.navigateTo = .email
-                services.pendingEmailThreadId = thread.id
-            }
         } label: {
             HStack(spacing: 12) {
                 // Unread dot
@@ -282,6 +307,7 @@ struct GlobalSearchView: View {
                         .font(.system(size: 13, weight: .medium))
                         .lineLimit(1)
                         .foregroundStyle(.primary.opacity(0.8))
+                        .help(thread.subject)
                     Text(thread.snippet)
                         .font(.system(size: 12))
                         .lineLimit(1)
@@ -294,14 +320,14 @@ struct GlobalSearchView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(thread.from.name), \(thread.subject)")
     }
 
     private func eventRow(_ event: CalendarEvent) -> some View {
         Button {
+            services.navigateTo = .calendar
             dismiss()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                services.navigateTo = .calendar
-            }
         } label: {
             HStack(spacing: 12) {
                 Circle()
@@ -340,27 +366,46 @@ struct GlobalSearchView: View {
     }
 
     private func personRow(_ sender: EmailSender) -> some View {
-        HStack(spacing: 12) {
-            // Real sender avatar (brand logo / contact photo / initials fallback) —
-            // matches the People tab instead of a flat gray-initials placeholder.
-            SenderAvatarView(email: sender.email, name: sender.name, size: 34)
+        Button {
+            // No dedicated person/contact detail screen exists yet — the closest
+            // existing mechanism is seeding the compose sheet's "To" field, same
+            // pattern HomeView's "+" on Recent Emails uses for a fresh compose.
+            services.composeEmailSeedBody = nil
+            services.composeEmailSeedTo = sender.email
+            services.showsComposeEmail = true
+            dismiss()
+        } label: {
+            HStack(spacing: 12) {
+                // Real sender avatar (brand logo / contact photo / initials fallback) —
+                // matches the People tab instead of a flat gray-initials placeholder.
+                SenderAvatarView(email: sender.email, name: sender.name, size: 34)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(sender.name)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Text(sender.email)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(sender.name)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(sender.email)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppTheme.mutedText)
             }
-
-            Spacer()
+            .padding(12)
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
+            .contentShape(Rectangle())
         }
-        .padding(12)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(sender.name), \(sender.email)")
+        .accessibilityHint("Compose an email to this person")
     }
 
     // MARK: - Empty States

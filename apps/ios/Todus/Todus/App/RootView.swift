@@ -25,8 +25,14 @@ struct RootView: View {
         Group {
             if !services.hasSeenStartupCard && !services.authService.isAuthenticated {
                 // One-shot branded entry — shown only for genuinely new installs.
-                // Both CTAs flip `hasSeenStartupCard`, after which the regular
-                // unauthenticated routing (AuthView → onboarding chain) takes over.
+                // Checking `isAuthenticated` here (not just `hasSeenStartupCard`)
+                // means an already-authenticated user (valid Keychain session,
+                // e.g. after a reinstall or a fresh app-storage reset) skips this
+                // pre-auth brand intro entirely and drops straight into the
+                // onboarding chain / app below — it has nothing to offer someone
+                // who's already signed in. Both CTAs also flip `hasSeenStartupCard`,
+                // after which the regular unauthenticated routing (AuthView →
+                // onboarding chain) takes over for genuinely new, unauthenticated users.
                 StartupOnboardingView()
                     .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
             } else if services.authService.showsOnboarding {

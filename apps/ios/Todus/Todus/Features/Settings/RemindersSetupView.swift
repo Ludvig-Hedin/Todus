@@ -69,8 +69,9 @@ struct RemindersOnboardingView: View {
                     .buttonStyle(AppPrimaryButtonStyle())
                     .disabled(isConnecting)
 
-                    // Skip — marks prompt as seen without enabling sync
-                    Button("Skip, set this up later in Settings") {
+                    // Skip — marks prompt as seen without enabling sync. Copy aligned
+                    // with NotificationsOnboardingView's "Skip, decide later" tone.
+                    Button("Skip, set up later") {
                         services.hasConfiguredRemindersPrompt = true
                     }
                     .font(.system(size: 15, weight: .medium))

@@ -55,6 +55,8 @@ struct TaskRowView: View {
                                             .tracking(-0.1)
                                     }
                                     .foregroundStyle(Color.primary.opacity(0.55))
+                                    .accessibilityElement(children: .ignore)
+                                    .accessibilityLabel("AI is analyzing task details")
                                 }
                             }
 
@@ -240,6 +242,8 @@ struct TaskRowView: View {
                 // dates changed and lost folder context exactly when the row was busiest.
                 if let folder = task.folder {
                     tag(title: folder.name, systemImage: "folder")
+                        .help(folder.name)
+                        .accessibilityLabel("Folder: \(folder.name)")
                 }
             }
         }
@@ -437,12 +441,28 @@ enum SnoozeOption: Hashable {
     /// said "Tonight" while the swipe-action sheet said "Tonight (8 pm)" —
     /// same enum, different copy. Now both surfaces consume this list so
     /// drift is impossible. (UX P9.)
-    static let menuOptions: [(option: SnoozeOption, label: String)] = [
-        (.tonight, "Tonight (8 pm)"),
-        (.tomorrow, "Tomorrow morning"),
-        (.weekend, "This weekend"),
-        (.nextWeek, "Next week"),
-    ]
+    ///
+    /// Computed (not a stored `let`) so the "Tonight" label tracks `.tonight.date()`'s
+    /// actual behavior: before 8pm it resolves to tonight, at/after 8pm `.date()` rolls
+    /// to tomorrow — the label previously always said "Tonight (8 pm)" even when the
+    /// resulting snooze was tomorrow. Call-site syntax (`SnoozeOption.menuOptions`, no
+    /// parens) is unchanged so other call sites (CalendarTaskView) keep working as-is.
+    static var menuOptions: [(option: SnoozeOption, label: String)] {
+        [
+            (.tonight, tonightLabel()),
+            (.tomorrow, "Tomorrow morning"),
+            (.weekend, "This weekend"),
+            (.nextWeek, "Next week"),
+        ]
+    }
+
+    /// Mirrors the `.tonight` branch of `date(now:calendar:)`: before 8pm today,
+    /// snoozing resolves to tonight at 8pm; at/after 8pm it rolls to tomorrow 8pm.
+    private static func tonightLabel(now: Date = .now, calendar: Calendar = .current) -> String {
+        let candidate = calendar.date(bySettingHour: 20, minute: 0, second: 0, of: now)
+            ?? now.addingTimeInterval(4 * 3600)
+        return candidate > now ? "Tonight at 8 pm" : "Tomorrow at 8 pm"
+    }
 
     func date(now: Date = .now, calendar: Calendar = .current) -> Date {
         switch self {

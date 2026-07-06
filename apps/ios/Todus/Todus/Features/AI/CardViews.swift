@@ -606,8 +606,12 @@ struct CopyableTextCardView: View {
                     Button {
                         UIPasteboard.general.string = p.content
                         onAction?("copy_text", ["content": p.content], nil)
-                        copied = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+                        withAnimation(.snappy(duration: 0.15)) {
+                            copied = true
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            withAnimation(.snappy(duration: 0.15)) { copied = false }
+                        }
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: copied ? "checkmark" : "doc.on.doc")
@@ -618,6 +622,7 @@ struct CopyableTextCardView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .sensoryFeedback(.success, trigger: copied)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)

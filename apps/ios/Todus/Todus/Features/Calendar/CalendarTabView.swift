@@ -196,7 +196,10 @@ struct CalendarTabView: View {
                         // (bottom-leading) and the AI FAB (bottom-trailing) — it
                         // previously hid behind the create "+" in the corner.
                         Spacer()
-                        Button(action: goToToday) {
+                        Button {
+                            AppHaptic.light.play()
+                            goToToday()
+                        } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "calendar")
                                     .font(.system(size: 14, weight: .semibold))
@@ -284,7 +287,7 @@ struct CalendarTabView: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                         .accessibilityHidden(true)
-                    Text("Reconnect Gmail to enable calendar editing.")
+                    Text("Reconnect Gmail to create and edit events on Google Calendar.")
                         .font(.subheadline)
                     Spacer(minLength: 8)
                     Button("Reconnect") {
@@ -313,7 +316,7 @@ struct CalendarTabView: View {
                 .padding(.top, 8)
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("Reconnect Gmail to enable calendar editing")
+                .accessibilityLabel("Reconnect Gmail to create and edit events on Google Calendar")
                 .onAppear {
                     UINotificationFeedbackGenerator().notificationOccurred(.warning)
                 }
@@ -326,7 +329,7 @@ struct CalendarTabView: View {
         ) {
             Button(String(localized: "OK"), role: .cancel) { }
         } message: {
-            Text("It may belong to a different calendar account.")
+            Text("Google Calendar and subscribed events are read-only. Only events on your Apple calendars can be opened and edited here.")
         }
     }
 
@@ -350,6 +353,20 @@ struct CalendarTabView: View {
             .padding(.horizontal, 16)
             .padding(.top, 4)
             .padding(.bottom, 4)
+            .overlay(alignment: .topTrailing) {
+                // Refresh indicator for reloads over already-visible events —
+                // the center overlay above only covers the initial (empty-state)
+                // fetch, so without this a background refresh was invisible.
+                if isLoading, !events.isEmpty {
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(.trailing, 20)
+                        .padding(.top, 8)
+                        .transition(.opacity)
+                        .accessibilityLabel("Refreshing events")
+                }
+            }
+            .animation(AppTheme.Motion.fast, value: isLoading)
 
             if viewMode != .month {
                 // Day mode now renders a unified SwiftUI grid (like Multi-Day), so it

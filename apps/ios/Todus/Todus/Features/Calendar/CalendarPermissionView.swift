@@ -175,6 +175,13 @@ struct CalendarPermissionView: View {
         if #available(iOS 17.0, *), authStatus == .writeOnly {
             return "Todus needs full calendar access to show your events. Choose “Full Access” in Settings for this app."
         }
+        if #available(iOS 17.0, *), authStatus == .notDetermined {
+            // Proactive heads-up before the system prompt appears — iOS 17+ offers
+            // a "Write Only" option that would leave events invisible in Todus, so
+            // steer the user toward "Full Access" up front instead of only
+            // reacting to it after the fact (see the `.writeOnly` branch above).
+            return "Allow access to your calendar to view and create events. If asked, choose “Full Access.”"
+        }
         return "Allow access to your calendar\nto view and create events."
     }
 }

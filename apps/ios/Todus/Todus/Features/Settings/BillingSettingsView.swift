@@ -122,6 +122,21 @@ struct BillingSettingsView: View {
         } message: {
             Text("You'll keep access until the end of the current billing period.")
         }
+        // The inline error Section above can be scrolled out of view (it renders
+        // after usageSection) — surface a blocking alert too so a failed cancel
+        // is never silently missed after the spinner disappears.
+        .alert(
+            "Something went wrong",
+            isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            ),
+            presenting: errorMessage
+        ) { _ in
+            Button("OK") { errorMessage = nil }
+        } message: { message in
+            Text(message)
+        }
     }
 
     private var planSection: some View {
@@ -297,6 +312,11 @@ struct BillingSettingsView: View {
             // when we add an annual upgrade on iOS we'll persist the actual
             // product id and use it here.
             try await subscription.cancel(productId: "pro_monthly")
+            // `cancel()` applies the post-cancel plan/status from its own response,
+            // but not usage/credit limits — force a fresh Autumn read so the AI
+            // usage meter reflects the new (free) plan's limits immediately
+            // instead of showing stale Pro numbers until the next webhook sync.
+            await subscription.forceRefreshFromAutumn()
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? "\(error)"
         }

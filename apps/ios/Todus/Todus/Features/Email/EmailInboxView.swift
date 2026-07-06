@@ -540,7 +540,12 @@ struct EmailInboxView: View {
                 .padding(.vertical, 9)
                 .background {
                     if #available(iOS 26.0, *) {
-                        Color.clear
+                        // Pure `.glassEffect` alone reads as non-interactive chrome
+                        // (no visible fill/border) — unlike the search bar next to it,
+                        // this is a Menu, so it needs to look tappable. Add a faint
+                        // capsule tint underneath the glass so it reads as a control.
+                        Capsule(style: .continuous)
+                            .fill(AppTheme.surfaceSecondary.opacity(0.35))
                     } else {
                         Capsule(style: .continuous)
                             .fill(AppTheme.surfaceSecondary.opacity(0.6))
@@ -653,6 +658,13 @@ struct EmailInboxView: View {
         Group {
             if paginationFailed {
                 Button {
+                    // Re-check in-flight state at tap time, not just via `.disabled` —
+                    // SwiftUI's re-render that flips the disabled state lags a frame
+                    // behind a rapid double-tap, so guard here too. `loadNextPage()`
+                    // itself also re-checks, but bailing before flipping
+                    // `paginationFailed` avoids a visible flicker back to the spinner
+                    // state on the redundant tap.
+                    guard !isLoadingNextPage else { return }
                     paginationFailed = false
                     Task { await loadNextPage() }
                 } label: {
@@ -1084,6 +1096,16 @@ struct EmailInboxView: View {
         .padding(.top, 4)
     }
 
+    /// Truncates the search query shown in the "No results for ..." empty state so a
+    /// long pasted/typed query doesn't blow out the message layout or wrap awkwardly.
+    private var truncatedSearchQuery: String {
+        let trimmed = searchText
+        if trimmed.count > 20 {
+            return "\(trimmed.prefix(20))…"
+        }
+        return trimmed
+    }
+
     /// Truncates an email address for chip display — shows the part before @ plus a short domain hint.
     /// e.g. "john.doe@gmail.com" -> "john.doe@gm..."
     private func truncatedEmail(_ email: String) -> String {
@@ -1255,7 +1277,7 @@ struct EmailInboxView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 44, weight: .light))
                         .foregroundStyle(AppTheme.mutedText)
-                    Text("No results for \"\(searchText)\"")
+                    Text("No results for \"\(truncatedSearchQuery)\"")
                         .font(.system(size: 17, weight: .semibold))
                     Text("Try a different search term.")
                         .font(.system(size: 14))

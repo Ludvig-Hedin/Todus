@@ -127,7 +127,7 @@ struct FolderEditSheet: View {
                         )
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(Self.iconName(for: symbol))
+                .accessibilityLabel("\(Self.iconName(for: symbol)) icon")
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
@@ -173,6 +173,7 @@ struct FolderEditSheet: View {
             )
             onSaved?(folder)
         }
+        AppHaptic.success.play()
         dismiss()
     }
 

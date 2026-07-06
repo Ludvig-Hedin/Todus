@@ -43,6 +43,10 @@ struct HomeView: View {
     @State private var briefingThreadRoute: HomeThreadIdRoute? = nil
     @State private var showDocsSheet = false
     @State private var meetingRoute: HomeMeetingRoute? = nil
+    /// Item pending confirmation before the destructive "Not a reply" / "Not a draft
+    /// I want" briefing dismissal fires — avoids an accidental irreversible dismiss
+    /// from a stray tap on the destructive menu row.
+    @State private var pendingBriefingDismiss: BriefingFeedItem? = nil
 
     /// Most recent foreground refresh — used to gate the scenePhase listener so we don't
     /// double-refresh when the app comes back to foreground rapidly (e.g. after dismissing
@@ -77,10 +81,9 @@ struct HomeView: View {
 
                     foldersSection
 
-                    // Pages not pinned to the tab bar — only shown in developer mode
-                    if services.effectiveDeveloperModeEnabled {
-                        moreSection
-                    }
+                    // Pages not pinned to the tab bar (e.g. Docs) — always shown so every
+                    // part of the app stays discoverable, not just in developer mode.
+                    moreSection
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 16)
@@ -218,6 +221,31 @@ struct HomeView: View {
                 await loadHomeData()
                 lastRefresh = Date()
             }
+        }
+        // Confirm before the destructive "Not a reply" / "Not a draft I want" briefing
+        // dismissal — this is a training-signal action with no undo.
+        .confirmationDialog(
+            pendingBriefingDismiss?.source == .preparedAction ? "Not a draft I want?" : "Not a reply?",
+            isPresented: Binding(
+                get: { pendingBriefingDismiss != nil },
+                set: { if !$0 { pendingBriefingDismiss = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Dismiss", role: .destructive) {
+                if let item = pendingBriefingDismiss {
+                    Task {
+                        await dismissBriefingItem(item)
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+                }
+                pendingBriefingDismiss = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingBriefingDismiss = nil
+            }
+        } message: {
+            Text("This tells the assistant it got this one wrong so it stops surfacing similar items.")
         }
     }
 
@@ -893,7 +921,10 @@ struct HomeView: View {
         }
 
         Button {
-            Task { await markBriefingItemDone(item) }
+            Task {
+                await markBriefingItemDone(item)
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            }
         } label: {
             Label("Mark done", systemImage: "checkmark.circle")
         }
@@ -901,7 +932,10 @@ struct HomeView: View {
         Menu {
             ForEach(snoozePresets, id: \.label) { preset in
                 Button(preset.label) {
-                    Task { await snoozeBriefingItem(item, until: preset.date()) }
+                    Task {
+                        await snoozeBriefingItem(item, until: preset.date())
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
                 }
             }
         } label: {
@@ -911,8 +945,10 @@ struct HomeView: View {
         Divider()
 
         // Destructive — labeled honestly: this is a "this isn't a reply" / training signal.
+        // Confirmed via `.confirmationDialog` (see `pendingBriefingDismiss`) since this is
+        // an irreversible action with no undo affordance in the row.
         Button(role: .destructive) {
-            Task { await dismissBriefingItem(item) }
+            pendingBriefingDismiss = item
         } label: {
             Label(item.source == .preparedAction ? "Not a draft I want" : "Not a reply", systemImage: "xmark.circle")
         }
@@ -942,14 +978,40 @@ struct HomeView: View {
         }
     }
 
-    // TODO(bug-hunt): These three handlers call the backend with `item.backendId`
-    // without first re-validating the item still exists in the current briefing. If
-    // the server removed/refreshed the item between render and tap, the mutation
-    // silently fails (errors are logged, not surfaced) while the row is removed
-    // locally — leaving the app's view and the server out of sync. Fix needs a UX
-    // decision (toast on stale item? refresh briefing? optimistic-then-reconcile?),
-    // so it's flagged rather than auto-fixed. See CODE_REVIEW_BACKLOG.md (bug-hunt 2026-06-14).
+    // TODO(bug-hunt): These three handlers previously called the backend with
+    // `item.backendId` without re-validating the item still exists in the current
+    // briefing (BH-0614-1). Fixed by guarding on `briefingItemStillExists` (mirrors
+    // `todayActionLine`'s pool lookup) — a stale item now skips the mutation and
+    // triggers a briefing refresh so the UI reconciles with the server instead of
+    // silently no-op'ing. See CODE_REVIEW_BACKLOG.md (bug-hunt 2026-06-14).
+
+    /// True if `item.backendId` is still present in whichever pool it originated from.
+    /// Mirrors `todayActionLine`'s lookup — `needsYou` + `waitingOn` + `today.urgentReply`
+    /// for open-loops, `prepared` for prepared-actions.
+    private func briefingItemStillExists(_ item: BriefingFeedItem) -> Bool {
+        guard let briefing = services.emailService.assistantBriefing else { return false }
+        switch item.source {
+        case .openLoop:
+            if briefing.needsYou.contains(where: { $0.id == item.backendId }) { return true }
+            if briefing.waitingOn.contains(where: { $0.id == item.backendId }) { return true }
+            if briefing.today.urgentReply?.id == item.backendId { return true }
+            return false
+        case .preparedAction:
+            return briefing.prepared.contains(where: { $0.id == item.backendId })
+        }
+    }
+
+    /// Re-fetches the briefing so a stale row (already actioned/removed server-side)
+    /// gets reconciled instead of the client firing a mutation against a dead id.
+    private func refreshStaleBriefing() async {
+        _ = await services.emailService.loadAssistantBriefing()
+    }
+
     private func dismissBriefingItem(_ item: BriefingFeedItem) async {
+        guard briefingItemStillExists(item) else {
+            await refreshStaleBriefing()
+            return
+        }
         switch item.source {
         case .openLoop:
             await services.emailService.dismissBriefingOpenLoop(id: item.backendId, threadId: item.threadId)
@@ -959,6 +1021,10 @@ struct HomeView: View {
     }
 
     private func markBriefingItemDone(_ item: BriefingFeedItem) async {
+        guard briefingItemStillExists(item) else {
+            await refreshStaleBriefing()
+            return
+        }
         switch item.source {
         case .openLoop:
             await services.emailService.completeBriefingOpenLoop(id: item.backendId, threadId: item.threadId)
@@ -970,6 +1036,10 @@ struct HomeView: View {
     }
 
     private func snoozeBriefingItem(_ item: BriefingFeedItem, until: Date) async {
+        guard briefingItemStillExists(item) else {
+            await refreshStaleBriefing()
+            return
+        }
         switch item.source {
         case .openLoop:
             await services.emailService.snoozeBriefingOpenLoop(id: item.backendId, threadId: item.threadId, until: until)

@@ -18,6 +18,13 @@ struct EmailAutomationPolicyView: View {
     /// already committed locally. Cancelled + restarted on every mutation;
     /// `.onDisappear` flushes any pending push synchronously.
     @State private var pushTask: Task<Void, Never>?
+    /// Inline feedback shown under the excluded-sender field — set on duplicate
+    /// add attempts, auto-cleared on the next successful edit/add.
+    @State private var patternFieldNotice: String?
+    /// Monotonic counter bumped on a successful pattern add so the
+    /// `.sensoryFeedback(.success, trigger:)` modifier fires a haptic — matches
+    /// the pattern in EmailComposeView / EmailThreadView.
+    @State private var addPatternSuccessTick: Int = 0
 
     var body: some View {
         List {
@@ -49,6 +56,13 @@ struct EmailAutomationPolicyView: View {
                     }
                     .disabled(trimmedNewPattern.isEmpty)
                     .buttonStyle(.plain)
+                }
+
+                if let patternFieldNotice {
+                    Text(patternFieldNotice)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .transition(.opacity)
                 }
             } header: {
                 Text("Excluded senders")
@@ -152,6 +166,7 @@ struct EmailAutomationPolicyView: View {
             pushTask?.cancel()
             Task { await services.saveSharedAIProfile() }
         }
+        .sensoryFeedback(.success, trigger: addPatternSuccessTick)
     }
 
     // MARK: - Helpers
@@ -179,11 +194,28 @@ struct EmailAutomationPolicyView: View {
         // De-dupe case-insensitively to match what the backend filtering does.
         guard !patterns.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) else {
             newPattern = ""
+            showPatternFieldNotice("Pattern already excluded")
             return
         }
         patterns.append(trimmed)
         services.assistantAutomationPolicy.excludedSenderPatterns = patterns
         newPattern = ""
+        addPatternSuccessTick &+= 1
+    }
+
+    /// Briefly shows inline feedback under the excluded-sender field, then
+    /// auto-clears it. Used for the duplicate-pattern case since the add
+    /// silently no-ops otherwise.
+    private func showPatternFieldNotice(_ message: String) {
+        withAnimation(AppTheme.Motion.base) {
+            patternFieldNotice = message
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2.5))
+            withAnimation(AppTheme.Motion.base) {
+                patternFieldNotice = nil
+            }
+        }
     }
 
     private func deletePatterns(at offsets: IndexSet) {

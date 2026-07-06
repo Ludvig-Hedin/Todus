@@ -163,7 +163,7 @@ struct TaskTableView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(task.completed ? "Mark as incomplete" : "Mark complete")
+            .accessibilityLabel(task.completed ? "Mark as incomplete" : "Mark as complete")
 
             // Inner status icon removed — TaskStatus.todo's symbol is `circle`,
             // which collided with the checkbox column to render as a double-circle.

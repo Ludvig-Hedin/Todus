@@ -137,7 +137,12 @@ struct WelcomeTourView: View {
                 Button {
                     finish()
                 } label: {
-                    Text("Skip")
+                    // "Skip tour" (not bare "Skip") so the outcome is unambiguous —
+                    // this ends the whole tour, unlike the corner Skip on the
+                    // explainer pages which reads the same way for the same action,
+                    // but here it sits next to "Show me around" where a bare "Skip"
+                    // could be misread as skipping just this screen.
+                    Text("Skip tour")
                         .font(.system(size: 16, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 13)

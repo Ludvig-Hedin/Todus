@@ -1014,11 +1014,11 @@ Scoped bug review of the iOS app's main-flow surfaces (auth, email, tasks, calen
 - `Features/Meetings/MeetingDetailView.swift:506` (`generateSummary`) — a failed post-action `loadMeeting()` nils `meeting`, replacing the just-generated summary with "Meeting not found". Now snapshots `meeting` and restores it if the refresh returns nil.
 - `Features/Meetings/MeetingDetailView.swift:515` (`scheduleBot`) — same failed-reload-blanks-the-view defect; same snapshot/restore fix.
 
-## Needs human review (1)
+## Needs human review (1) — ✅ RESOLVED 2026-06-15
 
 | ID | Area | Where | Severity | Problem | Suggested fix |
 |----|------|-------|----------|---------|---------------|
-| BH-0614-1 | Home briefing | `Features/Home/HomeView.swift:945-974` (`dismissBriefingItem`/`markBriefingItemDone`/`snoozeBriefingItem`) | 🟠 high | Handlers call the backend with `item.backendId` without re-validating the item still exists in the current briefing. If the server removed/refreshed the item between render and tap, the mutation silently fails (errors logged, not surfaced) while the row is removed locally → app view and server diverge. TODO comment added at the handler site. | Re-validate the item exists in the current briefing before the call; on miss, show a toast / refresh the briefing rather than firing a doomed mutation. Needs a UX decision, so not auto-fixed. |
+| ~~BH-0614-1~~ | Home briefing | `Features/Home/HomeView.swift` (`dismissBriefingItem`/`markBriefingItemDone`/`snoozeBriefingItem`) | 🟠 high | Handlers called the backend with `item.backendId` without re-validating the item still exists in the current briefing → silent mutation failure + local/server divergence. | **RESOLVED** in the 2026-06-15 UX pass: added `briefingItemStillExists(_:)` (mirrors `todayActionLine`'s pool lookup); all three handlers now skip the mutation and call `loadAssistantBriefing()` to reconcile when the item is stale. |
 
 ## Refuted — investigated, NOT bugs (no action)
 
@@ -1028,6 +1028,40 @@ Scoped bug review of the iOS app's main-flow surfaces (auth, email, tasks, calen
 - `Features/Voice/VoiceChatViewModel.swift:135` (trailing-event state resurrection) — already guarded by `if case .failed = connectionState { return }` at the top of `handleEvent`. (Overlaps the broader, still-open `CR-0613-7` TODO; left as-is.)
 - `Navigation/MainTabView.swift:87` (capture-failure dismiss timer) — idiomatic cancel-and-replace `Task` on the main actor; `guard !Task.isCancelled` + `try?` handle cancellation correctly.
 - `App/AppServices.swift:806` (`Task { @MainActor … }` after `Task.yield()`) — class is `@MainActor`; the closure is explicitly `@MainActor`; mutated properties have no `didSet`. Correct as written.
+
+---
+
+# iOS UX hardening pass — 2026-06-15 (whole-app, main user-flow surfaces)
+
+Follow-up to the 2026-06-14 bug hunt: addressed the full finding set from three audits (UX flow assessment, UX-polish, bug-hunt) across the iOS app. 9 parallel implementer agents each owned a disjoint file set; every agent grep-verified symbols before use and deferred true feature-scope items. **Full `xcodebuild -scheme Todus` → BUILD SUCCEEDED** with all edits combined. 49 files changed (+1066/-224). Not yet committed with tests beyond the compile.
+
+## Fixed this pass (highlights by surface)
+
+- **Auth/onboarding** — email-validation error no longer flashes mid-typing (gated on blur); "Send code" always visible-but-disabled; email field a11y label/hint; OTP digit-only paste filter; 60s resend cooldown; user-friendly backend error copy (no Supabase/SMTP leakage); Gmail-check loading state + haptic; bell-icon a11y; WelcomeTour "Skip" → "Skip tour". (RootView reinstall "bug" confirmed a non-issue — `&&` already skips the card when authenticated.)
+- **Email** — compose `To`-invalid indicator + send-fail haptic + attachment-remove confirm + CC/BCC hint; inbox folder-dropdown affordance on iOS 26, search-term truncation, pagination double-tap guard; thread task/event/copy haptics; row/receipt truncation help.
+- **Tasks** — TaskDetailSheet save now surfaces errors + keeps sheet open on failure; **bulk-capture truncation banner** (`lastTruncatedCount`/`lastTruncatedAt` → MainTabView, mirrors rollback banner); attachment-delete confirms; dynamic snooze labels; a11y on parse-state/folder chip/board title; checkbox copy.
+- **Create sheet** — duplicate-send guard (`isSending`); `To` required for email type; attachment-delete confirm.
+- **Folders** — a11y labels on add/menu; MoveToFolder shows current folder + disables no-op Inbox + inline create-error; AddToFolder "Add X to [folder]"; save haptic; empty-state copy.
+- **Calendar** — explicit read-only-event message; clearer reconnect-Gmail scope copy; Today/nav/list/copy haptics; refresh indicator over non-empty events; nav-chevron a11y; proactive full-access permission copy.
+- **AI + Voice** — **voice-connect failure now shows an error card + Retry for all users** (was dev-only); `isDisconnecting` "Closing…" state; muted mic icon; tool-call success confirmation; copy-card haptic; sources count header; disabled-state dimming; `+`/attachment a11y labels.
+- **Home/Search** — **BH-0614-1 fixed** (stale-briefing reconcile); 350ms search-nav flicker removed; person row tappable → compose; "See all N" rows; Docs no longer dev-gated; destructive-dismiss confirm + haptics.
+- **Settings** — signature swipe-delete confirm; billing error-alert + `forceRefreshFromAutumn` after cancel; disconnect-button label + 44pt target; tab-bar customization surfaced in Settings; calendar toggle labels; duplicate-pattern feedback; voice-settings nav-title consistency; tab-bar-customization background token.
+- **Docs/Meetings/Notifications** — faster new-doc autofocus + blur-save; docs search-task cancel; meetings sync button + row truncation help; Q&A send spinner + a11y; notification row haptic + truncation help.
+
+## Deferred — feature-scope / needs product decision or API change (NOT done)
+
+| ID | Where | Why deferred |
+|----|-------|--------------|
+| UX-D1 | Board view (`BoardView`) | Inline "add to column" is a new feature, not a polish fix. |
+| UX-D2 | `FolderDetailView.fetchFolderContents` | Distinguishing empty-vs-failed needs the service to report success/failure (currently swallows + falls back to local). TODO left in code. |
+| UX-D3 | `CalendarMonthView` row height | Size-class-adaptive height risks layout churn across the perf-tuned ±60-month buffer. |
+| UX-D4 | AI chat — edit-message undo/branching, per-tool retry, streaming keystroke-lag, per-source "open in app" | Architectural / new UI. |
+| UX-D5 | `VoiceInputButton` transcribing-cancel | No cancel API exists; building one is out of scope. |
+| UX-D6 | AI delete-confirmation context (due date/folder) | `PendingDeleteConfirmation` carries only id/title; needs a new service fetch. |
+| UX-D7 | Meeting Q&A timestamp sourcing; docs "last refreshed" indicator | Needs `MeetingsService`/`DocsService` changes outside the edited files. |
+| UX-D8 | Recipient display-name preservation in compose | Data-model change (`[String]` → `[Recipient]`). |
+| UX-D9 | Cross-tab "See all N" query pre-fill | No query-seed property on `AppServices` yet. |
+| UX-D10 | Email AI-draft → compose insert (orphaned `EmailAIDraftSheet`) | Needs AIChatView→compose callback plumbing; decide keep-and-wire vs delete. |
 
 ---
 
