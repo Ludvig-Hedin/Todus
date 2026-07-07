@@ -140,14 +140,17 @@ final class MLXInferenceService: LocalAIService {
         // `evict` cancels an entry but leaves the slot, a fresh caller
         // would otherwise inherit the cancellation and surface a
         // `LocalAIError.cancelled` they never requested.
-        // TODO(bug-hunt): Residual cancellation race — if evict()/unloadAll() cancels
-        // this entry's task AFTER the !isCancelled check passes but while
-        // `await pending.task.value` is suspended, this coalesced caller still
-        // surfaces a CancellationError it never requested. Consider having
-        // evict/unloadAll synchronously removeValue(forKey:) the slot they cancel,
-        // or retrying a fresh load when a non-cancelled caller catches CancellationError.
         if let pending = inflight[modelId], !pending.task.isCancelled {
-            return try await pending.task.value
+            do {
+                return try await pending.task.value
+            } catch is CancellationError {
+                // Residual race: evict()/unloadAll() cancelled the shared task
+                // AFTER the isCancelled check passed but while we were
+                // suspended on it. If *this* caller wasn't cancelled, the
+                // cancellation isn't ours — fall through and start a fresh
+                // load instead of surfacing an error the user never requested.
+                try Task.checkCancellation()
+            }
         }
         inflightSeq &+= 1
         let seq = inflightSeq

@@ -1267,7 +1267,7 @@ struct CreateSheet: View {
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
             let detected = resolveAutoType(for: trimmed)
-            withAnimation(.snappy(duration: 0.15)) {
+            withAnimation(AppTheme.Motion.fast) {
                 autoDetectedType = detected
             }
         }

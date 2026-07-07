@@ -832,10 +832,10 @@ struct HomeView: View {
         }
     }
 
-    // TODO(bug-hunt): These three handlers previously called the backend with
-    // `item.backendId` without re-validating the item still exists in the current
-    // briefing (BH-0614-1). Fixed by guarding on `briefingItemStillExists` (mirrors
-    // `todayActionLine`'s pool lookup) — a stale item now skips the mutation and
+    // NOTE (fixed, BH-0614-1): These three handlers previously called the backend
+    // with `item.backendId` without re-validating the item still exists in the
+    // current briefing. Now guarded by `briefingItemStillExists` (mirrors
+    // `todayActionLine`'s pool lookup) — a stale item skips the mutation and
     // triggers a briefing refresh so the UI reconciles with the server instead of
     // silently no-op'ing. See CODE_REVIEW_BACKLOG.md (bug-hunt 2026-06-14).
 

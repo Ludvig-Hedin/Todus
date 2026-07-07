@@ -168,11 +168,10 @@ final class UnifiedCalendarService {
             await googleService.refresh(googleConnections: googleConnections)
         }
 
-        // TODO(bug-hunt): If a connection's calendar list isn't loaded yet (cold start /
-        // isStale race not fully resolved by the refresh above), GoogleCalendarService.events
-        // falls back to fetching `primary` and ignores hiddenCalendarIds, so a hidden primary
-        // can briefly reappear. Ensure refresh() populates sources for every connection
-        // before events() runs, or make the primary fallback respect hiddenCalendarIds.
+        // NOTE (fixed): when a connection's calendar list isn't loaded yet (cold
+        // start), GoogleCalendarService.events now skips connections that have
+        // any hidden calendar instead of falling back to an unfiltered `primary`
+        // fetch — a hidden primary can no longer briefly reappear.
         let (events, _) = await googleService.events(
             from: startDate,
             to: endDate,

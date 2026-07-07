@@ -571,10 +571,10 @@ struct AuthView: View {
 
     /// Opens the user's email inbox — tries known app-specific inbox URL schemes
     /// before falling back to mailto: (which opens the composer, not the inbox).
-    /// Ported from `AuthPageView.openEmailInbox()` so both auth surfaces behave the
-    /// same. NOTE: the custom schemes below only resolve via `canOpenURL` if they're
-    /// declared under `LSApplicationQueriesSchemes` in Info.plist; without that they
-    /// silently fall through to `mailto:` (still functional, just the composer).
+    /// Ported from the deleted legacy auth sheet's `openEmailInbox()`. NOTE: the
+    /// custom schemes below only resolve via `canOpenURL` because they're
+    /// declared under `LSApplicationQueriesSchemes` in Info.plist; without that
+    /// they'd silently fall through to `mailto:`.
     private func openEmailInbox() {
         // Ordered by most-specific inbox URL first.
         // googlegmail:/// opens Gmail directly to the inbox (not the composer).

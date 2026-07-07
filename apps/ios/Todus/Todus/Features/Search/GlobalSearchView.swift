@@ -569,6 +569,9 @@ struct GlobalSearchView: View {
         }
 
         let q = trimmedQuery
+        // Drop the previous query's server hits — otherwise they stay merged
+        // into the visible results for the ~400ms until the new search lands.
+        serverEmailResults = []
         isEmailSearchPending = true
         emailSearchTask = Task { @MainActor in
             // Slightly longer debounce than calendar — this is a network call.

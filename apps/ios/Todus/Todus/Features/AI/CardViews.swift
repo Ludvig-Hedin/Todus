@@ -882,6 +882,12 @@ struct InlineComposeCardView: View {
             guard let p else { return }
             let payload = encodePayload()
             await MainActor.run {
+                // Guard INSIDE the MainActor block: the await above releases the
+                // main actor, so onDisappear's flush can run in that window and
+                // already fire the save. Both this body and onDisappear are
+                // synchronous on the main actor, making check-and-clear atomic —
+                // exactly one of them sends update_draft.
+                guard hasPendingSave else { return }
                 hasPendingSave = false
                 onAction?("update_draft", ["draftId": p.draftId, "payload": payload]) { success, err in
                     if success {

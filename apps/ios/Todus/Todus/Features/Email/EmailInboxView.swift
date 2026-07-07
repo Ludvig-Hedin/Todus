@@ -437,16 +437,28 @@ struct EmailInboxView: View {
             searchDebounceTask = Task {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard !Task.isCancelled else { return }
+                let queryAtDispatch = searchText
                 let task = Task {
                     guard !Task.isCancelled else { return }
                     await emailService.loadThreads(
                         folder: selectedFolder.rawValue,
-                        query: searchText.isEmpty ? nil : searchText,
+                        query: queryAtDispatch.isEmpty ? nil : queryAtDispatch,
                         refresh: true
                     )
                 }
                 searchTask = task
                 await task.value
+                // Server results are in `emailService.threads` now. Mark them as
+                // authoritative for this query so recomputeFilteredThreads shows
+                // them as-is instead of re-filtering against the local
+                // subject/from/snippet blob (which drops body-only matches).
+                // Guard: the user may have typed more while we were in flight —
+                // a keystroke already reset serverSearchQuery to nil and kicked
+                // off a newer search, so only claim the results if the query is
+                // still current.
+                guard !Task.isCancelled, searchText == queryAtDispatch else { return }
+                serverSearchQuery = queryAtDispatch
+                recomputeFilteredThreads()
             }
         }
     }

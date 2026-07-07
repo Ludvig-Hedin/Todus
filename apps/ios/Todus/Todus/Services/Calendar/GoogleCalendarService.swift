@@ -167,7 +167,16 @@ final class GoogleCalendarService {
         for conn in connections {
             let sources = self.sources(forConnectionId: conn.id)
             if sources.isEmpty {
-                // Don't constrain — backend will fetch from `primary` for safety.
+                // Calendar list not loaded yet (cold start). The backend would
+                // default to `primary`, which ignores hiddenCalendarIds — so if
+                // the user has hidden anything on this connection, skip it this
+                // round rather than briefly resurrecting a hidden calendar.
+                // (Fetching resumes on the next pass once sources are loaded.)
+                let connPrefix = "\(CalendarSourceIDPrefix.google):\(conn.id):"
+                if hiddenCalendarIds.contains(where: { $0.hasPrefix(connPrefix) }) {
+                    calendarIds[conn.id] = [] // explicit empty => backend skips
+                }
+                // Otherwise don't constrain — backend fetches `primary` for safety.
                 continue
             }
             let visible = sources

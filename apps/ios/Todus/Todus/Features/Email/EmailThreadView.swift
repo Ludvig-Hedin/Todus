@@ -2104,16 +2104,21 @@ private struct MessageRow: View {
             do {
                 let all = try await services.emailService.fetchMessageAttachments(messageId: message.id)
                 guard let match = all.first(where: { $0.attachmentId == attachment.id })
-                        ?? all.first(where: { $0.filename == attachment.filename }),
-                      let data = match.decodedData else {
+                        ?? all.first(where: { $0.filename == attachment.filename }) else {
                     attachmentError = "Couldn't download \(attachment.filename)."
                     return
                 }
+                // Base64 decode + disk write off the main actor — a multi-MB
+                // attachment would otherwise hitch the UI.
                 let ext = (attachment.filename as NSString).pathExtension
-                guard let localName = AttachmentService.shared.saveData(
-                    data,
-                    fileExtension: ext.isEmpty ? "bin" : ext
-                ) else {
+                let localName = await Task.detached(priority: .userInitiated) { () -> String? in
+                    guard let data = match.decodedData else { return nil }
+                    return AttachmentService.shared.saveData(
+                        data,
+                        fileExtension: ext.isEmpty ? "bin" : ext
+                    )
+                }.value
+                guard let localName else {
                     attachmentError = "Couldn't save \(attachment.filename)."
                     return
                 }

@@ -175,11 +175,18 @@ struct TaskDetailSheet: View {
         ) {
             Button("Remove", role: .destructive) {
                 if let name = pendingDeleteAttachment {
-                    // Only drop the chip here. The file itself is deleted in
-                    // saveTask() after a successful save — deleting from disk
-                    // immediately meant Cancel left the persisted task pointing
-                    // at a file that no longer existed.
                     attachmentNames.removeAll { $0 == name }
+                    if task.attachmentNames.contains(name) {
+                        // Persisted attachment: only drop the chip here. The file
+                        // is deleted in saveTask() after a successful save —
+                        // deleting immediately meant Cancel left the persisted
+                        // task pointing at a file that no longer existed.
+                    } else {
+                        // Added this session and never persisted — nothing
+                        // references it, so delete the file now (leaving it
+                        // orphaned the old way leaked disk space).
+                        AttachmentService.shared.delete(filename: name)
+                    }
                 }
                 pendingDeleteAttachment = nil
             }

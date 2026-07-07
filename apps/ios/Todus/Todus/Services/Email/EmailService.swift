@@ -1649,8 +1649,12 @@ final class EmailService {
     /// simple HTML. If the body already looks like HTML (e.g. an AI-generated
     /// draft), it passes through unchanged.
     static func composeBodyToHTML(_ body: String) -> String {
-        let lower = body.lowercased()
-        if lower.contains("<p") || lower.contains("<div") || lower.contains("<br") || lower.contains("<html") {
+        // Real-tag detection — a bare `contains("<p")` false-positived on plain
+        // text like "i<processes" and shipped it unescaped.
+        if body.range(
+            of: #"<(p|div|br|html|body|table|span|a)(\s|>|/)"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil {
             return body
         }
 
