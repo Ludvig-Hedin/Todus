@@ -1,6 +1,18 @@
 # Migration Backlog
 
-Last updated: 2026-05-24
+Last updated: 2026-07-08
+
+## 📋 2026-07-08 — iOS follow-up tasks (ready for pickup)
+
+The iOS triple audit (UX assessment + polish + bug hunt, 2026-07-07/08) fixed ~75 verified findings across 4 commits; all fixes adversarially re-verified and simulator builds green. The remaining feature/ops work is specced as self-contained, agent-ready tasks in **[docs/ios-followup-tasks.md](docs/ios-followup-tasks.md)**:
+
+1. Wire the dynamic tab bar (BH-0613-6) — full design + gotchas documented
+2. In-composer attachment picker (upload pipeline already works)
+3. Widen email search beyond the inbox folder
+4. Persist meeting Q&A (session cache tier + durable tier)
+5. **Ops: deploy `apps/server` before the next iOS release** (mail.send idempotency key)
+6. Device smoke test (attachment round-trip, idempotent send)
+7. Micro-nits batch
 
 ## ✅ 2026-05-24 — Docs feature overhaul (iOS + macOS)
 
