@@ -267,8 +267,7 @@ final class AppServices {
     var composeEmailSeedBcc: String? = nil
     var composeEmailSeedSubject: String? = nil
     /// Filenames (already saved by AttachmentService) carried into a fresh
-    /// EmailComposeView. Surfaced as chips so the user keeps a record even
-    /// though the send pipeline does not yet upload binary attachments.
+    /// EmailComposeView. Surfaced as chips and uploaded inline with the send.
     var composeEmailSeedAttachments: [String] = []
     /// Connection ID pre-selected in CreateSheet's From picker, forwarded to EmailComposeView.
     var composeEmailSeedFromConnectionId: String? = nil

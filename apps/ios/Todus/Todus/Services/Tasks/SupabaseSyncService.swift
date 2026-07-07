@@ -21,15 +21,32 @@ final class SupabaseSyncService: SyncService {
     /// local TaskRecord immediately, so unlike upserts they can't be rebuilt from
     /// surviving records by `retryUnsyncedTasks` — dropping the batch lost the
     /// deletion forever and the task resurrected from the server on next pull.
-    /// Held here (deduped by taskID) and replayed on the next retry pass.
-    /// TODO(bug-hunt): in-memory only — a kill before reconnect still loses the
-    /// delete. Persisting tombstones needs a schema change.
-    private var pendingDeleteRetries: [SyncMutation] = []
+    /// Deduped by taskID, replayed on the next retry pass, and persisted to
+    /// UserDefaults (SyncMutation is Codable) so an app kill before reconnect
+    /// doesn't lose the deletion either.
+    private var pendingDeleteRetries: [SyncMutation] = [] {
+        didSet { persistPendingDeleteRetries() }
+    }
+
+    private static let pendingDeleteRetriesKey = "TaskApp.pendingDeleteRetries"
 
     init(configuration: AppConfiguration, authStore: AuthSessionStore) {
         self.configuration = configuration
         self.authStore = authStore
         self.client = configuration.hasRemoteBackend ? SupabaseEdgeFunctionClient(configuration: configuration) : nil
+        // Restore delete tombstones from a previous run (offline delete → kill).
+        if let data = UserDefaults.standard.data(forKey: Self.pendingDeleteRetriesKey),
+           let restored = try? JSONDecoder().decode([SyncMutation].self, from: data) {
+            pendingDeleteRetries = restored
+        }
+    }
+
+    private func persistPendingDeleteRetries() {
+        if pendingDeleteRetries.isEmpty {
+            UserDefaults.standard.removeObject(forKey: Self.pendingDeleteRetriesKey)
+        } else if let data = try? JSONEncoder().encode(pendingDeleteRetries) {
+            UserDefaults.standard.set(data, forKey: Self.pendingDeleteRetriesKey)
+        }
     }
 
     func enqueue(_ mutations: [SyncMutation], in context: ModelContext) async {

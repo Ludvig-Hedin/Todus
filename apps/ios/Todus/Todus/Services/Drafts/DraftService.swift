@@ -70,17 +70,22 @@ final class DraftService {
         let subject: String
         let message: String
         let draftId: String?
+        /// Idempotency key — the server acknowledges (instead of re-sending) a
+        /// retry that carries a clientSendId it has already delivered. Makes
+        /// crash-retry of in-flight sends safe (no duplicate email).
+        let clientSendId: String?
     }
 
     /// Calls mail.send. The backend deletes the draft when draftId is provided.
-    func send(draftId: String?, payload: DraftPayload) async throws {
+    func send(draftId: String?, payload: DraftPayload, clientSendId: String? = nil) async throws {
         let input = SendInput(
             to: payload.to,
             cc: payload.cc.isEmpty ? nil : payload.cc,
             bcc: payload.bcc.isEmpty ? nil : payload.bcc,
             subject: payload.subject,
             message: payload.body,
-            draftId: draftId
+            draftId: draftId,
+            clientSendId: clientSendId
         )
         let _: EmptyResult = try await api.trpcMutation("mail.send", input: input)
     }
@@ -111,7 +116,10 @@ final class DraftService {
         )
 
         do {
-            try await send(draftId: nil, payload: payload)
+            // The draft's stable id doubles as the idempotency key: the server
+            // acknowledges (rather than re-delivers) a retry of a send that
+            // already landed — making crash-retry of "sending" rows safe.
+            try await send(draftId: nil, payload: payload, clientSendId: draft.id)
             context.delete(draft)
             try? context.save()
         } catch {
@@ -120,9 +128,9 @@ final class DraftService {
         }
     }
 
-    /// Retry all pending/failed drafts. Call on reconnect.
-    /// Records stuck in "sending" (in-flight at last crash) are intentionally
-    /// left alone — see the duplicate-delivery note below.
+    /// Retry all pending/failed drafts, plus records stuck in "sending"
+    /// (in-flight at last crash). Safe against duplicate delivery because every
+    /// send carries the draft id as an idempotency key the server dedupes on.
     func flushPending(in context: ModelContext) async {
         // Re-entrant guard. Without this, a rapid offline→online→offline→online
         // bounce could fire two concurrent flushes: the second would reset a
@@ -132,17 +140,18 @@ final class DraftService {
         isFlushing = true
         defer { isFlushing = false }
 
-        // Deliberately do NOT reset stuck "sending" records for retry. A draft
-        // that was mid-flight when the app was killed may already have been
-        // delivered server-side (mail.send has no idempotency key), so
-        // auto-resending it risked DUPLICATE delivery to the recipient — worse
-        // than a rare lost send.
-        // TODO(bug-hunt): add a client idempotency key to mail.send (server
-        // dedupe) so stuck "sending" drafts can be replayed safely, and surface
-        // them in the UI for manual retry until then.
+        // Reset stuck "sending" rows for retry — the clientSendId dedupe on the
+        // server makes this safe even when the crashed attempt actually
+        // delivered (the retry is acknowledged, not re-sent).
+        let stuckDescriptor = FetchDescriptor<DraftRecord>(
+            predicate: #Predicate { $0.syncState == "sending" }
+        )
+        let stuck = (try? context.fetch(stuckDescriptor)) ?? []
+        for draft in stuck {
+            draft.syncState = "pendingSend"
+        }
+        if !stuck.isEmpty { try? context.save() }
 
-        // Auto-retry drafts that never completed a send attempt: "pendingSend"
-        // (never reached the wire) and "failed" (the send call itself errored).
         let descriptor = FetchDescriptor<DraftRecord>(
             predicate: #Predicate { $0.syncState == "pendingSend" || $0.syncState == "failed" }
         )

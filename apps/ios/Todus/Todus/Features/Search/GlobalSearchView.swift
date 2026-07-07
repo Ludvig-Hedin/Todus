@@ -21,6 +21,13 @@ struct GlobalSearchView: View {
     /// "No results" flash for calendar-only queries during the 250ms debounce
     /// plus fetch.
     @State private var isCalendarSearchPending = false
+    /// Server-side email search results (covers mail that isn't loaded in the
+    /// inbox). Merged with the instant local filter below. Debounced like the
+    /// calendar search; uses `searchThreadsServer`, which never clobbers
+    /// `emailService.threads`.
+    @State private var serverEmailResults: [EmailThread] = []
+    @State private var emailSearchTask: Task<Void, Never>?
+    @State private var isEmailSearchPending = false
 
     // MARK: - Derived results (all local — no extra network calls)
 
@@ -38,12 +45,16 @@ struct GlobalSearchView: View {
     private var emailResults: [EmailThread] {
         guard !trimmedQuery.isEmpty else { return [] }
         let q = trimmedQuery.lowercased()
-        return services.emailService.threads.filter {
+        // Instant local matches over loaded threads, then server matches (which
+        // include body-text hits and mail not in memory) deduped by thread id.
+        let local = services.emailService.threads.filter {
             $0.subject.lowercased().contains(q) ||
             $0.from.name.lowercased().contains(q) ||
             $0.from.email.lowercased().contains(q) ||
             $0.snippet.lowercased().contains(q)
         }
+        var seen = Set(local.map(\.id))
+        return local + serverEmailResults.filter { seen.insert($0.id).inserted }
     }
 
     /// Unique people from loaded email threads matching the query
@@ -78,10 +89,10 @@ struct GlobalSearchView: View {
                 if trimmedQuery.isEmpty {
                     emptyPrompt
                 } else if !hasResults {
-                    // Hold off on "No results" while the calendar search is
-                    // still in flight — calendar-only matches otherwise flash
-                    // a false negative for ~a quarter second.
-                    if isCalendarSearchPending {
+                    // Hold off on "No results" while the calendar or server
+                    // email search is still in flight — those matches otherwise
+                    // flash a false negative.
+                    if isCalendarSearchPending || isEmailSearchPending {
                         VStack {
                             Spacer()
                             ProgressView()
@@ -113,10 +124,15 @@ struct GlobalSearchView: View {
                 isSearchFocused = true
             }
         }
-        .onChange(of: trimmedQuery) { scheduleCalendarSearch() }
+        .onChange(of: trimmedQuery) {
+            scheduleCalendarSearch()
+            scheduleEmailSearch()
+        }
         .onDisappear {
             calendarSearchTask?.cancel()
             calendarSearchTask = nil
+            emailSearchTask?.cancel()
+            emailSearchTask = nil
         }
     }
 
@@ -176,17 +192,15 @@ struct GlobalSearchView: View {
                         ForEach(emailResults.prefix(5)) { thread in
                             emailRow(thread)
                         }
-                        // This section filters already-loaded threads locally —
-                        // it can't see mail that isn't in memory. Be honest
-                        // about the partial scope; the Mail tab's own search
-                        // hits the server for full coverage.
-                        // TODO(bug-hunt): call the server search here without
-                        // clobbering emailService.threads once a side-channel
-                        // search API exists.
-                        Text("Searches loaded mail — open Mail search for everything")
-                            .font(.system(size: 11))
-                            .foregroundStyle(AppTheme.mutedText)
+                        if isEmailSearchPending {
+                            HStack(spacing: 6) {
+                                ButtonInlineProgressView(tint: .secondary, side: AppTheme.Metrics.compactInlineSpinner)
+                                Text("Searching all mail…")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(AppTheme.mutedText)
+                            }
                             .padding(.top, 2)
+                        }
                     }
                 }
 
@@ -540,6 +554,30 @@ struct GlobalSearchView: View {
             guard !Task.isCancelled else { return }
             calendarResults = events.filter { $0.title.lowercased().contains(q) }
             isCalendarSearchPending = false
+        }
+    }
+
+    /// Debounced server-side email search (covers body text + threads not
+    /// loaded in the inbox). Never touches `emailService.threads`.
+    private func scheduleEmailSearch() {
+        emailSearchTask?.cancel()
+
+        guard !trimmedQuery.isEmpty, services.emailService.hasConnection else {
+            serverEmailResults = []
+            isEmailSearchPending = false
+            return
+        }
+
+        let q = trimmedQuery
+        isEmailSearchPending = true
+        emailSearchTask = Task { @MainActor in
+            // Slightly longer debounce than calendar — this is a network call.
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            let results = await services.emailService.searchThreadsServer(query: q)
+            guard !Task.isCancelled else { return }
+            serverEmailResults = results
+            isEmailSearchPending = false
         }
     }
 }

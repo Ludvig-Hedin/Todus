@@ -1686,12 +1686,24 @@ private struct MessageRow: View {
     let onReply: (() -> Void)?
     let onForward: (() -> Void)?
 
+    @Environment(AppServices.self) private var services
+
     @State private var isExpanded: Bool
     @State private var showDetails = false
     /// Defers WKWebView creation to avoid blocking the main thread on navigation
     @State private var htmlReady = false
     /// Controlled by the parent thread view — toggled via the header ellipsis menu.
     @Binding var emailDarkMode: Bool
+    /// Attachment id currently downloading (drives the per-card spinner).
+    @State private var downloadingAttachmentId: String?
+    /// Local AttachmentService filename of a downloaded attachment being previewed.
+    @State private var previewedAttachment: DownloadedAttachment?
+    @State private var attachmentError: String?
+
+    private struct DownloadedAttachment: Identifiable {
+        let localFilename: String
+        var id: String { localFilename }
+    }
 
     init(
         message: EmailMessage,
@@ -2015,53 +2027,100 @@ private struct MessageRow: View {
     // MARK: - Attachments
 
     private func attachmentsView(_ attachments: [EmailAttachment]) -> some View {
-        // TODO(bug-hunt): attachment cards are intentionally non-interactive. The
-        // `EmailAttachment` model carries only id/filename/mimeType/size — no URL or
-        // bytes — and `EmailService` exposes no endpoint to fetch attachment content
-        // by message + attachment id. Once a download API lands, wire a tap here to
-        // download → QuickLook (QLPreviewController) with a per-card spinner state.
         VStack(alignment: .leading, spacing: 6) {
             ForEach(attachments) { attachment in
-                HStack(spacing: 10) {
-                    // File type icon
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(attachmentColor(for: attachment.mimeType))
-                        .frame(width: 36, height: 36)
-                        .overlay(
-                            Text(attachmentLabel(for: attachment.mimeType))
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.white)
-                        )
+                Button {
+                    openAttachment(attachment)
+                } label: {
+                    HStack(spacing: 10) {
+                        // File type icon
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(attachmentColor(for: attachment.mimeType))
+                            .frame(width: 36, height: 36)
+                            .overlay(
+                                Text(attachmentLabel(for: attachment.mimeType))
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white)
+                            )
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(attachment.filename)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        Text(formatSize(attachment.size))
-                            .font(.system(size: 11))
-                            .foregroundStyle(AppTheme.mutedText)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(attachment.filename)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            Text(formatSize(attachment.size))
+                                .font(.system(size: 11))
+                                .foregroundStyle(AppTheme.mutedText)
+                        }
+                        Spacer()
+                        if downloadingAttachmentId == attachment.id {
+                            ButtonInlineProgressView(tint: .secondary, side: AppTheme.Metrics.compactInlineSpinner)
+                        } else {
+                            Image(systemName: "arrow.down.circle")
+                                .font(.system(size: 15))
+                                .foregroundStyle(AppTheme.mutedText)
+                        }
                     }
-                    Spacer()
+                    .padding(10)
+                    .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
+                            .stroke(AppTheme.rowStroke, lineWidth: 1)
+                    )
+                    .contentShape(Rectangle())
                 }
-                .padding(10)
-                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
-                        .stroke(AppTheme.rowStroke, lineWidth: 1)
-                )
-                // Non-interactive: no download/preview path exists client-side yet.
-                // Mark accordingly so it doesn't read as a dead tappable control.
+                .buttonStyle(.plain)
+                .disabled(downloadingAttachmentId != nil)
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("Attachment \(attachment.filename), \(formatSize(attachment.size)). Preview not available yet.")
+                .accessibilityLabel("Attachment \(attachment.filename), \(formatSize(attachment.size)). Downloads and previews on tap.")
             }
 
-            // Caption clarifies the cards are informational, not tappable — otherwise
-            // they look like a broken/dead core feature.
-            Text("Preview not available yet")
-                .font(.system(size: 11))
-                .foregroundStyle(AppTheme.mutedText)
-                .padding(.top, 2)
+            if let attachmentError {
+                Text(attachmentError)
+                    .font(.system(size: 11))
+                    .foregroundStyle(AppTheme.danger)
+                    .padding(.top, 2)
+            }
+        }
+        .fullScreenCover(item: $previewedAttachment) { item in
+            AttachmentPreviewSheet(filename: item.localFilename) {
+                // Downloaded copies are per-view temporaries — clean up so
+                // previews don't accumulate in the attachments directory.
+                AttachmentService.shared.delete(filename: item.localFilename)
+                previewedAttachment = nil
+            }
+        }
+    }
+
+    /// Downloads the attachment's bytes via `mail.getMessageAttachments`, writes
+    /// them to a temporary AttachmentService file, and presents the shared
+    /// preview sheet (image viewer / ShareLink for other types).
+    private func openAttachment(_ attachment: EmailAttachment) {
+        guard downloadingAttachmentId == nil else { return }
+        downloadingAttachmentId = attachment.id
+        attachmentError = nil
+        Task { @MainActor in
+            defer { downloadingAttachmentId = nil }
+            do {
+                let all = try await services.emailService.fetchMessageAttachments(messageId: message.id)
+                guard let match = all.first(where: { $0.attachmentId == attachment.id })
+                        ?? all.first(where: { $0.filename == attachment.filename }),
+                      let data = match.decodedData else {
+                    attachmentError = "Couldn't download \(attachment.filename)."
+                    return
+                }
+                let ext = (attachment.filename as NSString).pathExtension
+                guard let localName = AttachmentService.shared.saveData(
+                    data,
+                    fileExtension: ext.isEmpty ? "bin" : ext
+                ) else {
+                    attachmentError = "Couldn't save \(attachment.filename)."
+                    return
+                }
+                previewedAttachment = DownloadedAttachment(localFilename: localName)
+            } catch {
+                attachmentError = "Couldn't download \(attachment.filename). Check your connection."
+            }
         }
     }
 

@@ -8,18 +8,20 @@ Last updated: 2026-07-07
 
 Triple audit (12 parallel finder agents: 5 UX assessment, 3 UX polish, 4 bug hunt) over the whole iOS app, then a fix pass. ~60 verified findings fixed across Email, Search, Auth/Onboarding, Tasks/Folders/Home, Calendar/Meetings/Docs, AI/Voice, Settings, Navigation, and the services layer. Simulator build green. Details in CHANGELOG `[Unreleased]`.
 
-## Deferred (needs product/backend work — TODO(bug-hunt) comments at each site)
+## Resolved in the follow-up pass (2026-07-08)
 
-- **Account deletion doesn't delete for passwordless users** — `TodosAPIClient.deleteAccount()`: backend `sendDeleteAccountVerification` emails a link and returns 2xx WITHOUT deleting; the app wipes local data + signs out on that "success". Client now sends the required `Origin` header, but the flow needs to be verification-aware (don't wipe until confirmed; tell the user to check email). Backend + Settings flow change.
-- **Received email attachments can't be opened** — `EmailAttachment` carries only id/filename/mime/size; no download endpoint exists client-side. Cards are now explicitly non-interactive with a "Preview not available yet" caption. Needs an attachment-content API, then wire tap → QuickLook (`EmailThreadView.attachmentsView`).
-- **Composed email attachments are never uploaded** — `SendEmailInput` has no attachment field. Compose now shows "Attachments can't be sent yet" under the chip row. Needs upload pipeline server-side.
-- **Global search email section is local-only** — filters loaded threads; labeled "Searches loaded mail". Needs a server search API that doesn't clobber `emailService.threads` (`GlobalSearchView`).
-- **Offline task deletions**: network-failed delete batches are now retained in-memory and replayed on reconnect (`SupabaseSyncService.pendingDeleteRetries`), but a kill before reconnect still loses them — persistent tombstones need a schema change.
-- **Draft double-send**: drafts stuck in "sending" (killed mid-flight) are no longer auto-resent (duplicate-delivery risk); they need a manual-retry surface + a `mail.send` idempotency key.
-- **Tab bar customization** — `TabBarCustomizationView` writes `services.tabBarTabs` but `MainTabView` renders a fixed 6-tab set (BH-0613-6). Entry points now dev-gated; wire the dynamic bar or delete the screen.
-- **HomeView dead code** — `summaryLine`, `topPriority`, `topPriorityRow`, `HomeTopPriority` unreferenced since the slim greeting replaced the hero. Safe delete (~150 lines).
+- ~~Account deletion~~ — flow is now verification-aware: the app no longer wipes local data / signs out on the delete request; it tells the user to check their email (deletion completes via the emailed link; the eventual 401 signs the device out). `Origin` header added.
+- ~~Received email attachments can't be opened~~ — the server already exposes `mail.getMessageAttachments` (base64 content); attachment cards now download on tap (per-card spinner) and open in the shared preview sheet, with error copy on failure.
+- ~~Composed email attachments never uploaded~~ — the server's `mail.send` already accepts `serializedFileSchema`; iOS now uploads chips inline (base64) with the send. Compose body is also converted from the toolbar's light Markdown to HTML so recipients don't see literal `**bold**` markers (resolves the backend-rendering question — the server forwards `message` as-is).
+- ~~Global search email local-only~~ — global search now runs a debounced server-side search via a new non-clobbering `EmailService.searchThreadsServer`, merged (deduped) with the instant local matches.
+- ~~Offline task deletions lost on kill~~ — pending delete retries now persist to UserDefaults (SyncMutation is Codable) and restore on launch; no schema change needed.
+- ~~Draft double-send~~ — `mail.send` now accepts a `clientSendId` idempotency key (KV-deduped server-side, both immediate and scheduled paths); iOS sends the draft's stable id, and `flushPending` safely retries drafts stuck in "sending" again. ⚠️ Deploy the server before shipping the iOS build — until the server is deployed the key is ignored (zod strips unknown keys) and retries behave like before.
+- ~~HomeView dead code~~ — `summaryLine`, `topPriority`, `topPriorityRow`, `HomeTopPriority` deleted (~150 lines).
+
+## Deferred (product decisions)
+
+- **Dynamic tab bar** — `TabBarCustomizationView` writes `services.tabBarTabs` but `MainTabView` renders a fixed 6-tab set (BH-0613-6). The no-op control is no longer user-reachable (dev-gated), which resolves the UX defect; actually wiring a user-configurable tab bar is a shelved feature, not a bug.
 - **GoogleCalendarService primary fallback ignores hiddenCalendarIds** on cold start (pre-existing TODO in `UnifiedCalendarService.fetchGoogleEvents`).
-- **Backend check**: iOS compose formatting toolbar inserts literal Markdown into `draft.body` sent raw as `message` — confirm the server renders Markdown→HTML for outgoing mail, else recipients see `**bold**`.
 
 ---
 

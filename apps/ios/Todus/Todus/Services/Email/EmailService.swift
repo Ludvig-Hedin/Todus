@@ -1525,7 +1525,9 @@ final class EmailService {
     /// Send an email. Pass `fromEmail` when the user picked a specific
     /// connected mailbox via the composer's From row; the backend will route
     /// the send through that connection instead of the active default.
-    func sendEmail(_ draft: EmailDraft, fromEmail: String? = nil) async -> Bool {
+    /// `attachmentNames` are AttachmentService filenames uploaded inline as
+    /// base64 (the server's `serializedFileSchema`).
+    func sendEmail(_ draft: EmailDraft, fromEmail: String? = nil, attachmentNames: [String] = []) async -> Bool {
         isSending = true
         errorMessage = nil
         defer { isSending = false }
@@ -1541,12 +1543,32 @@ final class EmailService {
                 headers["In-Reply-To"] = wrapped
                 headers["References"] = wrapped
             }
+            // Load attachment bytes from disk into the server's serialized-file
+            // wire format. A file that vanished (deleted externally) is skipped
+            // rather than failing the whole send.
+            let serializedAttachments: [SerializedAttachment] = attachmentNames.compactMap { filename in
+                let url = AttachmentService.shared.url(for: filename)
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                return SerializedAttachment(
+                    name: filename,
+                    type: AttachmentService.shared.mimeType(for: filename),
+                    size: data.count,
+                    lastModified: Int(Date().timeIntervalSince1970 * 1000),
+                    base64: data.base64EncodedString()
+                )
+            }
+
             let input = SendEmailInput(
                 to: draft.to.map { SendRecipient(email: $0) },
                 cc: draft.cc.isEmpty ? nil : draft.cc.map { SendRecipient(email: $0) },
                 bcc: draft.bcc.isEmpty ? nil : draft.bcc.map { SendRecipient(email: $0) },
                 subject: draft.subject,
-                message: draft.body,
+                // The composer produces plain text with light Markdown from its
+                // formatting toolbar; recipients' clients render `message` as
+                // HTML, so convert (bold/italic/headers/bullets + <br>) instead
+                // of shipping literal `**bold**` markers.
+                message: Self.composeBodyToHTML(draft.body),
+                attachments: serializedAttachments.isEmpty ? nil : serializedAttachments,
                 threadId: draft.replyToThreadId,
                 fromEmail: fromEmail,
                 headers: headers.isEmpty ? nil : headers,
@@ -1574,6 +1596,92 @@ final class EmailService {
             }
             return false
         }
+    }
+
+    /// Server-backed thread search that does NOT touch `threads` — used by
+    /// global search so results include mail that isn't loaded in the inbox
+    /// (the debounced inbox search overwrites `threads`, which is destructive
+    /// for a cross-tab overlay).
+    func searchThreadsServer(query: String, limit: Int = 25) async -> [EmailThread] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard hasConnection, !trimmed.isEmpty else { return [] }
+        do {
+            let input = ListThreadsInput(folder: "inbox", q: trimmed, maxResults: limit, cursor: nil)
+            let response: ListThreadsResponse = try await withTimeout(seconds: 12) { [api] in
+                try await api.trpcQuery("mail.listThreads", input: input)
+            }
+            let ids = response.threads.map(\.id)
+            guard !ids.isEmpty else { return [] }
+            return await fetchThreadDetails(ids: ids)
+        } catch {
+            AppLogger.shared.log("[EmailService] searchThreadsServer failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    /// One attachment of a message, with its content as base64 (server
+    /// `mail.getMessageAttachments`).
+    struct MessageAttachmentContent: Decodable {
+        let filename: String
+        let mimeType: String
+        let size: Int
+        let attachmentId: String
+        /// Base64 attachment bytes. Gmail uses base64url; normalize before decoding.
+        let body: String
+
+        var decodedData: Data? {
+            var normalized = body
+                .replacingOccurrences(of: "-", with: "+")
+                .replacingOccurrences(of: "_", with: "/")
+            while normalized.count % 4 != 0 { normalized.append("=") }
+            return Data(base64Encoded: normalized)
+        }
+    }
+
+    /// Fetch the full attachment payloads for a message (used by the thread
+    /// view's attachment cards to open/preview received files).
+    func fetchMessageAttachments(messageId: String) async throws -> [MessageAttachmentContent] {
+        struct Input: Encodable { let messageId: String }
+        return try await api.trpcQuery("mail.getMessageAttachments", input: Input(messageId: messageId))
+    }
+
+    /// Converts the iOS composer's plain-text-with-light-Markdown body into
+    /// simple HTML. If the body already looks like HTML (e.g. an AI-generated
+    /// draft), it passes through unchanged.
+    static func composeBodyToHTML(_ body: String) -> String {
+        let lower = body.lowercased()
+        if lower.contains("<p") || lower.contains("<div") || lower.contains("<br") || lower.contains("<html") {
+            return body
+        }
+
+        func escape(_ s: String) -> String {
+            s.replacingOccurrences(of: "&", with: "&amp;")
+                .replacingOccurrences(of: "<", with: "&lt;")
+                .replacingOccurrences(of: ">", with: "&gt;")
+        }
+
+        func inlineMarkdown(_ s: String) -> String {
+            var out = s
+            for (pattern, template) in [
+                (#"\*\*(.+?)\*\*"#, "<b>$1</b>"),
+                (#"(?<![\w*])\*([^*\n]+)\*(?![\w*])"#, "<i>$1</i>"),
+            ] {
+                out = out.replacingOccurrences(of: pattern, with: template, options: .regularExpression)
+            }
+            return out
+        }
+
+        let htmlLines = body.components(separatedBy: "\n").map { rawLine -> String in
+            let line = escape(rawLine)
+            if line.hasPrefix("# ") { return "<h1>\(inlineMarkdown(String(line.dropFirst(2))))</h1>" }
+            if line.hasPrefix("## ") { return "<h2>\(inlineMarkdown(String(line.dropFirst(3))))</h2>" }
+            if line.hasPrefix("• ") || line.hasPrefix("- ") {
+                return "&bull; \(inlineMarkdown(String(line.dropFirst(2))))<br>"
+            }
+            if line.isEmpty { return "<br>" }
+            return "\(inlineMarkdown(line))<br>"
+        }
+        return "<div>\(htmlLines.joined())</div>"
     }
 
     /// Restores the given thread snapshots into `threads` without disturbing
@@ -1904,12 +2012,24 @@ private struct SendRecipient: Encodable {
     let name: String? = nil
 }
 
+/// Wire format for `mail.send` attachments — the server's `serializedFileSchema`.
+struct SerializedAttachment: Encodable {
+    let name: String
+    let type: String
+    let size: Int
+    let lastModified: Int
+    let base64: String
+}
+
 private struct SendEmailInput: Encodable {
     let to: [SendRecipient]
     let cc: [SendRecipient]?
     let bcc: [SendRecipient]?
     let subject: String
     let message: String
+    /// Binary attachments, matching the server's `serializedFileSchema`
+    /// ({ name, type, size, lastModified, base64 }).
+    let attachments: [SerializedAttachment]?
     let threadId: String?
     /// Address of the connected mailbox to send from. When nil the backend
     /// uses the active connection — but multi-account users picking a

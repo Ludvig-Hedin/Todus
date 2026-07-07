@@ -174,15 +174,12 @@ final class TodosAPIClient {
 
     // MARK: - Account
 
-    /// Delete the current user's account and all associated data on the backend.
-    ///
-    /// TODO(bug-hunt): the backend (Better Auth `sendDeleteAccountVerification`)
-    /// does NOT delete passwordless accounts (Google/Apple/OTP — i.e. every iOS
-    /// user) on this call — it emails a verification link and returns 2xx. The
-    /// caller (SettingsView.performDeleteAccount) currently signs out and wipes
-    /// local SwiftData on that "success" while the account survives server-side.
-    /// Needs a verification-aware flow: keep local data until deletion is
-    /// confirmed, and tell the user to check their email.
+    /// Request account deletion. For passwordless users (Google/Apple/OTP —
+    /// i.e. every iOS account) the backend (Better Auth
+    /// `sendDeleteAccountVerification`) does NOT delete on this call — it
+    /// emails a confirmation link and deletes once it's clicked. The caller
+    /// (SettingsView.performDeleteAccount) therefore keeps local data intact
+    /// and tells the user to check their email.
     func deleteAccount() async throws {
         // Better Auth's CSRF middleware requires an Origin header on auth
         // endpoints — every other auth call sets it, this one didn't.

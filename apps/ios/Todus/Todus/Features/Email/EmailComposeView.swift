@@ -11,9 +11,7 @@ struct EmailComposeView: View {
     @State private var bodyMentions: [RichInputMentionRef] = []
     @State private var eventMentions: [RichInputMentionRef] = []
     /// Attachment filenames carried over from CreateSheet. Surfaced in the
-    /// compose UI as chips. The send pipeline does not yet upload binary
-    /// attachments, but keeping them visible avoids silent data loss and lets
-    /// the user reference them in the body.
+    /// compose UI as chips and uploaded inline (base64) with the send.
     @State private var seededAttachmentNames: [String] = []
     @State private var pendingAttachmentRemovals: Set<String> = []
     /// Attachment chip awaiting a remove confirmation. Setting this presents
@@ -271,7 +269,11 @@ struct EmailComposeView: View {
                             } else {
                                 fromEmail = nil
                             }
-                            let success = await emailService.sendEmail(draft, fromEmail: fromEmail)
+                            let success = await emailService.sendEmail(
+                                draft,
+                                fromEmail: fromEmail,
+                                attachmentNames: seededAttachmentNames
+                            )
                             if success {
                                 deletePendingAttachments()
                                 // Clear the autosaved draft once it's safely on the wire
@@ -776,13 +778,6 @@ struct EmailComposeView: View {
                 .padding(.horizontal, 16)
             }
 
-            // The send pipeline can't upload binary attachments yet (SendEmailInput
-            // has no attachment field), so these chips would otherwise vanish
-            // silently on send. Tell the user up front.
-            Text("Attachments can't be sent yet — mention them in your message.")
-                .font(.system(size: 11))
-                .foregroundStyle(AppTheme.mutedText)
-                .padding(.horizontal, 16)
         }
         .padding(.vertical, 8)
         // Removal was previously instant on tap — one mis-tap silently dropped a

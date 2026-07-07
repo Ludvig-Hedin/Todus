@@ -12,6 +12,9 @@ struct SettingsView: View {
     @State private var deleteConfirmError: String?
     @State private var deleteAccountErrorMessage: String?
     @State private var isDeletingAccount = false
+    /// Shown after a successful delete request — deletion completes via the
+    /// emailed confirmation link, not immediately.
+    @State private var showsDeleteVerificationSentAlert = false
     /// True while `performLogout` is running — drives a small "Signing out…" HUD so
     /// the user sees feedback during the network round-trip before the auth state
     /// flips and the sheet dismisses.
@@ -216,6 +219,17 @@ struct SettingsView: View {
             }
         } message: { msg in
             Text(msg)
+        }
+        // Deletion is finalized via an emailed link (Better Auth verification
+        // for passwordless accounts) — tell the user what happens next instead
+        // of wiping local data for an account that still exists.
+        .alert(
+            "Check your email",
+            isPresented: $showsDeleteVerificationSentAlert
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("We sent a confirmation link to your email. Your account and data will be deleted once you open it. Until then, everything stays intact.")
         }
         // Disconnect Gmail confirmation
         .confirmationDialog(
@@ -1194,7 +1208,9 @@ struct SettingsView: View {
         defer { isDeletingAccount = false }
 
         do {
-            // Call backend to delete account and all associated data
+            // Request account deletion. For passwordless users (Google / Apple /
+            // OTP — i.e. every iOS account) Better Auth does NOT delete here: it
+            // emails a confirmation link and only deletes once it's clicked.
             try await services.apiClient.deleteAccount()
         } catch {
             AppLogger.shared.log("Delete account failed: \(error.localizedDescription)")
@@ -1203,18 +1219,13 @@ struct SettingsView: View {
             return
         }
 
-        // Clear local state — Keychain token, auth flags, SwiftData
+        // Do NOT wipe local data or sign out here — the account still exists
+        // until the user confirms via the emailed link. Wiping now (the old
+        // behavior) destroyed local data while the server account survived.
+        // Once they confirm, the server deletes the account and the next API
+        // call's 401 signs this device out through the session-expired path.
         deleteConfirmText = ""
-        services.authService.hasSeenOnboarding = false
-        services.signOut()
-
-        // Wipe all local SwiftData records (tasks + folders + folder items)
-        try? modelContext.delete(model: TaskRecord.self)
-        try? modelContext.delete(model: FolderItemRecord.self)
-        try? modelContext.delete(model: FolderRecord.self)
-        try? modelContext.save()
-
-        dismiss()
+        showsDeleteVerificationSentAlert = true
     }
 
     /// Links Gmail to the current account via the same OAuth flow as EmailConnectView,

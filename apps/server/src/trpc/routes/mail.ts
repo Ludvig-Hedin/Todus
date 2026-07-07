@@ -863,6 +863,11 @@ export const mailRouter = router({
         isForward: z.boolean().optional(),
         originalMessage: z.string().optional(),
         scheduleAt: z.string().optional(),
+        // Client-supplied idempotency key. Native clients retry sends that were
+        // in-flight when the app crashed; without this the retry delivers the
+        // email twice (the recipient gets duplicates). Stable per logical send
+        // (e.g. the local draft record id).
+        clientSendId: z.string().max(128).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -870,9 +875,22 @@ export const mailRouter = router({
       const executionCtx = getContext<HonoContext>().executionCtx;
       const agent = await getZeroAgent(activeConnection.id, executionCtx);
 
-      const { draftId, scheduleAt, attachments, ...mail } = input as typeof input & {
+      const { draftId, scheduleAt, attachments, clientSendId, ...mail } = input as typeof input & {
         scheduleAt?: string;
+        clientSendId?: string;
       };
+
+      // Idempotency gate: if this clientSendId already completed a send for
+      // this connection, treat the retry as a success without re-sending.
+      const dedupeKey = clientSendId
+        ? `send-dedupe:${activeConnection.id}:${clientSendId}`
+        : null;
+      if (dedupeKey) {
+        const already = await env.pending_emails_status.get(dedupeKey);
+        if (already) {
+          return { success: true, deduplicated: true } as const;
+        }
+      }
 
       const db = await getZeroDB(sessionUser.id);
       const userSettings = await db.findUserSettings();
@@ -982,6 +1000,16 @@ export const mailRouter = router({
 
         ctx.c.executionCtx.waitUntil(afterTask());
 
+        // The send is now owned by the scheduler — a crash-retry with the same
+        // clientSendId must not enqueue it a second time.
+        if (dedupeKey) {
+          ctx.c.executionCtx.waitUntil(
+            env.pending_emails_status.put(dedupeKey, 'scheduled', {
+              expirationTtl: 60 * 60 * 24,
+            }),
+          );
+        }
+
         if (isLongTerm) {
           return { success: true, scheduled: true, messageId, sendAt: targetTime };
         } else {
@@ -1000,6 +1028,15 @@ export const mailRouter = router({
         await agent.stub.sendDraft(draftId, mailWithAttachments);
       } else {
         await agent.stub.create(mailWithAttachments);
+      }
+
+      // Mark this clientSendId as delivered so a crash-retry of the same
+      // logical send is acknowledged instead of re-sent (24h window covers any
+      // realistic retry-after-relaunch).
+      if (dedupeKey) {
+        executionCtx.waitUntil(
+          env.pending_emails_status.put(dedupeKey, 'sent', { expirationTtl: 60 * 60 * 24 }),
+        );
       }
 
       console.log('[send] input.threadId:', input);
