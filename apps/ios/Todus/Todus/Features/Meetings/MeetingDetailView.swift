@@ -19,9 +19,20 @@ struct MeetingDetailView: View {
     @State private var playerUrl: URL? = nil
 
     // Q&A
-    @State private var qaMessages: [(role: String, content: String)] = []
     @State private var qaInput = ""
     @FocusState private var qaInputFocused: Bool
+
+    /// Q&A thread lives on MeetingsService keyed by meeting id, so it survives
+    /// navigating away and back within the app session (was view @State, which
+    /// reset on every push/pop).
+    private var qaMessages: [MeetingsService.QAMessage] {
+        services.meetingsService.qaThreads[meetingId] ?? []
+    }
+
+    private func appendQAMessage(role: String, content: String) {
+        services.meetingsService.qaThreads[meetingId, default: []]
+            .append(MeetingsService.QAMessage(role: role, content: content))
+    }
     @State private var isAskingQuestion = false
 
     // Transcript
@@ -445,7 +456,7 @@ struct MeetingDetailView: View {
 
             if !qaMessages.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(qaMessages.enumerated()), id: \.offset) { _, msg in
+                    ForEach(qaMessages) { msg in
                         HStack {
                             if msg.role == "user" { Spacer() }
 
@@ -495,9 +506,9 @@ struct MeetingDetailView: View {
                 .accessibilityLabel("Send question")
             }
 
-            // The thread is plain @State — make the ephemerality visible instead
-            // of letting users discover their Q&A vanished on re-entry.
-            Text("Answers aren't saved when you leave this meeting.")
+            // Thread persists for the app session (MeetingsService.qaThreads) —
+            // be honest that it doesn't survive a relaunch.
+            Text("Answers are kept for this session.")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
         }
@@ -555,13 +566,13 @@ struct MeetingDetailView: View {
         qaInput = ""
         // Drop keyboard so it doesn't cover the freshly-appended answer bubble.
         qaInputFocused = false
-        qaMessages.append((role: "user", content: q))
+        appendQAMessage(role: "user", content: q)
         isAskingQuestion = true
 
         if let answer = await services.meetingsService.askQuestion(meetingId: meetingId, question: q) {
-            qaMessages.append((role: "assistant", content: answer))
+            appendQAMessage(role: "assistant", content: answer)
         } else {
-            qaMessages.append((role: "assistant", content: "Sorry, I couldn't answer that."))
+            appendQAMessage(role: "assistant", content: "Sorry, I couldn't answer that.")
         }
         isAskingQuestion = false
     }

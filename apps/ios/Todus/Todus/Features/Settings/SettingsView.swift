@@ -828,17 +828,12 @@ struct SettingsView: View {
                 Label("Manage Folders", systemImage: "folder")
             }
 
-            // Customize Tab Bar is a no-op for regular users: MainTabView renders a
-            // fixed tab set and never reads services.tabBarTabs (RootView removed the
-            // dynamic bar; see backlog BH-0613-6). Gate the entry behind the developer
-            // allowlist — same mechanism as the Design System viewer — until the
-            // dynamic bar is rewired, so users aren't handed a control that does nothing.
-            if services.isDeveloperModeUIAvailable {
-                NavigationLink {
-                    TabBarCustomizationView()
-                } label: {
-                    Label("Customize Tab Bar", systemImage: "square.bottomhalf.filled")
-                }
+            // MainTabView renders the bar from services.tabBarTabs, so changes
+            // here take effect immediately (BH-0613-6 resolved).
+            NavigationLink {
+                TabBarCustomizationView()
+            } label: {
+                Label("Customize Tab Bar", systemImage: "square.bottomhalf.filled")
             }
 
             if services.isDeveloperModeUIAvailable {

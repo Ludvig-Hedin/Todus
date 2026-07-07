@@ -59,8 +59,15 @@ struct AppConfiguration: Sendable {
             return .defaults
         }
 
-        let backendURL = (plist["BACKEND_URL"] as? String).flatMap(URL.init(string:))
-        let supabaseURL = (plist["SUPABASE_URL"] as? String).flatMap(URL.init(string:))
+        // Trim before parsing: a whitespace-only plist value parses to a non-nil
+        // URL, which would wrongly flip hasSupabaseBackend/hasRemoteBackend on.
+        func cleanURL(_ raw: String?) -> URL? {
+            guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !trimmed.isEmpty else { return nil }
+            return URL(string: trimmed)
+        }
+        let backendURL = cleanURL(plist["BACKEND_URL"] as? String)
+        let supabaseURL = cleanURL(plist["SUPABASE_URL"] as? String)
         let anonKey = plist["SUPABASE_ANON_KEY"] as? String ?? ""
         let parsePath = plist["PARSE_FUNCTION_PATH"] as? String ?? "parseTasks"
         let syncPath = plist["SYNC_FUNCTION_PATH"] as? String ?? "syncTasks"

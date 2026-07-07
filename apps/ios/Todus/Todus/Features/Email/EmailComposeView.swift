@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+import PhotosUI
+import UIKit
 
 /// Email compose sheet — supports new email and reply.
 struct EmailComposeView: View {
@@ -14,6 +16,16 @@ struct EmailComposeView: View {
     /// compose UI as chips and uploaded inline (base64) with the send.
     @State private var seededAttachmentNames: [String] = []
     @State private var pendingAttachmentRemovals: Set<String> = []
+    /// Filenames imported inside THIS composer session (vs seeded from
+    /// CreateSheet). Deleted from disk if the user cancels the compose so
+    /// abandoned imports don't leak.
+    @State private var sessionAddedAttachments: Set<String> = []
+    /// In-composer attachment chooser + pickers.
+    @State private var isShowingAttachmentOptions = false
+    @State private var isShowingFilePicker = false
+    @State private var isShowingPhotoPicker = false
+    @State private var isShowingCamera = false
+    @State private var selectedPhotoItem: PhotosPickerItem?
     /// Attachment chip awaiting a remove confirmation. Setting this presents
     /// the confirmation dialog — removal was previously instant on tap, which
     /// is one accidental tap away from silently dropping a file from the draft.
@@ -229,8 +241,24 @@ struct EmailComposeView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .font(.system(size: 16, weight: .medium))
+                    Button("Cancel") {
+                        // Files imported in this composer session were never
+                        // persisted anywhere — clean them up on abandon.
+                        for name in sessionAddedAttachments {
+                            AttachmentService.shared.delete(filename: name)
+                        }
+                        dismiss()
+                    }
+                    .font(.system(size: 16, weight: .medium))
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        isShowingAttachmentOptions = true
+                    } label: {
+                        Image(systemName: "paperclip")
+                            .font(.system(size: 15, weight: .medium))
+                    }
+                    .accessibilityLabel("Add attachment")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -325,6 +353,19 @@ struct EmailComposeView: View {
             }
             .navigationTitle(draft.isForward ? "Forward" : (draft.replyToThreadId != nil ? "Reply" : "New Email"))
             .navigationBarTitleDisplayMode(.inline)
+            // In-composer attachment picker — same three-way chooser as
+            // TaskDetailSheet/CreateSheet, appending into the chip row + upload.
+            // Extracted into a ViewModifier: inlining five more modifiers here
+            // pushed the (already huge) body past the type-checker's budget.
+            .modifier(ComposeAttachmentPickers(
+                isShowingAttachmentOptions: $isShowingAttachmentOptions,
+                isShowingPhotoPicker: $isShowingPhotoPicker,
+                isShowingFilePicker: $isShowingFilePicker,
+                isShowingCamera: $isShowingCamera,
+                selectedPhotoItem: $selectedPhotoItem,
+                colorScheme: services.appearancePreference.colorScheme,
+                onImported: appendComposerAttachment
+            ))
             // AI assistant — opens the full AI chat sheet on top of the composer, with
             // the email context pre-seeded into the input. The user asks naturally
             // ("make it shorter", "rewrite friendlier", "draft a reply to this") and
@@ -793,13 +834,28 @@ struct EmailComposeView: View {
         ) { filename in
             Button("Remove", role: .destructive) {
                 seededAttachmentNames.removeAll { $0 == filename }
-                pendingAttachmentRemovals.insert(filename)
+                if sessionAddedAttachments.contains(filename) {
+                    // Imported in this composer session and referenced nowhere
+                    // else — delete now instead of leaking the file.
+                    sessionAddedAttachments.remove(filename)
+                    AttachmentService.shared.delete(filename: filename)
+                } else {
+                    pendingAttachmentRemovals.insert(filename)
+                }
                 attachmentPendingRemoval = nil
             }
             Button("Cancel", role: .cancel) { attachmentPendingRemoval = nil }
         } message: { filename in
             Text("\"\(filename)\" will be removed from this email.")
         }
+    }
+
+    /// Appends a freshly-imported attachment to the chip row, tracking it as
+    /// session-added so Cancel/remove can clean the file up.
+    private func appendComposerAttachment(_ filename: String) {
+        seededAttachmentNames.append(filename)
+        sessionAddedAttachments.insert(filename)
+        AppHaptic.light.play()
     }
 
     /// Body area — the full minHeight region is tappable to focus the text input.
@@ -1135,5 +1191,70 @@ struct EmailComposeView: View {
                 eventMentions = Array(mentions)
             }
         }
+    }
+}
+
+// MARK: - Attachment picker modifiers
+
+/// The in-composer attachment chooser + pickers, extracted from the compose
+/// body because inlining them pushed SwiftUI's type-checker past its budget.
+private struct ComposeAttachmentPickers: ViewModifier {
+    @Binding var isShowingAttachmentOptions: Bool
+    @Binding var isShowingPhotoPicker: Bool
+    @Binding var isShowingFilePicker: Bool
+    @Binding var isShowingCamera: Bool
+    @Binding var selectedPhotoItem: PhotosPickerItem?
+    let colorScheme: ColorScheme?
+    let onImported: (String) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog("Add attachment", isPresented: $isShowingAttachmentOptions, titleVisibility: .visible) {
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    Button("Take Photo") { isShowingCamera = true }
+                }
+                Button("Choose from Library") { isShowingPhotoPicker = true }
+                Button("Upload File") { isShowingFilePicker = true }
+            }
+            .photosPicker(
+                isPresented: $isShowingPhotoPicker,
+                selection: $selectedPhotoItem,
+                matching: .images
+            )
+            .fileImporter(
+                isPresented: $isShowingFilePicker,
+                allowedContentTypes: [.item],
+                allowsMultipleSelection: true
+            ) { result in
+                guard case .success(let urls) = result else { return }
+                Task {
+                    for url in urls {
+                        if let filename = await AttachmentService.shared.importFile(at: url) {
+                            onImported(filename)
+                        }
+                    }
+                }
+            }
+            .fullScreenCover(isPresented: $isShowingCamera) {
+                CameraPicker { image in
+                    if let image,
+                       let filename = AttachmentService.shared.saveImage(image) {
+                        onImported(filename)
+                    }
+                }
+                .ignoresSafeArea()
+                .preferredColorScheme(colorScheme)
+            }
+            .onChange(of: selectedPhotoItem) { _, newItem in
+                guard let newItem else { return }
+                Task {
+                    if let data = try? await newItem.loadTransferable(type: Data.self),
+                       let uiImage = UIImage(data: data),
+                       let filename = AttachmentService.shared.saveImage(uiImage) {
+                        onImported(filename)
+                    }
+                }
+                selectedPhotoItem = nil
+            }
     }
 }

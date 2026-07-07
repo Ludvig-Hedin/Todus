@@ -1,5 +1,7 @@
 # iOS Follow-up Tasks — post-audit handoff
 
+> **UPDATE (2026-07-08, later same session):** Tasks 1–4 and 7 below were implemented and are live (commit history: dynamic tab bar, in-composer attachment picker, all-mail search scope, session-persistent meeting Q&A, micro-nits). Only Task 5 (server deploy — ops) and Task 6 (device smoke test — human-in-the-loop) remain; specs kept below for reference.
+>
 > Created 2026-07-08 after the iOS triple audit (UX assessment + UX polish + bug hunt; commits `3ebe558a`, `959b6cfc`, `33639d4d`, `dd040cc7`). All ~75 audit findings are fixed and adversarially verified. The items below are the intentionally remaining product/feature work, written as self-contained specs so any agent/session can pick one up cold. Each task lists exact files, the investigation already done, and known gotchas.
 >
 > Context docs: `AGENT_CONTEXT.md` (repo map), `CLAUDE.md` (iOS build commands), `CODE_REVIEW_BACKLOG.md` (audit history).

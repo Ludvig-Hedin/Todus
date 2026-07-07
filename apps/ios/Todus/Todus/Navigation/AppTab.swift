@@ -12,6 +12,9 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable, Codable {
     case create
     /// AI/search tab — pinned to the trailing side via `Tab(role: .search)`.
     case ai
+    /// Overflow tab — lists content pages not currently in the tab bar plus the
+    /// tab-bar customization entry. Always the last bar slot; not user-editable.
+    case more
 
     var id: String { rawValue }
 
@@ -26,6 +29,7 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable, Codable {
         case .docs:     return "Docs"
         case .create:   return "New"
         case .ai:       return "AI"
+        case .more:     return "More"
         }
     }
 
@@ -40,6 +44,7 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable, Codable {
         case .docs:     return "Documents and notes"
         case .create:   return "Create a new item"
         case .ai:       return "AI assistant"
+        case .more:     return "Pages not in the tab bar"
         }
     }
 
@@ -47,9 +52,13 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable, Codable {
     var isRequired: Bool { self == .home }
 
     /// Tabs shown in the tab bar by default (first launch).
-    /// Max 4 — the burger (More) button adds a fixed 5th visual slot so the pill isn't cramped.
-    /// Meetings is accessible via the More sheet and the Home "More" section by default.
+    /// Max 4 — the fixed More tab adds a 5th visual slot so the bar isn't cramped.
+    /// Meetings/Docs stay reachable via the More tab and the Home "More" section.
     static let defaultNavTabs: [AppTab] = [.home, .tasks, .email, .calendar]
+
+    /// Content tabs that can appear in the bar or the More overflow.
+    /// (`create`/`ai` are FAB actions; `more` is the fixed overflow slot.)
+    static let contentTabs: [AppTab] = [.home, .tasks, .email, .calendar, .meetings, .docs]
 
     /// SF Symbol shown when this tab is selected.
     var activeIcon: String {
@@ -62,6 +71,7 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable, Codable {
         case .docs:     return "doc.text.fill"
         case .create:   return "plus.circle.fill"
         case .ai:       return "sparkles"
+        case .more:     return "ellipsis.circle.fill"
         }
     }
 
@@ -77,6 +87,7 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable, Codable {
         case .docs:     return "doc.text"
         case .create:   return "plus.circle.fill"
         case .ai:       return "sparkles"
+        case .more:     return "ellipsis.circle"
         }
     }
 

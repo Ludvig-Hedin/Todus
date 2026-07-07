@@ -92,6 +92,17 @@ final class MeetingsService {
     var isSyncing = false
     var loadError: String? = nil
     var lastSyncedAt: Date? = nil
+
+    /// Per-meeting "Ask about this meeting" threads, kept for the app session so
+    /// navigating away and back doesn't wipe the Q&A (it was plain view @State
+    /// before, resetting on every push/pop). In-memory only — cleared on relaunch.
+    var qaThreads: [String: [QAMessage]] = [:]
+
+    struct QAMessage: Identifiable, Equatable {
+        let id = UUID()
+        let role: String
+        let content: String
+    }
     private var currentStatusFilter: String? = nil
     private var currentSearchQuery: String? = nil
 

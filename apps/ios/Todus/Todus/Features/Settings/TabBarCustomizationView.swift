@@ -15,7 +15,8 @@ struct TabBarCustomizationView: View {
     @State private var activeTabs: [AppTab] = []
     @State private var editMode: EditMode = .active
 
-    private var availableTabs: [AppTab] { AppTab.allCases.filter { $0 != .create && $0 != .ai } }
+    // Content tabs only — create/ai are FABs; the More slot is fixed.
+    private var availableTabs: [AppTab] { AppTab.contentTabs }
 
     var body: some View {
         List {

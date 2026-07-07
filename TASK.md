@@ -6,13 +6,13 @@ Last updated: 2026-07-08
 
 The iOS triple audit (UX assessment + polish + bug hunt, 2026-07-07/08) fixed ~75 verified findings across 4 commits; all fixes adversarially re-verified and simulator builds green. The remaining feature/ops work is specced as self-contained, agent-ready tasks in **[docs/ios-followup-tasks.md](docs/ios-followup-tasks.md)**:
 
-1. Wire the dynamic tab bar (BH-0613-6) — full design + gotchas documented
-2. In-composer attachment picker (upload pipeline already works)
-3. Widen email search beyond the inbox folder
-4. Persist meeting Q&A (session cache tier + durable tier)
-5. **Ops: deploy `apps/server` before the next iOS release** (mail.send idempotency key)
-6. Device smoke test (attachment round-trip, idempotent send)
-7. Micro-nits batch
+1. ~~Wire the dynamic tab bar (BH-0613-6)~~ ✅ implemented same session
+2. ~~In-composer attachment picker~~ ✅ implemented same session
+3. ~~Widen email search beyond the inbox folder~~ ✅ implemented (all-mail scope)
+4. ~~Persist meeting Q&A~~ ✅ session-cache tier implemented (durable tier optional)
+5. **Ops: deploy `apps/server` before the next iOS release** (mail.send idempotency key) — REMAINING
+6. Device smoke test (attachment round-trip, idempotent send) — REMAINING
+7. ~~Micro-nits batch~~ ✅ implemented same session
 
 ## ✅ 2026-05-24 — Docs feature overhaul (iOS + macOS)
 

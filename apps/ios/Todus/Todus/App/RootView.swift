@@ -58,12 +58,9 @@ struct RootView: View {
                 WelcomeTourView()
                     .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
             } else {
-                // NOTE: the tab-bar customization onboarding step was removed — the live
-                // shell (MainTabView) uses a fixed native tab bar and does not yet consume
-                // `tabBarTabs`, so the step had no effect (a no-op control = UX bug). The
-                // TabBarOnboardingView/TabBarCustomizationView/CustomTabBar components remain
-                // in the codebase for if/when the dynamic tab bar is finished. See
-                // CODE_REVIEW_BACKLOG.md (BH-0613-6).
+                // NOTE: MainTabView now renders the bar from `services.tabBarTabs`
+                // (BH-0613-6 resolved) — customization lives in Settings and the
+                // More tab rather than as a dedicated onboarding step.
                 MainTabView()
                     .transition(hasAppeared ? .opacity : .identity)
             }

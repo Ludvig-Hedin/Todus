@@ -1606,7 +1606,10 @@ final class EmailService {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard hasConnection, !trimmed.isEmpty else { return [] }
         do {
-            let input = ListThreadsInput(folder: "inbox", q: trimmed, maxResults: limit, cursor: nil)
+            // folder "" = unscoped: the Gmail driver's normalizeSearch leaves an
+            // empty folder out of the query entirely, so this searches ALL mail
+            // (inbox + archive + sent), not just the inbox label.
+            let input = ListThreadsInput(folder: "", q: trimmed, maxResults: limit, cursor: nil)
             let response: ListThreadsResponse = try await withTimeout(seconds: 12) { [api] in
                 try await api.trpcQuery("mail.listThreads", input: input)
             }
@@ -1669,9 +1672,19 @@ final class EmailService {
             for (pattern, template) in [
                 (#"\*\*(.+?)\*\*"#, "<b>$1</b>"),
                 (#"(?<![\w*])\*([^*\n]+)\*(?![\w*])"#, "<i>$1</i>"),
+                // The compose toolbar's Italic inserts _underscores_.
+                (#"(?<![\w_])_([^_\n]+)_(?![\w_])"#, "<i>$1</i>"),
             ] {
                 out = out.replacingOccurrences(of: pattern, with: template, options: .regularExpression)
             }
+            // Auto-link bare URLs so recipients get a clickable link instead of
+            // plain text. Runs on already-escaped text ("&amp;" in an href is
+            // valid HTML), after markdown so it can't touch generated tags.
+            out = out.replacingOccurrences(
+                of: #"(https?://[^\s<]+)"#,
+                with: #"<a href="$1">$1</a>"#,
+                options: .regularExpression
+            )
             return out
         }
 
@@ -1682,6 +1695,11 @@ final class EmailService {
             if line.hasPrefix("• ") || line.hasPrefix("- ") {
                 return "&bull; \(inlineMarkdown(String(line.dropFirst(2))))<br>"
             }
+            // Toolbar Quote / Divider markers. (">" was escaped to "&gt;" above.)
+            if line.hasPrefix("&gt; ") {
+                return "<blockquote>\(inlineMarkdown(String(line.dropFirst(5))))</blockquote>"
+            }
+            if line == "---" { return "<hr>" }
             if line.isEmpty { return "<br>" }
             return "\(inlineMarkdown(line))<br>"
         }

@@ -160,52 +160,43 @@ struct MainTabView: View {
 
     // MARK: - Tab View
 
+    /// Tabs shown in the bar, in the user's chosen order (home-first, max 4 —
+    /// enforced by TabBarCustomizationView.save() and the AppServices loader).
+    private var barTabs: [AppTab] {
+        let chosen = services.tabBarTabs.filter { AppTab.contentTabs.contains($0) }
+        return chosen.isEmpty ? AppTab.defaultNavTabs : chosen
+    }
+
     private var tabView: some View {
+        // Every content tab stays instantiated (hidden ones are still valid
+        // programmatic selections for deep links via `services.navigateTo`);
+        // only bar membership + order follow `services.tabBarTabs`. The fixed
+        // More tab exposes whatever isn't in the bar plus customization.
         TabView(selection: $selectedTab) {
-            // Resolve permission at render time so the tab switches the moment the
-            // user grants/revokes access via Settings or the in-app prompt.
-            NavigationStack {
-                // Google events come from the backend and don't need EventKit —
-                // a Gmail-connected user who declined Apple Calendar access must
-                // not be walled out of the whole tab with their events hidden.
-                if calendarPermissionGranted
-                    || services.calendarService.canReadEvents()
-                    || services.connectionsService.connections.contains(where: { $0.providerId == "google" }) {
-                    CalendarTabView()
-                        .toolbar(.hidden, for: .navigationBar)
-                } else {
-                    CalendarPermissionView()
-                        .background(AppTheme.backgroundTop)
+            ForEach(barTabs) { tab in
+                Tab(value: tab) {
+                    tabRoot(for: tab)
+                } label: {
+                    Label(tab.title, systemImage: tab.inactiveIcon())
                 }
             }
-            .id(calendarTabId)
-            .tabItem { Label(AppTab.calendar.title, systemImage: AppTab.calendar.inactiveIcon()) }
-            .tag(AppTab.calendar)
 
-            NavigationStack { TasksTabView() }
-                .id(tasksTabId)
-                .tabItem { Label(AppTab.tasks.title, systemImage: AppTab.tasks.inactiveIcon()) }
-                .tag(AppTab.tasks)
+            ForEach(AppTab.contentTabs.filter { !barTabs.contains($0) }) { tab in
+                Tab(value: tab) {
+                    tabRoot(for: tab)
+                } label: {
+                    Label(tab.title, systemImage: tab.inactiveIcon())
+                }
+                .hidden(true)
+            }
 
-            NavigationStack { HomeView() }
-                .id(homeTabId)
-                .tabItem { Label(AppTab.home.title, systemImage: AppTab.home.inactiveIcon()) }
-                .tag(AppTab.home)
-
-            NavigationStack { EmailInboxView() }
-                .id(emailTabId)
-                .tabItem { Label(AppTab.email.title, systemImage: AppTab.email.inactiveIcon()) }
-                .tag(AppTab.email)
-
-            DocsListView()
-                .id(docsTabId)
-                .tabItem { Label(AppTab.docs.title, systemImage: AppTab.docs.inactiveIcon()) }
-                .tag(AppTab.docs)
-
-            NavigationStack { MeetingsListView() }
-                .id(meetingsTabId)
-                .tabItem { Label(AppTab.meetings.title, systemImage: AppTab.meetings.inactiveIcon()) }
-                .tag(AppTab.meetings)
+            Tab(value: AppTab.more) {
+                MoreSheetView(showsDone: false) { tab in
+                    services.navigateTo = tab
+                }
+            } label: {
+                Label(AppTab.more.title, systemImage: AppTab.more.inactiveIcon())
+            }
         }
         .tint(Color(UIColor.label))
         .toolbar(services.hideTabBar ? .hidden : .visible, for: .tabBar)
@@ -330,7 +321,51 @@ struct MainTabView: View {
     }
 
     private var visibleContentTabs: Set<AppTab> {
-        [.home, .tasks, .email, .calendar, .docs, .meetings]
+        Set(AppTab.contentTabs).union([.more])
+    }
+
+    /// Root view for a content tab. Kept in one place so the bar and the hidden
+    /// (overflow, deep-linkable) copies render identically.
+    @ViewBuilder
+    private func tabRoot(for tab: AppTab) -> some View {
+        switch tab {
+        case .calendar:
+            // Resolve permission at render time so the tab switches the moment
+            // the user grants/revokes access via Settings or the in-app prompt.
+            NavigationStack {
+                // Google events come from the backend and don't need EventKit —
+                // a Gmail-connected user who declined Apple Calendar access must
+                // not be walled out of the whole tab with their events hidden.
+                if calendarPermissionGranted
+                    || services.calendarService.canReadEvents()
+                    || services.connectionsService.connections.contains(where: { $0.providerId == "google" }) {
+                    CalendarTabView()
+                        .toolbar(.hidden, for: .navigationBar)
+                } else {
+                    CalendarPermissionView()
+                        .background(AppTheme.backgroundTop)
+                }
+            }
+            .id(calendarTabId)
+        case .tasks:
+            NavigationStack { TasksTabView() }
+                .id(tasksTabId)
+        case .home:
+            NavigationStack { HomeView() }
+                .id(homeTabId)
+        case .email:
+            NavigationStack { EmailInboxView() }
+                .id(emailTabId)
+        case .docs:
+            // DocsListView owns its own NavigationStack/SplitView — don't nest.
+            DocsListView()
+                .id(docsTabId)
+        case .meetings:
+            NavigationStack { MeetingsListView() }
+                .id(meetingsTabId)
+        case .create, .ai, .more:
+            EmptyView()
+        }
     }
 
     // MARK: - FABs

@@ -490,7 +490,7 @@ struct AppTopHeader<CustomTitle: View>: View {
         switch services.currentTab {
         case .home, .tasks, .email, .calendar:
             return true
-        case .meetings, .docs, .create, .ai:
+        case .meetings, .docs, .create, .ai, .more:
             return false
         }
     }
@@ -591,7 +591,7 @@ struct AppTopHeader<CustomTitle: View>: View {
                 Label("New Event", systemImage: "calendar.badge.plus")
             }
 
-        case .meetings, .docs, .create, .ai:
+        case .meetings, .docs, .create, .ai, .more:
             EmptyView()
         }
     }

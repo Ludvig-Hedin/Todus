@@ -20,7 +20,7 @@ Triple audit (12 parallel finder agents: 5 UX assessment, 3 UX polish, 4 bug hun
 
 ## Deferred (product decisions)
 
-- **Remaining feature/ops work is fully specced in [docs/ios-followup-tasks.md](docs/ios-followup-tasks.md)** (2026-07-08): dynamic tab bar (BH-0613-6, wiring design + gotchas documented), in-composer attachment picker, search scope beyond inbox, meeting Q&A persistence, server deploy ordering (mail.send idempotency), device smoke test, micro-nits.
+- **[docs/ios-followup-tasks.md](docs/ios-followup-tasks.md)** (2026-07-08): tasks 1–4 + 7 (dynamic tab bar BH-0613-6, in-composer attachment picker, all-mail search scope, session-persistent meeting Q&A, micro-nits) were implemented the same session. Remaining: Task 5 (ops — deploy `apps/server` before the next iOS release) and Task 6 (device smoke test).
 - ~~GoogleCalendarService primary fallback ignores hiddenCalendarIds~~ — fixed 2026-07-08 (cold-start connections with hidden calendars are skipped until their calendar list loads).
 
 ---
