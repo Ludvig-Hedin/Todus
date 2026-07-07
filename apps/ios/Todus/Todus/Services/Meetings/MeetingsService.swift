@@ -119,7 +119,7 @@ final class MeetingsService {
             meetings = response.meetings
             loadError = nil
         } catch {
-            print("[MeetingsService] Failed to load meetings: \(error)")
+            AppLogger.shared.log("[MeetingsService] Failed to load meetings: \(error)")
             loadError = error.localizedDescription
         }
     }
@@ -129,7 +129,7 @@ final class MeetingsService {
         do {
             return try await apiClient.trpcQuery("meet.getMeeting", input: Input(meetingId: id))
         } catch {
-            print("[MeetingsService] Failed to get meeting: \(error)")
+            AppLogger.shared.log("[MeetingsService] Failed to get meeting: \(error)")
             return nil
         }
     }
@@ -145,7 +145,7 @@ final class MeetingsService {
         } catch {
             // Mirror loadMeetings — surface to the published `loadError` so
             // observers see the failure instead of it being swallowed by print.
-            print("[MeetingsService] Failed to sync: \(error)")
+            AppLogger.shared.log("[MeetingsService] Failed to sync: \(error)")
             loadError = error.localizedDescription
         }
     }
@@ -159,7 +159,7 @@ final class MeetingsService {
             await loadMeetings(status: currentStatusFilter, search: currentSearchQuery)
             return true
         } catch {
-            print("[MeetingsService] Failed to schedule bot: \(error)")
+            AppLogger.shared.log("[MeetingsService] Failed to schedule bot: \(error)")
             return false
         }
     }
@@ -171,7 +171,7 @@ final class MeetingsService {
                 "meet.generateSummary", input: Input(meetingId: meetingId)
             )
         } catch {
-            print("[MeetingsService] Failed to generate summary: \(error)")
+            AppLogger.shared.log("[MeetingsService] Failed to generate summary: \(error)")
             return nil
         }
     }
@@ -184,7 +184,7 @@ final class MeetingsService {
             )
             return response.answer
         } catch {
-            print("[MeetingsService] Failed to ask: \(error)")
+            AppLogger.shared.log("[MeetingsService] Failed to ask: \(error)")
             return nil
         }
     }

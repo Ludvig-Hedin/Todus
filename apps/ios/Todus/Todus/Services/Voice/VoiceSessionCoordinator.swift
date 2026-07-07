@@ -351,7 +351,7 @@ final class VoiceSessionCoordinator {
             )
             systemPromptClient.invalidateCache()
         } catch {
-            print("[VoiceSessionCoordinator] saveConversation failed: \(error.localizedDescription)")
+            AppLogger.shared.log("[VoiceSessionCoordinator] saveConversation failed: \(error.localizedDescription)")
         }
     }
 
@@ -359,13 +359,13 @@ final class VoiceSessionCoordinator {
 
     private func transition(to newState: VoiceSessionStatus, reason: String) {
         if newState == status { return }
-        print("[VoiceSessionCoordinator] \(status.label) → \(newState.label) (\(reason))")
+        AppLogger.shared.log("[VoiceSessionCoordinator] \(status.label) → \(newState.label) (\(reason))")
         status = newState
     }
 
     private func failSession(_ message: String) {
         lastError = message
-        print("[VoiceSessionCoordinator] error: \(message)")
+        AppLogger.shared.log("[VoiceSessionCoordinator] error: \(message)")
         transition(to: .error(message), reason: "failure")
         Task { await stop() }
     }

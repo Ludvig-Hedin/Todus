@@ -1992,7 +1992,7 @@ struct AIChatView: View {
             // and trigger a soft haptic so the user knows the tap registered. A
             // follow-up should detect unsupported actions at render time and dim
             // the card so it looks non-interactive.
-            print("[GenerativeUI] Unhandled action: \(action) params: \(params)")
+            AppLogger.shared.log("[GenerativeUI] Unhandled action: \(action) params: \(params)")
             UISelectionFeedbackGenerator().selectionChanged()
         }
     }

@@ -59,7 +59,7 @@ final class VoiceSystemPromptClient {
             self.cachedAt = Date()
             return prompt
         } catch {
-            print("[VoiceSystemPromptClient] fetch failed: \(error.localizedDescription) — using fallback prompt")
+            AppLogger.shared.log("[VoiceSystemPromptClient] fetch failed: \(error.localizedDescription) — using fallback prompt")
             // Stale cache is preferable to nothing — return it if we have one.
             if let cached { return cached }
             return Self.fallbackPrompt

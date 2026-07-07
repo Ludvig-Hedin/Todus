@@ -36,7 +36,7 @@ final class AudioPlayerManager: @unchecked Sendable {
             channels: channels,
             interleaved: true
         ) else {
-            print("[AudioPlayerManager] Invalid audio format: sampleRate=\(sampleRate), channels=\(channels)")
+            AppLogger.shared.log("[AudioPlayerManager] Invalid audio format: sampleRate=\(sampleRate), channels=\(channels)")
             return nil
         }
         self.outputFormat = format
@@ -81,7 +81,7 @@ final class AudioPlayerManager: @unchecked Sendable {
             isEngineRunning = true
             _isPlaying = true
         } catch {
-            print("[AudioPlayerManager] Failed to start engine: \(error)")
+            AppLogger.shared.log("[AudioPlayerManager] Failed to start engine: \(error)")
         }
     }
 

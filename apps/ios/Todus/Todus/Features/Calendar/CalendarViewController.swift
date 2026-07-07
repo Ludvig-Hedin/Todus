@@ -338,7 +338,7 @@ final class CalendarViewController: DayViewController {
                 do {
                     try store.save(editingEvent.ekEvent, span: .thisEvent)
                 } catch {
-                    print("[CalendarViewController] Failed to save edited event: \(error)")
+                    AppLogger.shared.log("[CalendarViewController] Failed to save edited event: \(error)")
                     onSaveError?(error)
                 }
             }

@@ -566,7 +566,7 @@ final class TaskCaptureService {
                 try context.save()
                 lastSharedFolderSyncAt = now
             } catch {
-                print("[TaskCaptureService] Failed to save shared folders: \(error)")
+                AppLogger.shared.log("[TaskCaptureService] Failed to save shared folders: \(error)")
             }
         } catch {
             // Folder sync is best-effort; local folders remain usable offline.

@@ -218,7 +218,7 @@ final class GoogleCalendarService {
             }
             return (response.events, response.scopeMissing)
         } catch {
-            print("[GoogleCalendarService] eventsMulti failed: \(error)")
+            AppLogger.shared.log("[GoogleCalendarService] eventsMulti failed: \(error)")
             return ([], false)
         }
     }
@@ -349,7 +349,7 @@ final class GoogleCalendarService {
             }
             return (conn.id, sources, false)
         } catch {
-            print("[GoogleCalendarService] calendars fetch failed for \(conn.email): \(error)")
+            AppLogger.shared.log("[GoogleCalendarService] calendars fetch failed for \(conn.email): \(error)")
             return (conn.id, [], false)
         }
     }

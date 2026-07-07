@@ -329,7 +329,7 @@ final class VoiceChatViewModel {
                         result: "{\"error\": \"Tool execution unavailable\"}"
                     )
                 } catch {
-                    print("[VoiceChatVM] Failed to send tool error response for \(name): \(error)")
+                    AppLogger.shared.log("[VoiceChatVM] Failed to send tool error response for \(name): \(error)")
                 }
                 return
             }
@@ -345,7 +345,7 @@ final class VoiceChatViewModel {
             do {
                 try await provider.sendToolResponse(id: id, name: name, result: result)
             } catch {
-                print("[VoiceChatVM] Failed to send tool response for \(name)(\(id)): \(error)")
+                AppLogger.shared.log("[VoiceChatVM] Failed to send tool response for \(name)(\(id)): \(error)")
                 // Surface the failure to the user briefly — otherwise tool errors
                 // disappear silently and the assistant looks unresponsive.
                 let failureMessage = "Tool failed: \(error.localizedDescription)"

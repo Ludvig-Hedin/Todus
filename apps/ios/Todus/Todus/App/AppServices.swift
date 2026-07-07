@@ -437,7 +437,7 @@ final class AppServices {
                 defaults.set(data, forKey: Keys.emailSignatures)
             } catch {
                 // Log encoding failure so we can diagnose signature persistence issues
-                print("[AppServices] Failed to encode signatures: \(error)")
+                AppLogger.shared.log("[AppServices] Failed to encode signatures: \(error)")
             }
         }
     }
@@ -901,7 +901,7 @@ final class AppServices {
             try context.delete(model: FolderRecord.self)
             try context.save()
         } catch {
-            print("[AppServices] wipeLocalAccountData failed: \(error)")
+            AppLogger.shared.log("[AppServices] wipeLocalAccountData failed: \(error)")
         }
     }
 
@@ -1021,7 +1021,7 @@ final class AppServices {
             }
             lastSharedProfileLoadAt = now
         } catch {
-            print("[AppServices] Failed to load shared AI profile: \(error)")
+            AppLogger.shared.log("[AppServices] Failed to load shared AI profile: \(error)")
         }
     }
 
@@ -1039,7 +1039,7 @@ final class AppServices {
                 )
             )
         } catch {
-            print("[AppServices] Failed to save shared AI profile: \(error)")
+            AppLogger.shared.log("[AppServices] Failed to save shared AI profile: \(error)")
         }
     }
 
@@ -1054,7 +1054,7 @@ final class AppServices {
                 input: _OneFieldInput(key: key, value: value)
             )
         } catch {
-            print("[AppServices] Failed to sync setting \(key): \(error)")
+            AppLogger.shared.log("[AppServices] Failed to sync setting \(key): \(error)")
         }
     }
 
@@ -1072,7 +1072,7 @@ final class AppServices {
                 input: Input(calendarPreferences: calendarPreferences)
             )
         } catch {
-            print("[AppServices] Failed to save calendar preferences: \(error)")
+            AppLogger.shared.log("[AppServices] Failed to save calendar preferences: \(error)")
         }
     }
 

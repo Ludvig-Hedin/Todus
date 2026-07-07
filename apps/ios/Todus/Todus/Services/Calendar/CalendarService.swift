@@ -246,7 +246,7 @@ actor CalendarService {
         // Silent fallback can leave the user staring at "I picked Work but it
         // saved to Personal" with no explanation. Log so the bug is reproducible
         // — callers may want to surface a friendlier alert in the future.
-        print("[CalendarService] target calendar '\(stripped)' missing or read-only — falling back to defaultCalendarForNewEvents (\(defaultCal?.title ?? "nil"))")
+        AppLogger.shared.log("[CalendarService] target calendar '\(stripped)' missing or read-only — falling back to defaultCalendarForNewEvents (\(defaultCal?.title ?? "nil"))")
         return defaultCal
     }
 

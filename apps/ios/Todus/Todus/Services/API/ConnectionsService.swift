@@ -101,7 +101,7 @@ final class ConnectionsService {
             }
         } catch {
             loadError = error.localizedDescription
-            print("[ConnectionsService] Failed to load connections: \(error)")
+            AppLogger.shared.log("[ConnectionsService] Failed to load connections: \(error)")
         }
     }
 
