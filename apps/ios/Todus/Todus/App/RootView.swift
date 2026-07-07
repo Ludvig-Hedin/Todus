@@ -38,7 +38,13 @@ struct RootView: View {
             } else if services.authService.showsOnboarding {
                 AuthView()
                     .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
-            } else if !services.hasConfiguredGmailPrompt {
+            } else if !services.hasConfiguredGmailPrompt && services.authService.isAuthenticated {
+                // Gmail connection needs a real account, so this step is meaningless
+                // for guests (who tapped "Continue as guest" and never authenticated).
+                // Auto-skip it for them by gating on `isAuthenticated` — the onboarding
+                // chain falls through to the next device-level step. `onboardingPendingFlags`
+                // applies the same gate so the "X of N" pill doesn't count a step guests
+                // never see. Authenticated behavior is unchanged.
                 GmailOnboardingView()
                     .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
             } else if !services.hasConfiguredRemindersPrompt {
@@ -121,20 +127,25 @@ struct RootView: View {
         }
         .task(id: services.authService.isAuthenticated) {
             guard services.authService.isAuthenticated else {
-                // Signed out — clear the snapshot so the next sign-in measures its
-                // own onboarding journey afresh.
+                // Signed out — clear the snapshot so the next sign-in (or guest
+                // journey) measures its own onboarding length afresh.
                 onboardingPendingSnapshot = nil
                 return
             }
             // Capture the journey length once, now that the account's onboarding
             // flags are settled, so the "X of N" counter reflects the steps this
             // user will actually see instead of a hardcoded 5.
-            if onboardingPendingSnapshot == nil {
-                let pendingIndices = onboardingPendingFlags.indices.filter { onboardingPendingFlags[$0] }
-                if !pendingIndices.isEmpty { onboardingPendingSnapshot = Array(pendingIndices) }
-            }
+            captureOnboardingSnapshotIfNeeded()
             guard !services.isUITestingMode else { return }
             await services.loadSharedAIProfile()
+        }
+        .task(id: services.authService.showsOnboarding) {
+            // Guests never authenticate, so the auth-keyed task above never captures
+            // their snapshot — leaving the pill stuck at "1 of N" with a shrinking N.
+            // Once the user leaves the auth stage (guest continue *or* real sign-in),
+            // measure the remaining onboarding steps so the counter is stable.
+            guard !services.authService.showsOnboarding else { return }
+            captureOnboardingSnapshotIfNeeded()
         }
     }
 
@@ -171,10 +182,22 @@ struct RootView: View {
         await services.completeAuthUpgradeIfNeeded(in: modelContext)
     }
 
-    /// The five onboarding steps in display order, each flagged as still-pending.
+    /// Snapshots the pending-step set once, the first time onboarding actually
+    /// begins (guest or authenticated). Idempotent — later calls are no-ops until
+    /// a sign-out clears the snapshot. Keeping the *set* (not a count) keeps the
+    /// "X of N" counter monotonic when a later step auto-skips before an earlier one.
+    private func captureOnboardingSnapshotIfNeeded() {
+        guard onboardingPendingSnapshot == nil else { return }
+        let pendingIndices = onboardingPendingFlags.indices.filter { onboardingPendingFlags[$0] }
+        if !pendingIndices.isEmpty { onboardingPendingSnapshot = Array(pendingIndices) }
+    }
+
+    /// The onboarding steps in display order, each flagged as still-pending.
     private var onboardingPendingFlags: [Bool] {
         [
-            !services.hasConfiguredGmailPrompt,
+            // Gmail step is only part of the journey for authenticated users — guests
+            // auto-skip it (see the body gate), so it must not inflate their step count.
+            !services.hasConfiguredGmailPrompt && services.authService.isAuthenticated,
             !services.hasConfiguredRemindersPrompt,
             !services.hasConfiguredNotificationsPrompt,
             !services.hasSeenWelcomeTour,

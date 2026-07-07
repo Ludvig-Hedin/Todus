@@ -148,16 +148,21 @@ struct CalendarTaskView: View {
     }
 
     private var tasksChangeDigest: TasksDigest {
+        // Sum term catches in-place sync updates whose updatedAt ≤ current max
+        // (count + max alone left the buckets stale after multi-device sync).
         var latest: Date = .distantPast
-        for task in allTasks where task.updatedAt > latest {
-            latest = task.updatedAt
+        var sum: Double = 0
+        for task in allTasks {
+            if task.updatedAt > latest { latest = task.updatedAt }
+            sum += task.updatedAt.timeIntervalSinceReferenceDate
         }
-        return TasksDigest(count: allTasks.count, latestUpdate: latest)
+        return TasksDigest(count: allTasks.count, latestUpdate: latest, updateSum: sum)
     }
 
     private struct TasksDigest: Equatable {
         let count: Int
         let latestUpdate: Date
+        let updateSum: Double
     }
 
     // MARK: - Bucket Header

@@ -102,6 +102,13 @@ struct EmailInboxView: View {
     @State private var searchText = ""
     @State private var selectedThreadId: String?
     @State private var filteredThreads: [EmailThread] = []
+    /// The query for which `emailService.threads` currently holds *server* search
+    /// results. Set once a debounced server search resolves for the active
+    /// `searchText`, cleared on every keystroke. While set and equal to the query,
+    /// `recomputeFilteredThreads` trusts the server's matches as-is instead of
+    /// re-filtering locally against the subject/from/snippet blob — which would
+    /// drop body-only matches the server found (the "0 results despite hits" bug).
+    @State private var serverSearchQuery: String?
     /// Cached sender grouping for the People view. Recomputed only when `filteredThreads`
     /// changes — previously the computed property rebuilt the entire group-by + sort on
     /// every body evaluation, including when the user was in Threads mode.
@@ -321,6 +328,10 @@ struct EmailInboxView: View {
             rebuildSearchBlobs()
             recomputeFilteredThreads()
             consumePendingThreadNavigation()
+            consumePendingSearchSeed()
+        }
+        .onChange(of: services.pendingEmailSearchQuery) { _, _ in
+            consumePendingSearchSeed()
         }
         .onDisappear {
             // Cancel any pending deep-navigation push so it can't fire after the
@@ -391,6 +402,9 @@ struct EmailInboxView: View {
             Task { await emailService.markAsRead(ids: unreadIds) }
         }
         .onChange(of: searchText) { oldValue, newValue in
+            // A keystroke invalidates any prior server-result set — fall back to the
+            // instant local filter until the new debounced server search resolves.
+            serverSearchQuery = nil
             // Instant local filtering for immediate visual feedback
             recomputeFilteredThreads()
             // Debounced server search — waits 500ms after last keystroke so we don't
@@ -783,7 +797,13 @@ struct EmailInboxView: View {
                     Button {
                         Task { await emailService.toggleStar(ids: [thread.id]) }
                     } label: {
-                        Label("Star", systemImage: "star")
+                        // Reflect current state like SenderThreadsView's row —
+                        // a starred thread previously still read "Star" with a
+                        // hollow icon while the action actually un-starred it.
+                        Label(
+                            thread.isStarredInLabels ? "Unstar" : "Star",
+                            systemImage: thread.isStarredInLabels ? "star.fill" : "star"
+                        )
                     }
                     .tint(.yellow)
                 }
@@ -1429,6 +1449,16 @@ struct EmailInboxView: View {
         }
     }
 
+    /// Picks up a search query seeded by GlobalSearchView's "See all N in Mail" row
+    /// and applies it to the inbox's own search field. Setting `searchText` here
+    /// flows through the existing `.onChange(of: searchText)` debounce/server-search
+    /// pipeline exactly as if the user had typed it.
+    private func consumePendingSearchSeed() {
+        guard let seed = services.pendingEmailSearchQuery else { return }
+        services.pendingEmailSearchQuery = nil
+        searchText = seed
+    }
+
     /// Whether the given folder's empty-state should expose a manual Refresh
     /// button. Snoozed/Spam/Trash never benefit from a Gmail re-sync — their
     /// contents are either local-only (Snoozed) or fully managed server-side
@@ -1478,6 +1508,17 @@ struct EmailInboxView: View {
         }
         let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
         guard !query.isEmpty else {
+            filteredThreads = emailService.threads
+            recomputeSenderGroupsIfPeopleMode()
+            return
+        }
+
+        // If `emailService.threads` currently holds server search results for exactly
+        // this query, trust them as-is. The server matches on message bodies too, which
+        // the local blob (subject/from/snippet only) doesn't have — re-filtering here
+        // would drop body-only hits and show "0 results" despite real matches.
+        if let sq = serverSearchQuery,
+           sq.trimmingCharacters(in: .whitespaces).lowercased() == query {
             filteredThreads = emailService.threads
             recomputeSenderGroupsIfPeopleMode()
             return
@@ -1675,16 +1716,6 @@ struct SenderThreadsView: View {
                 }
         } else {
             baseRow
-        }
-    }
-}
-
-private extension EmailThread {
-    /// Gmail label convention — same check as `EmailThreadView` star state.
-    var isStarredInLabels: Bool {
-        labels.contains { name in
-            let n = name.uppercased()
-            return n == "STARRED" || n == "\\STARRED"
         }
     }
 }

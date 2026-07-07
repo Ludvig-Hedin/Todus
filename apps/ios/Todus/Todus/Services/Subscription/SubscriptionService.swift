@@ -122,7 +122,16 @@ final class SubscriptionService {
         self.aiUsageLimit = response.aiUsage.limit
         self.aiUsageRemaining = response.aiUsage.remaining
         self.aiUsageUnlimited = response.aiUsage.unlimited
-        self.aiUsageResetAt = response.aiUsage.resetAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+        // JS `toISOString()` always emits fractional seconds, which a bare
+        // ISO8601DateFormatter rejects — the reset date never parsed, so
+        // Billing never showed "resets on …". Try fractional first, plain second
+        // (mirrors TodosAPIClient.apiDecoder's dual strategy).
+        self.aiUsageResetAt = response.aiUsage.resetAt.flatMap { raw in
+            let fractional = ISO8601DateFormatter()
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = fractional.date(from: raw) { return date }
+            return ISO8601DateFormatter().date(from: raw)
+        }
     }
 }
 

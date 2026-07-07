@@ -1,6 +1,25 @@
 # Code Review Backlog
 
-Last updated: 2026-06-14
+Last updated: 2026-07-07
+
+---
+
+# iOS UX assessment + polish + bug hunt — 2026-07-07 (apps/ios)
+
+Triple audit (12 parallel finder agents: 5 UX assessment, 3 UX polish, 4 bug hunt) over the whole iOS app, then a fix pass. ~60 verified findings fixed across Email, Search, Auth/Onboarding, Tasks/Folders/Home, Calendar/Meetings/Docs, AI/Voice, Settings, Navigation, and the services layer. Simulator build green. Details in CHANGELOG `[Unreleased]`.
+
+## Deferred (needs product/backend work — TODO(bug-hunt) comments at each site)
+
+- **Account deletion doesn't delete for passwordless users** — `TodosAPIClient.deleteAccount()`: backend `sendDeleteAccountVerification` emails a link and returns 2xx WITHOUT deleting; the app wipes local data + signs out on that "success". Client now sends the required `Origin` header, but the flow needs to be verification-aware (don't wipe until confirmed; tell the user to check email). Backend + Settings flow change.
+- **Received email attachments can't be opened** — `EmailAttachment` carries only id/filename/mime/size; no download endpoint exists client-side. Cards are now explicitly non-interactive with a "Preview not available yet" caption. Needs an attachment-content API, then wire tap → QuickLook (`EmailThreadView.attachmentsView`).
+- **Composed email attachments are never uploaded** — `SendEmailInput` has no attachment field. Compose now shows "Attachments can't be sent yet" under the chip row. Needs upload pipeline server-side.
+- **Global search email section is local-only** — filters loaded threads; labeled "Searches loaded mail". Needs a server search API that doesn't clobber `emailService.threads` (`GlobalSearchView`).
+- **Offline task deletions**: network-failed delete batches are now retained in-memory and replayed on reconnect (`SupabaseSyncService.pendingDeleteRetries`), but a kill before reconnect still loses them — persistent tombstones need a schema change.
+- **Draft double-send**: drafts stuck in "sending" (killed mid-flight) are no longer auto-resent (duplicate-delivery risk); they need a manual-retry surface + a `mail.send` idempotency key.
+- **Tab bar customization** — `TabBarCustomizationView` writes `services.tabBarTabs` but `MainTabView` renders a fixed 6-tab set (BH-0613-6). Entry points now dev-gated; wire the dynamic bar or delete the screen.
+- **HomeView dead code** — `summaryLine`, `topPriority`, `topPriorityRow`, `HomeTopPriority` unreferenced since the slim greeting replaced the hero. Safe delete (~150 lines).
+- **GoogleCalendarService primary fallback ignores hiddenCalendarIds** on cold start (pre-existing TODO in `UnifiedCalendarService.fetchGoogleEvents`).
+- **Backend check**: iOS compose formatting toolbar inserts literal Markdown into `draft.body` sent raw as `message` — confirm the server renders Markdown→HTML for outgoing mail, else recipients see `**bold**`.
 
 ---
 
@@ -1048,20 +1067,31 @@ Follow-up to the 2026-06-14 bug hunt: addressed the full finding set from three 
 - **Settings** — signature swipe-delete confirm; billing error-alert + `forceRefreshFromAutumn` after cancel; disconnect-button label + 44pt target; tab-bar customization surfaced in Settings; calendar toggle labels; duplicate-pattern feedback; voice-settings nav-title consistency; tab-bar-customization background token.
 - **Docs/Meetings/Notifications** — faster new-doc autofocus + blur-save; docs search-task cancel; meetings sync button + row truncation help; Q&A send spinner + a11y; notification row haptic + truncation help.
 
-## Deferred — feature-scope / needs product decision or API change (NOT done)
+## Deferred items — 2026-06-15 second-wave resolution
 
-| ID | Where | Why deferred |
-|----|-------|--------------|
-| UX-D1 | Board view (`BoardView`) | Inline "add to column" is a new feature, not a polish fix. |
-| UX-D2 | `FolderDetailView.fetchFolderContents` | Distinguishing empty-vs-failed needs the service to report success/failure (currently swallows + falls back to local). TODO left in code. |
+Second wave (6 implementer agents) cleared most of the deferred set. Whole-app `xcodebuild` re-verified after these + the file deletion below.
+
+### ✅ Resolved in the second wave
+
+| ID | Where | Resolution |
+|----|-------|-----------|
+| ~~UX-D1~~ | Board view | **Already existed** — `BoardColumnView` has an inline quick-add row calling `TaskCaptureService.captureInStatus(title:status:in:)`. Original deferral was wrong. |
+| ~~UX-D2~~ | `FolderDetailView` / `fetchFolderContents` | `fetchFolderContents` now returns `FolderContentsResult { items, remoteFetchFailed }`; the view shows a distinct "Couldn't load — pull to refresh" state vs. genuine empty. |
+| ~~UX-D4 (subset)~~ | AI chat edit-undo | Edit now captures the truncated tail + index (`lastTruncatedHistory` was previously dead — set to `[]` immediately); `restoreTruncatedHistory` + a 30s "Undo edit" chip wired via the existing `cancelStream()`. Branching / per-tool-retry / streaming-lag / per-source open remain deferred (see below). |
+| ~~UX-D6~~ | AI delete confirmation | `PendingDeleteConfirmation` gained `subtitle`; the delete-task handler fetches due date + folder and the dialog shows "Due <date> · <folder>". |
+| ~~UX-D7 (docs)~~ | `DocsService` / `DocsListView` | `lastSyncedAt` set on successful refresh; a "Last refreshed … ago" tap-to-sync footer mirrors MeetingsListView. |
+| ~~UX-D9~~ | Cross-tab "See all N" | Added `tasksSearchSeed` (+ reused existing `pendingEmailSearchQuery`); GlobalSearchView seeds the query, Tasks & Email tabs consume it on appear. |
+| ~~UX-D10~~ | Orphaned `EmailAIDraftSheet` | Confirmed zero external references; **deleted** the file and its 4 explicit `project.pbxproj` entries (legacy-style, not a synchronized group). Compose already uses AIChatView. |
+
+### Still deferred — genuine risk / product decision (unchanged)
+
+| ID | Where | Why still deferred |
+|----|-------|--------------------|
 | UX-D3 | `CalendarMonthView` row height | Size-class-adaptive height risks layout churn across the perf-tuned ±60-month buffer. |
-| UX-D4 | AI chat — edit-message undo/branching, per-tool retry, streaming keystroke-lag, per-source "open in app" | Architectural / new UI. |
-| UX-D5 | `VoiceInputButton` transcribing-cancel | No cancel API exists; building one is out of scope. |
-| UX-D6 | AI delete-confirmation context (due date/folder) | `PendingDeleteConfirmation` carries only id/title; needs a new service fetch. |
-| UX-D7 | Meeting Q&A timestamp sourcing; docs "last refreshed" indicator | Needs `MeetingsService`/`DocsService` changes outside the edited files. |
-| UX-D8 | Recipient display-name preservation in compose | Data-model change (`[String]` → `[Recipient]`). |
-| UX-D9 | Cross-tab "See all N" query pre-fill | No query-seed property on `AppServices` yet. |
-| UX-D10 | Email AI-draft → compose insert (orphaned `EmailAIDraftSheet`) | Needs AIChatView→compose callback plumbing; decide keep-and-wire vs delete. |
+| UX-D4 (rest) | AI chat — message branching, per-tool retry, streaming keystroke-lag, per-source "open in app" | Architectural / new UI + backend shape. |
+| UX-D5 | `VoiceInputButton` transcribing-cancel | No cancel API; audio-path change, low value. |
+| UX-D7 (Q&A) | Meeting Q&A timestamp sourcing | Needs backend response to carry transcript timestamps. |
+| UX-D8 | Recipient display-name preservation in compose | Data-model change (`[String]` → `[Recipient]`) touching the send payload; needs integration testing before shipping. |
 
 ---
 

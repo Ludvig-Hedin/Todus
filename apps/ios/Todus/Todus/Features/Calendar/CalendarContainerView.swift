@@ -128,8 +128,13 @@ struct CalendarContainerView: UIViewControllerRepresentable {
             navigationController.setNavigationBarHidden(!isEventDetail, animated: animated)
             // Keep the interactive pop gesture working even after we hide/show the nav
             // bar — without this it can desync and the swipe-back stops responding.
-            navigationController.interactivePopGestureRecognizer?.isEnabled = true
-            navigationController.interactivePopGestureRecognizer?.delegate = nil
+            // Guard the root VC like didShow does: enabling the pop gesture with
+            // nothing to pop can wedge the nav controller's gesture state on a
+            // left-edge swipe (intermittently frozen calendar on return-to-root).
+            if navigationController.viewControllers.count > 1 {
+                navigationController.interactivePopGestureRecognizer?.isEnabled = true
+                navigationController.interactivePopGestureRecognizer?.delegate = nil
+            }
 
             // Reach into the binding inside the Task so we always read/write the
             // freshest reference — capturing it locally would lock onto a copy that

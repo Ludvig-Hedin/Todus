@@ -52,6 +52,12 @@ struct MainTabView: View {
     @State private var captureTruncatedCount = 0
     @State private var captureTruncatedDismiss: Task<Void, Never>? = nil
 
+    /// Transient success toast for CreateSheet captures ("Task added to Inbox").
+    /// Driven by `services.captureSuccessMessage` — a dateless task capture was
+    /// previously invisible from Home, leaving a "did that work?" moment on the
+    /// app's core flow.
+    @State private var captureSuccessToast: ToastMessage? = nil
+
     @ScaledMetric(relativeTo: .body) private var fabSize: CGFloat = 58
 
     /// Vertical room a scroll view needs at its bottom edge so the last row stays
@@ -99,6 +105,13 @@ struct MainTabView: View {
         .animation(.easeInOut(duration: 0.3), value: services.authService.isSessionExpired)
         .animation(.easeInOut(duration: 0.3), value: captureFailureVisible)
         .animation(.easeInOut(duration: 0.3), value: captureTruncatedVisible)
+        // Success confirmation for CreateSheet captures — sits above the FABs.
+        .toast($captureSuccessToast, bottomInset: Self.fabClearance)
+        .onChange(of: services.captureSuccessMessage) { _, newValue in
+            guard let message = newValue else { return }
+            services.captureSuccessMessage = nil
+            captureSuccessToast = .success(message)
+        }
         .onChange(of: services.captureService.lastRollbackAt) { _, newValue in
             guard newValue != nil else { return }
             captureFailureCount = services.captureService.lastRollbackCount
@@ -152,7 +165,12 @@ struct MainTabView: View {
             // Resolve permission at render time so the tab switches the moment the
             // user grants/revokes access via Settings or the in-app prompt.
             NavigationStack {
-                if calendarPermissionGranted || services.calendarService.canReadEvents() {
+                // Google events come from the backend and don't need EventKit —
+                // a Gmail-connected user who declined Apple Calendar access must
+                // not be walled out of the whole tab with their events hidden.
+                if calendarPermissionGranted
+                    || services.calendarService.canReadEvents()
+                    || services.connectionsService.connections.contains(where: { $0.providerId == "google" }) {
                     CalendarTabView()
                         .toolbar(.hidden, for: .navigationBar)
                 } else {
@@ -319,6 +337,7 @@ struct MainTabView: View {
 
     private var createFAB: some View {
         Button {
+            AppHaptic.light.play()
             createSheetInitialType = createType(for: selectedTab)
             withAnimation(.easeOut(duration: 0.22)) {
                 showCreateSheet = true
@@ -338,6 +357,7 @@ struct MainTabView: View {
 
     private var aiFAB: some View {
         Button {
+            AppHaptic.light.play()
             services.showsAIChat = true
         } label: {
             Image(systemName: "sparkles")

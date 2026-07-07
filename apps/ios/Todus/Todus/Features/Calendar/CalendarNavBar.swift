@@ -37,6 +37,7 @@ struct CalendarNavBar: View {
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(.primary.opacity(0.75))
                         .frame(width: 36, height: 32)
+                        .interactiveHitTarget(expansion: 6)
                 }
                 .buttonStyle(LiquidGlassButtonStyle(cornerRadius: AppTheme.Radius.row))
                 .accessibilityLabel(String(localized: "Calendars"))
@@ -51,6 +52,7 @@ struct CalendarNavBar: View {
                             .font(.system(size: 15, weight: .medium))
                             .foregroundStyle(.primary.opacity(0.75))
                             .frame(width: 36, height: 32)
+                            .interactiveHitTarget(expansion: 6)
                     } else {
                         Text(String(localized: "Today"))
                             .font(.system(size: 13, weight: .medium))
@@ -101,6 +103,9 @@ struct CalendarNavBar: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.primary.opacity(0.65))
                 .frame(width: 32, height: 32)
+                // Visible pill stays 32pt; expand the hit region to the HIG 44pt
+                // minimum without inflating the glass background.
+                .interactiveHitTarget(expansion: 6)
         }
         .buttonStyle(LiquidGlassButtonStyle(cornerRadius: AppTheme.Radius.row))
         .accessibilityLabel(accessibilityLabel)

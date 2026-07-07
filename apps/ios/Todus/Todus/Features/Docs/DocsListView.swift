@@ -129,6 +129,31 @@ struct DocsListView: View {
                 ForEach(svc.workspaces) { workspace in
                     workspaceSection(workspace)
                 }
+                if let synced = svc.lastSyncedAt {
+                    Section {
+                        Button {
+                            Task { await svc.refresh() }
+                        } label: {
+                            HStack {
+                                Spacer()
+                                if svc.isLoading {
+                                    ButtonInlineProgressView(tint: .secondary, side: AppTheme.Metrics.compactInlineSpinner)
+                                } else {
+                                    Label(docsRefreshedAgoText(synced), systemImage: "arrow.clockwise")
+                                        .font(.caption2)
+                                        .foregroundStyle(.quaternary)
+                                }
+                                Spacer()
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(svc.isLoading)
+                        .accessibilityLabel("Refresh docs")
+                        .accessibilityHint(docsRefreshedAgoText(synced))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    }
+                }
             }
         }
         .listStyle(.insetGrouped)
@@ -413,7 +438,13 @@ struct DocsListView: View {
                 Button {
                     Task { await createDoc() }
                 } label: {
-                    Label("New document", systemImage: "plus")
+                    // Mirror the toolbar create button's in-flight spinner —
+                    // the empty-state button previously just dimmed silently.
+                    if pendingCreate {
+                        ButtonInlineProgressView()
+                    } else {
+                        Label("New document", systemImage: "plus")
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(pendingCreate)
@@ -436,8 +467,7 @@ struct DocsListView: View {
                 .id(doc.id)
                 .onAppear { newlyCreatedDocID = nil }
         } else {
-            ProgressView()
-                .task { _ = await services.docsService.getDoc(id: id) }
+            DocFetchFallbackView(docId: id)
         }
     }
 
@@ -450,8 +480,7 @@ struct DocsListView: View {
         } else if let id = selectedDocID {
             // A doc was selected (e.g. just created) before allDocs includes it —
             // fetch it instead of showing the "Select a document" placeholder.
-            ProgressView()
-                .task { _ = await services.docsService.getDoc(id: id) }
+            DocFetchFallbackView(docId: id)
         } else {
             VStack(spacing: 12) {
                 Image(systemName: "doc.text.magnifyingglass")
@@ -543,4 +572,56 @@ struct DocsListView: View {
         renamingDoc = nil
         renameText = ""
     }
+}
+
+/// Fetches a doc that isn't in `allDocs` yet, with an explicit failure state.
+/// Previously this path was a bare `ProgressView().task { getDoc }` — a failed
+/// fetch left an infinite spinner with no message and no retry.
+private struct DocFetchFallbackView: View {
+    @Environment(AppServices.self) private var services
+    let docId: String
+
+    @State private var fetchFailed = false
+
+    var body: some View {
+        Group {
+            if fetchFailed {
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.secondary)
+                    Text("Couldn't open document")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Button {
+                        fetchFailed = false
+                        Task { await fetch() }
+                    } label: {
+                        Label("Retry", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                }
+            } else {
+                ProgressView()
+                    .task { await fetch() }
+            }
+        }
+    }
+
+    private func fetch() async {
+        let doc = await services.docsService.getDoc(id: docId)
+        if doc == nil {
+            fetchFailed = true
+        }
+    }
+}
+
+/// Mirrors `syncedAgoText` in MeetingsListView so Docs' refresh footer reads
+/// consistently with Meetings' sync footer.
+private func docsRefreshedAgoText(_ date: Date) -> String {
+    let diff = Date().timeIntervalSince(date)
+    if diff < 60 { return "Last refreshed just now" }
+    if diff < 3600 { return "Last refreshed \(Int(diff / 60))m ago" }
+    if diff < 86400 { return "Last refreshed \(Int(diff / 3600))h ago" }
+    return "Last refreshed \(date.formatted(.dateTime.month(.abbreviated).day()))"
 }

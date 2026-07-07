@@ -21,6 +21,11 @@ struct CreateSheet: View {
     @State private var selectedFolder: FolderRecord? = nil
     @State private var selectedDate: Date? = nil
     @State private var isShowingDatePicker = false
+    /// What Auto mode will actually create for the current text, surfaced live
+    /// so "Reply to landlord…" doesn't silently route into email compose at
+    /// send time. Debounced — resolveAutoType runs the local NLP parser.
+    @State private var autoDetectedType: CreateItemType? = nil
+    @State private var autoDetectTask: Task<Void, Never>? = nil
 
     // Email-specific secondary fields
     @State private var recipientText = ""
@@ -142,10 +147,14 @@ struct CreateSheet: View {
         .onAppear {
             selectedType = initialType
             fromConnectionId = services.connectionsService.connections.first?.id
-            // Auto-set start date for events if none selected
+            // Auto-set start date for events if none selected. A calendar-grid
+            // tap seeds the tapped slot's time via createSheetSeedDate — use it
+            // so "tap 3:00 PM to create" doesn't silently fall back to "now".
             if initialType == .event, selectedDate == nil {
-                selectedDate = Date()
-                selectedEndDate = Date().addingTimeInterval(3600)
+                let seed = services.createSheetSeedDate
+                services.createSheetSeedDate = nil
+                selectedDate = seed ?? Date()
+                selectedEndDate = (seed ?? Date()).addingTimeInterval(3600)
             }
         }
         .sheet(isPresented: $isShowingDatePicker) {
@@ -214,9 +223,13 @@ struct CreateSheet: View {
         // Auto-populate end date when type switches to event
         .onChange(of: selectedType) { _, newType in
             if newType == .event, selectedDate == nil {
-                selectedDate = Date()
-                selectedEndDate = Date().addingTimeInterval(3600)
+                let seed = services.createSheetSeedDate
+                services.createSheetSeedDate = nil
+                selectedDate = seed ?? Date()
+                selectedEndDate = (seed ?? Date()).addingTimeInterval(3600)
             }
+            // The live type indicator only applies to Auto mode.
+            refreshAutoDetectedType(for: text.trimmingCharacters(in: .whitespaces))
         }
         .alert(item: $eventSaveFallbackPrompt) { fallback in
             Alert(
@@ -368,6 +381,35 @@ struct CreateSheet: View {
             // Event: location field below main text
             if selectedType == .event {
                 eventLocationField
+            }
+
+            // Auto mode: show what the classifier will actually create so the
+            // routing (task vs event vs email compose) isn't a send-time surprise.
+            if selectedType == .auto, let detected = autoDetectedType {
+                HStack(spacing: 4) {
+                    Image(systemName: detected.icon)
+                        .font(.system(size: 10, weight: .semibold))
+                    Text("Creates \(detected.title.lowercased())")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundStyle(AppTheme.mutedText)
+                .padding(.horizontal, 16)
+                .padding(.top, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .transition(.opacity)
+            }
+
+            // Email mode: explain the disabled Send button instead of letting it
+            // silently grey out with a full body and no recipient.
+            if selectedType == .email,
+               recipientText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text("Add a recipient to send")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(AppTheme.mutedText)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             // Toolbar: folder | date | spacer | voice | send
@@ -615,7 +657,10 @@ struct CreateSheet: View {
                     Button {
                         selectedFolder = nil
                     } label: {
-                        Label("Auto (AI decides)", systemImage: "sparkles")
+                        // Checkmark marks the active choice (standard menu
+                        // behavior) — Auto and the default state are the same
+                        // nil value, which otherwise read as two different options.
+                        Label("Auto (AI decides)", systemImage: selectedFolder == nil ? "checkmark" : "sparkles")
                     }
                     if !folders.isEmpty {
                         Divider()
@@ -623,19 +668,19 @@ struct CreateSheet: View {
                             Button {
                                 selectedFolder = folder
                             } label: {
-                                Label(folder.name, systemImage: "folder")
+                                Label(folder.name, systemImage: selectedFolder?.id == folder.id ? "checkmark" : "folder")
                             }
                         }
                     }
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: selectedFolder == nil ? "tray" : "folder.fill")
+                        Image(systemName: selectedFolder == nil ? "sparkles" : "folder.fill")
                             .font(.system(size: 13, weight: .semibold))
-                        if let folder = selectedFolder {
-                            Text(folder.name)
-                                .font(.system(size: 12, weight: .semibold))
-                                .lineLimit(1)
-                        }
+                        // Always label the collapsed control — a bare tray glyph
+                        // gave no hint that AI auto-routing was active.
+                        Text(selectedFolder?.name ?? "Auto")
+                            .font(.system(size: 12, weight: .semibold))
+                            .lineLimit(1)
                     }
                     .foregroundStyle(selectedFolder == nil ? AppTheme.mutedText : .primary)
                     .padding(.horizontal, 10)
@@ -1062,6 +1107,10 @@ struct CreateSheet: View {
                             }
                         }
                     }
+                    // Confirm the compound capture — several items were just
+                    // created with no other visible feedback.
+                    let createdCount = intents.count
+                    services.captureSuccessMessage = "Added \(createdCount) items"
                     close()
                     return
                 }
@@ -1077,6 +1126,9 @@ struct CreateSheet: View {
             switch resolvedType {
             case .task:
                 createTask(input, attachments: attachments)
+                // A dateless task lands in Tasks → Inbox, which is invisible from
+                // Home — without this the core capture flow gave no confirmation.
+                services.captureSuccessMessage = "Task added to \(selectedFolder?.name ?? "Inbox")"
             case .event:
                 // Use NLP-parsed date when no date was explicitly picked
                 let eventStart = selectedDate ?? parsed?.dueDate
@@ -1088,6 +1140,7 @@ struct CreateSheet: View {
                     isSending = false
                     return
                 }
+                services.captureSuccessMessage = "Event added"
             case .email:
                 services.composeEmailSeedBody = input.isEmpty ? nil : input
                 services.composeEmailSeedTo = recipientText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1103,6 +1156,7 @@ struct CreateSheet: View {
                 services.showsComposeEmail = true
             case .auto:
                 createTask(input, attachments: attachments)
+                services.captureSuccessMessage = "Task added to \(selectedFolder?.name ?? "Inbox")"
             }
             close()
         }
@@ -1198,6 +1252,24 @@ struct CreateSheet: View {
         let trimmed = value.trimmingCharacters(in: .whitespaces)
         withAnimation(.snappy(duration: 0.15)) {
             showsSlashMenu = trimmed.hasSuffix("/") && !trimmed.isEmpty
+        }
+        refreshAutoDetectedType(for: trimmed)
+    }
+
+    /// Debounced live classification for Auto mode's type indicator.
+    private func refreshAutoDetectedType(for trimmed: String) {
+        autoDetectTask?.cancel()
+        guard selectedType == .auto, !trimmed.isEmpty else {
+            autoDetectedType = nil
+            return
+        }
+        autoDetectTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            let detected = resolveAutoType(for: trimmed)
+            withAnimation(.snappy(duration: 0.15)) {
+                autoDetectedType = detected
+            }
         }
     }
 

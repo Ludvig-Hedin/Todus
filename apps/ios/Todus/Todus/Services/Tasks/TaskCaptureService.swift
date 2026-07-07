@@ -342,19 +342,46 @@ final class TaskCaptureService {
         }
     }
 
+    /// Outcome of an explicit "create new folder" attempt. Distinguishes a real
+    /// creation from a case-insensitive name collision so create UIs can surface
+    /// the duplicate instead of silently returning the old folder (which dropped
+    /// the user's chosen color/icon and faked success).
+    enum CreateFolderOutcome {
+        case created(FolderRecord)
+        case duplicate(FolderRecord)
+        case invalidName
+    }
+
+    /// Get-or-create semantics: a name collision returns the existing folder.
+    /// Use `createFolderExclusive` when the user is explicitly creating a new
+    /// folder and a collision should be surfaced as an error.
     func createFolder(
         named name: String,
         colorHex: String? = nil,
         iconName: String? = nil,
         in context: ModelContext
     ) -> FolderRecord? {
+        switch createFolderExclusive(named: name, colorHex: colorHex, iconName: iconName, in: context) {
+        case .created(let folder), .duplicate(let folder):
+            return folder
+        case .invalidName:
+            return nil
+        }
+    }
+
+    func createFolderExclusive(
+        named name: String,
+        colorHex: String? = nil,
+        iconName: String? = nil,
+        in context: ModelContext
+    ) -> CreateFolderOutcome {
         let cleanedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanedName.isEmpty else { return nil }
+        guard !cleanedName.isEmpty else { return .invalidName }
 
         let existing = (try? context.fetch(FetchDescriptor<FolderRecord>())) ?? []
 
         if let existingFolder = existing.first(where: { $0.name.compare(cleanedName, options: .caseInsensitive) == .orderedSame }) {
-            return existingFolder
+            return .duplicate(existingFolder)
         }
 
         let nextPosition = (existing.map { $0.position }.max() ?? -1) + 1
@@ -377,7 +404,7 @@ final class TaskCaptureService {
                 )
             )
         }
-        return folder
+        return .created(folder)
     }
 
     func renameFolder(_ folder: FolderRecord, to name: String, in context: ModelContext) {
@@ -506,11 +533,14 @@ final class TaskCaptureService {
             let response: FolderListResponse = try await apiClient.trpcQuery("folders.list")
             let remoteFolders = response.folders
             let localFolders = (try? context.fetch(FetchDescriptor<FolderRecord>())) ?? []
-            var foldersByID = Dictionary(uniqueKeysWithValues: localFolders.map { ($0.id.uuidString, $0) })
+            // Keyed by parsed UUID, not uuidString: Swift renders uuidString UPPERCASE
+            // while server/web-created folders use lowercase ids, so a raw string
+            // lookup missed every remote folder and re-inserted a duplicate per sync.
+            var foldersByID = Dictionary(uniqueKeysWithValues: localFolders.map { ($0.id, $0) })
 
             for remote in remoteFolders {
                 guard let uuid = UUID(uuidString: remote.id) else { continue }
-                if let local = foldersByID[remote.id] {
+                if let local = foldersByID[uuid] {
                     local.name = remote.name
                     local.colorHex = remote.color
                     local.iconName = remote.icon
@@ -528,7 +558,7 @@ final class TaskCaptureService {
                         updatedAt: remote.updatedAt ?? remote.createdAt
                     )
                     context.insert(folder)
-                    foldersByID[remote.id] = folder
+                    foldersByID[uuid] = folder
                 }
             }
 
@@ -674,10 +704,13 @@ final class TaskCaptureService {
         do {
             let response: FolderSummaryResponse = try await apiClient.trpcQuery("folders.summary")
             let localFolders = (try? context.fetch(FetchDescriptor<FolderRecord>())) ?? []
-            let byID = Dictionary(uniqueKeysWithValues: localFolders.map { ($0.id.uuidString, $0) })
+            // UUID keys, not uuidString — server ids are lowercase, uuidString is
+            // UPPERCASE, so string-keyed lookups never matched (empty folder cards).
+            let byID = Dictionary(uniqueKeysWithValues: localFolders.map { ($0.id, $0) })
 
             for remote in response.folders {
-                guard let local = byID[remote.folder.id] else { continue }
+                guard let remoteID = UUID(uuidString: remote.folder.id),
+                      let local = byID[remoteID] else { continue }
                 local.cachedItemCount = remote.itemCount
                 local.setBreakdown(FolderTypeBreakdown(
                     tasks: remote.breakdown.tasks,
@@ -702,21 +735,32 @@ final class TaskCaptureService {
         }
     }
 
+    /// Result of `fetchFolderContents`. `remoteFetchFailed` lets the caller distinguish
+    /// a genuinely empty folder from one where the backend call failed and we fell back
+    /// to local-only data.
+    struct FolderContentsResult {
+        let items: [FolderContentItem]
+        let remoteFetchFailed: Bool
+    }
+
     /// Fetch the full mixed-type contents for a single folder from the backend.
     /// Tasks are resolved against local SwiftData so users get the live TaskRecord
     /// (with completion state, etc.). Chats / emails / events / docs are returned
     /// as lightweight value types since their full data lives elsewhere.
-    func fetchFolderContents(_ folder: FolderRecord, in context: ModelContext) async -> [FolderContentItem] {
+    func fetchFolderContents(_ folder: FolderRecord, in context: ModelContext) async -> FolderContentsResult {
         struct ContentsInput: Encodable {
             let folderId: String
             let limit: Int
         }
 
         let allTasks = (try? context.fetch(FetchDescriptor<TaskRecord>())) ?? []
-        let tasksByID = Dictionary(uniqueKeysWithValues: allTasks.map { ($0.id.uuidString, $0) })
+        // UUID keys, not uuidString — server ids are lowercase, uuidString is
+        // UPPERCASE, so string-keyed lookups never resolved remote task rows.
+        let tasksByID = Dictionary(uniqueKeysWithValues: allTasks.map { ($0.id, $0) })
 
         var items: [FolderContentItem] = []
         var seenIDs = Set<String>()
+        var remoteFetchFailed = false
 
         do {
             let response: FolderContentsResponse = try await apiClient.trpcQuery(
@@ -727,9 +771,11 @@ final class TaskCaptureService {
             for raw in response.items {
                 switch raw.type {
                 case "task":
-                    if let task = tasksByID[raw.id] {
+                    if let rawUUID = UUID(uuidString: raw.id), let task = tasksByID[rawUUID] {
                         items.append(.task(task))
-                        seenIDs.insert("task-\(raw.id)")
+                        // Lowercased so it matches the local-task dedup key below
+                        // regardless of server id casing.
+                        seenIDs.insert("task-\(raw.id.lowercased())")
                     }
                 case "chat":
                     items.append(.chat(id: raw.id, title: raw.title, updatedAt: raw.sortAt))
@@ -749,6 +795,7 @@ final class TaskCaptureService {
             }
         } catch {
             // Backend unavailable — fall through to local-only data below.
+            remoteFetchFailed = true
         }
 
         // Merge any locally-saved items not yet reflected in the backend response.
@@ -778,14 +825,17 @@ final class TaskCaptureService {
 
         // Include local tasks assigned to this folder but not yet visible on backend.
         for task in allTasks where task.folder?.id == folderID {
-            let key = "task-\(task.id.uuidString)"
+            let key = "task-\(task.id.uuidString.lowercased())"
             if !seenIDs.contains(key) {
                 items.append(.task(task))
                 seenIDs.insert(key)
             }
         }
 
-        return items.sorted { $0.sortDate > $1.sortDate }
+        return FolderContentsResult(
+            items: items.sorted { $0.sortDate > $1.sortDate },
+            remoteFetchFailed: remoteFetchFailed
+        )
     }
 
     // MARK: - Folder items (emails / events / docs)

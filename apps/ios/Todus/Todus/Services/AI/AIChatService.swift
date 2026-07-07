@@ -34,6 +34,9 @@ final class AIChatService {
         let id = UUID()
         let taskID: UUID
         let title: String?
+        /// Preformatted "Due <date> · <folder>" context line so the user can verify
+        /// it's the right task before confirming a destructive delete (UX-D6).
+        let subtitle: String?
     }
 
     /// Continuations stored per-pending-confirmation so the suspended tool-call await
@@ -50,8 +53,8 @@ final class AIChatService {
         }
     }
 
-    private func awaitDeleteConfirmation(taskID: UUID, title: String?) async -> Bool {
-        let pending = PendingDeleteConfirmation(taskID: taskID, title: title)
+    private func awaitDeleteConfirmation(taskID: UUID, title: String?, subtitle: String? = nil) async -> Bool {
+        let pending = PendingDeleteConfirmation(taskID: taskID, title: title, subtitle: subtitle)
         return await withCheckedContinuation { continuation in
             pendingDeleteContinuations[pending.id] = continuation
             pendingDeleteConfirmation = pending
@@ -422,6 +425,23 @@ final class AIChatService {
         errorMessage = nil
     }
 
+    /// Undo an "Edit message" send (UX-D4). `history` is the tail `truncateBefore`
+    /// dropped; `index` is where it used to start. Stops the in-flight replacement
+    /// turn (if still streaming), drops whatever replaced the original tail, and
+    /// reinserts `history` in its place. No-op if `index` no longer points inside
+    /// the array — e.g. the conversation was cleared or another turn already sent —
+    /// so a stale undo can never corrupt state.
+    func restoreTruncatedHistory(_ history: [AIChatMessage], at index: Int) {
+        guard !history.isEmpty, index >= 0, index <= messages.count else { return }
+        if isStreaming {
+            cancelStream()
+        }
+        messages.removeSubrange(index..<messages.count)
+        messages.append(contentsOf: history)
+        isConversationSaved = false
+        errorMessage = nil
+    }
+
     /// Retry after a mid-stream connection drop. Surfaces the same path as the
     /// in-conversation retry button so the user gets explicit control — we never
     /// auto-reconnect because the model may already have charged for partial output.
@@ -639,7 +659,9 @@ final class AIChatService {
             }
             if let args = try? JSONDecoder().decode(UpdateTaskArgs.self, from: argsData),
                let taskID = UUID(uuidString: args.id) {
-                applyUpdateTask(taskID: taskID, args: args, modelContext: modelContext)
+                guard applyUpdateTask(taskID: taskID, args: args, modelContext: modelContext) else {
+                    return encodeToolResult(success: false, message: "Task not found or could not be updated")
+                }
                 return encodeToolResult(success: true, message: "Task updated")
             }
 
@@ -649,7 +671,9 @@ final class AIChatService {
             }
             if let args = try? JSONDecoder().decode(DeleteTaskArgs.self, from: argsData),
                let taskID = UUID(uuidString: args.id) {
-                applyDeleteTask(taskID: taskID, modelContext: modelContext)
+                guard applyDeleteTask(taskID: taskID, modelContext: modelContext) else {
+                    return encodeToolResult(success: false, message: "Task not found or could not be deleted")
+                }
                 return encodeToolResult(success: true, message: "Task deleted")
             }
 
@@ -1317,10 +1341,19 @@ final class AIChatService {
             // Look up the task title before deleting so the chip + confirmation can
             // show context (Bug #9).
             let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID })
-            let titleForChip = (try? modelContext.fetch(descriptor))?.first?.title
+            let matchedTask = (try? modelContext.fetch(descriptor))?.first
+            let titleForChip = matchedTask?.title
+            // Enrich the confirmation with due date + folder so the user can verify
+            // it's the right task before deleting (UX-D6).
+            let confirmationSubtitle: String? = {
+                let dueDateText = matchedTask?.dueDate.map { $0.formatted(date: .abbreviated, time: .shortened) }
+                let folderText = matchedTask?.folder?.name
+                let parts = [dueDateText.map { "Due \($0)" }, folderText].compactMap { $0 }
+                return parts.isEmpty ? nil : parts.joined(separator: " · ")
+            }()
             // Destructive action — gate behind explicit user confirmation (Bug #4).
             // Suspends until the view resolves `pendingDeleteConfirmation`.
-            let confirmed = await awaitDeleteConfirmation(taskID: taskID, title: titleForChip)
+            let confirmed = await awaitDeleteConfirmation(taskID: taskID, title: titleForChip, subtitle: confirmationSubtitle)
             guard confirmed else {
                 appendToolFailureChip(
                     toolName: call.name,

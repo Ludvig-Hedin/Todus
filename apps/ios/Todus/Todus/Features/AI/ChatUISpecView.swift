@@ -19,16 +19,32 @@ struct ChatUISpecView: View {
         renderElement(id: spec.root)
     }
 
-    private func renderElement(id: String) -> AnyView {
+    /// Maximum nesting depth for an AI-produced spec. A malformed or adversarial spec could
+    /// nest layout containers arbitrarily deep (or cycle via child IDs); bail past this to
+    /// protect against unbounded recursion / stack overflow.
+    private static let maxRenderDepth = 32
+
+    private func renderElement(id: String, depth: Int = 0) -> AnyView {
+        guard depth <= Self.maxRenderDepth else {
+            #if DEBUG
+            return AnyView(
+                Text("Spec too deeply nested (truncated)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            )
+            #else
+            return AnyView(EmptyView())
+            #endif
+        }
         if let element = spec.elements[id] {
-            elementView(for: element)
+            return elementView(for: element, depth: depth)
         } else {
             // Element ID not found in spec — render nothing
-            AnyView(EmptyView())
+            return AnyView(EmptyView())
         }
     }
 
-    private func elementView(for element: UIElement) -> AnyView {
+    private func elementView(for element: UIElement, depth: Int) -> AnyView {
         switch element.type {
         // Domain cards
         case "EmailCard":
@@ -87,7 +103,7 @@ struct ChatUISpecView: View {
             return AnyView(StackView(props: element.props) {
                 if let children = element.children {
                     ForEach(children, id: \.self) { childId in
-                        renderElement(id: childId)
+                        renderElement(id: childId, depth: depth + 1)
                     }
                 }
             })
@@ -95,7 +111,7 @@ struct ChatUISpecView: View {
             return AnyView(CardContainerView(props: element.props) {
                 if let children = element.children {
                     ForEach(children, id: \.self) { childId in
-                        renderElement(id: childId)
+                        renderElement(id: childId, depth: depth + 1)
                     }
                 }
             })

@@ -35,7 +35,9 @@ struct CalendarListView: View {
                             .id(dayGroup.date)
                         }
 
-                        // Load more trigger
+                        // Load more trigger — with a visible footer spinner so
+                        // reaching the bottom doesn't look like a silent stall
+                        // while the next page fetches.
                         if onLoadMore != nil {
                             Color.clear
                                 .frame(height: 1)
@@ -45,6 +47,15 @@ struct CalendarListView: View {
                                     defer { isLoadingMore = false }
                                     await onLoadMore?()
                                 }
+                            if isLoadingMore {
+                                HStack {
+                                    Spacer()
+                                    ProgressView()
+                                        .controlSize(.small)
+                                    Spacer()
+                                }
+                                .padding(.vertical, 12)
+                            }
                         }
                     }
                 }

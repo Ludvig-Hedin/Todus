@@ -256,7 +256,7 @@ struct NoteCardView: View {
     private func noteColor(_ color: String?) -> Color {
         switch color {
         case "yellow": return Color.yellow.opacity(0.1)
-        case "blue": return Color.primary.opacity(0.1)
+        case "blue": return Color.blue.opacity(0.1)
         case "green": return Color.green.opacity(0.1)
         case "red": return Color.red.opacity(0.1)
         case "purple": return Color.purple.opacity(0.1)
@@ -520,15 +520,17 @@ struct CalendarEventListCardView: View {
     private var title: String? { props["title"]?.stringValue }
     private var summary: String? { props["summary"]?.stringValue }
     private var eventDicts: [[String: ChatJSONValue]] {
-        // Deduplicate by title + date prefix (first 10 chars of ISO start, i.e. "YYYY-MM-DD").
-        // Events from multiple subscribed Apple calendars (e.g. Swedish + Norwegian holidays)
-        // share the same title and date but have *different* eventIds, so deduplicating
-        // by eventId alone would miss duplicates. Title+date catches all same-day duplicates.
+        // Deduplicate by title + full ISO start (including time). Events from multiple
+        // subscribed Apple calendars (e.g. Swedish + Norwegian holidays) share the same
+        // title and *all-day* start ("YYYY-MM-DD", no time) with different eventIds, so
+        // title + start still collapses those. But two genuinely distinct same-title events
+        // on the same day at different times (e.g. two "Standup" meetings at 9am and 10am)
+        // differ in their start time and are correctly kept — a date-only prefix collapsed them.
         var seen = Set<String>()
         return (props["events"]?.arrayValue ?? []).compactMap { $0.objectValue }.filter { dict in
             let title = dict["title"]?.stringValue ?? ""
-            let datePrefix = String((dict["start"]?.stringValue ?? "").prefix(10))
-            let key = "\(title)|\(datePrefix)"
+            let start = dict["start"]?.stringValue ?? ""
+            let key = "\(title)|\(start)"
             return seen.insert(key).inserted
         }
     }
@@ -694,6 +696,7 @@ struct InlineComposeCardView: View {
     @State private var saveStatus: String = "All changes are saved"
     @State private var sendStatus: String = "draft"
     @State private var debounceTask: Task<Void, Never>? = nil
+    @State private var hasPendingSave: Bool = false
     @State private var initialDraftId: String? = nil
 
     var body: some View {
@@ -844,10 +847,15 @@ struct InlineComposeCardView: View {
                 }
             }
             .onDisappear {
-                // Drop any pending autosave so the callback can't fire after the view
-                // is gone and trigger an update_draft action against a stale context.
+                // Flush a pending autosave before tearing down: cancel the debounce timer
+                // and fire one final synchronous update_draft so the user's last keystrokes
+                // aren't lost when the card disappears inside the 600ms debounce window.
                 debounceTask?.cancel()
                 debounceTask = nil
+                if hasPendingSave {
+                    hasPendingSave = false
+                    onAction?("update_draft", ["draftId": p.draftId, "payload": encodePayload()], nil)
+                }
             }
         }
     }
@@ -865,6 +873,7 @@ struct InlineComposeCardView: View {
 
     private func markDirty() {
         saveStatus = "Saving…"
+        hasPendingSave = true
         debounceTask?.cancel()
         let p = parsed
         debounceTask = Task {
@@ -873,6 +882,7 @@ struct InlineComposeCardView: View {
             guard let p else { return }
             let payload = encodePayload()
             await MainActor.run {
+                hasPendingSave = false
                 onAction?("update_draft", ["draftId": p.draftId, "payload": payload]) { success, err in
                     if success {
                         saveStatus = "All changes are saved"
@@ -1510,12 +1520,21 @@ private enum CardDateFormatting {
         f.dateFormat = "h:mm a"
         return f
     }()
+
+    /// Fallback for date-only "yyyy-MM-dd" values (e.g. all-day events) that the ISO
+    /// formatters can't parse. Mirrors WeeklyAgendaCardView.parseDate.
+    static let dateOnlyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
 }
 
 /// Formats an ISO 8601 string into a short display date (e.g. "Mar 27")
 private func formatDate(_ iso: String) -> String {
     guard let date = CardDateFormatting.isoFormatter.date(from: iso)
-            ?? ISO8601DateFormatter().date(from: iso) else {
+            ?? ISO8601DateFormatter().date(from: iso)
+            ?? CardDateFormatting.dateOnlyFormatter.date(from: iso) else {
         return iso
     }
     return CardDateFormatting.displayDateFormatter.string(from: date)
@@ -1533,7 +1552,8 @@ private func formatTimeRange(_ start: String, _ end: String) -> String {
 /// Checks if an ISO 8601 date string is in the past
 private func isDatePast(_ iso: String) -> Bool {
     guard let date = CardDateFormatting.isoFormatter.date(from: iso)
-            ?? ISO8601DateFormatter().date(from: iso) else { return false }
+            ?? ISO8601DateFormatter().date(from: iso)
+            ?? CardDateFormatting.dateOnlyFormatter.date(from: iso) else { return false }
     return date < Date()
 }
 

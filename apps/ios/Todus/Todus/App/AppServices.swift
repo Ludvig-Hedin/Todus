@@ -236,9 +236,28 @@ final class AppServices {
     /// MainTabView observes this and resets it to nil after presenting.
     var requestCreateSheet: CreateItemType? = nil
 
+    /// Start date seeded into CreateSheet's event form when the user taps a
+    /// specific time slot in the calendar grid. CreateSheet consumes it in
+    /// onAppear and resets it to nil.
+    var createSheetSeedDate: Date? = nil
+
+    /// Search query carried from global search's "See all N in Mail" into the
+    /// Email tab. EmailInboxView consumes it on appear and resets it to nil.
+    var pendingEmailSearchQuery: String? = nil
+
+    /// Search query carried from global search's "See all N in Tasks" into the
+    /// Tasks tab. TasksTabView consumes it on appear and resets it to nil.
+    var tasksSearchSeed: String? = nil
+
     /// Surfaced when a notification action (complete / snooze) fails on the next app open.
     /// Cleared by views once shown to the user. Plain text — render in a banner or alert.
     var pendingNotificationActionError: String? = nil
+
+    /// Transient confirmation shown after a successful create from CreateSheet
+    /// (e.g. "Task added to Inbox"). MainTabView observes this, shows an
+    /// auto-dismissing banner, and resets it to nil. Without it a dateless task
+    /// capture gives no visible feedback and is invisible on Home.
+    var captureSuccessMessage: String? = nil
 
     /// Set true to trigger the global email compose sheet from MainTabView.
     var showsComposeEmail = false

@@ -49,23 +49,30 @@ struct MoreSheetView: View {
                             .foregroundStyle(.primary)
                     }
 
-                    // Legacy web shim — kept as an opt-in fallback so users who
-                    // hit issues with the native shell can still get to docs.
-                    NavigationLink {
-                        DocsWebView()
-                            .navigationTitle("Docs (Web)")
-                            .navigationBarTitleDisplayMode(.inline)
-                    } label: {
-                        Label("Docs (Web)", systemImage: "globe")
+                    // Legacy web shim — an internal fallback, not something to show
+                    // every user next to the native Docs entry. Gate behind the
+                    // developer allowlist (same mechanism as the Design System viewer).
+                    if services.isDeveloperModeUIAvailable {
+                        NavigationLink {
+                            DocsWebView()
+                                .navigationTitle("Docs (Web)")
+                                .navigationBarTitleDisplayMode(.inline)
+                        } label: {
+                            Label("Docs (Web)", systemImage: "globe")
+                        }
                     }
                 }
 
-                // Tab bar settings shortcut
-                Section {
-                    NavigationLink {
-                        TabBarCustomizationView()
-                    } label: {
-                        Label("Customize Tab Bar", systemImage: "square.bottomhalf.filled")
+                // Tab bar settings shortcut — Customize Tab Bar is a no-op while
+                // MainTabView renders a fixed tab set (see BH-0613-6), so gate the
+                // entry behind the developer allowlist until the dynamic bar returns.
+                if services.isDeveloperModeUIAvailable {
+                    Section {
+                        NavigationLink {
+                            TabBarCustomizationView()
+                        } label: {
+                            Label("Customize Tab Bar", systemImage: "square.bottomhalf.filled")
+                        }
                     }
                 }
             }

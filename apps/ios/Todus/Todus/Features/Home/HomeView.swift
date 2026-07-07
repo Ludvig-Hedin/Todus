@@ -715,6 +715,11 @@ struct HomeView: View {
         // Surface the failure card with a Retry CTA so the user isn't stranded behind
         // an empty Today section after a timeout.
         if briefingDidFail { return true }
+        // Briefing loaded successfully with zero actionable items — keep the section
+        // so the "You're caught up." reassurance renders. Previously this returned
+        // false, making the whole Today section silently vanish and the caught-up
+        // branch in `todayList` unreachable.
+        if services.emailService.assistantBriefing != nil { return true }
         return false
     }
 
@@ -1058,7 +1063,9 @@ struct HomeView: View {
             sectionHeader(
                 title: "This Week",
                 icon: "calendar",
-                count: sections.count,
+                // Total items, not day-group count — "This Week · 3" read as "3
+                // things" while it actually meant "3 days that have things".
+                count: sections.reduce(0) { $0 + $1.items.count },
                 actionTitle: "Open",
                 isUpdating: isEventsRefreshing,
                 onOpen: { services.navigateTo = .calendar },
@@ -1188,6 +1195,9 @@ struct HomeView: View {
     private func moveEvent(_ event: CalendarEvent, to folderID: UUID?) {
         Task {
             await services.calendarService.setFolderID(folderID, for: event.id)
+            // Same tactile confirm as the briefing-row actions — the move was
+            // previously fully silent.
+            AppHaptic.light.play()
             await loadUpcomingEvents()
         }
     }
@@ -1282,6 +1292,13 @@ struct HomeView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        // The unread dot is purely visual — surface unread state
+                        // to VoiceOver alongside the combined row content.
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(
+                            (thread.unread ? "Unread. " : "")
+                                + "\(thread.from.name), \(thread.subject)"
+                        )
                     }
                 }
             }
@@ -1306,9 +1323,17 @@ struct HomeView: View {
                 count: allMeetings.count,
                 actionTitle: "View all",
                 isUpdating: services.meetingsService.isSyncing,
+                // This action syncs, it doesn't create — a "+" here misled users
+                // into expecting a new-meeting flow. Also guard double-taps:
+                // unguarded taps stacked parallel syncFromCalendar() calls.
+                addIcon: "arrow.clockwise",
                 onOpen: { services.navigateToSheet = .meetings },
                 onAdd: {
-                    Task { await services.meetingsService.syncFromCalendar() }
+                    guard !services.meetingsService.isSyncing else { return }
+                    Task {
+                        await services.meetingsService.syncFromCalendar()
+                        AppHaptic.light.play()
+                    }
                 }
             )
 
@@ -1603,6 +1628,7 @@ struct HomeView: View {
         count: Int,
         actionTitle: String,
         isUpdating: Bool = false,
+        addIcon: String = "plus",
         onOpen: @escaping () -> Void,
         onAdd: @escaping () -> Void
     ) -> some View {
@@ -1633,9 +1659,10 @@ struct HomeView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(AppTheme.accent)
 
-            // Plus button — creates a new item in this category
+            // Trailing action — creates a new item in this category (or, for
+            // sections that pass a custom `addIcon`, runs that action instead).
             Button(action: onAdd) {
-                Image(systemName: "plus")
+                Image(systemName: addIcon)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .frame(width: 28, height: 28)

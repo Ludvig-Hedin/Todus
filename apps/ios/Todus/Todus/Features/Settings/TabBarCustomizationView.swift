@@ -106,6 +106,7 @@ struct TabBarCustomizationView: View {
                             // Add button — disabled when already at max 4 tabs
                             Button {
                                 guard activeTabs.count < 4 else { return }
+                                AppHaptic.light.play()
                                 withAnimation(AppTheme.Motion.base) { activeTabs.append(tab) }
                             } label: {
                                 Image(systemName: activeTabs.count < 4 ? "plus.circle.fill" : "plus.circle")
@@ -139,6 +140,7 @@ struct TabBarCustomizationView: View {
         var result = activeTabs.filter { $0 != .home }
         result.insert(.home, at: 0)
         services.tabBarTabs = Array(result.prefix(4))
+        AppHaptic.success.play()
         dismiss()
     }
 }

@@ -145,18 +145,24 @@ struct InboxView<Footer: View>: View {
     /// any insert/delete shifts count, any in-place mutation bumps updatedAt
     /// (TaskCaptureService writes `.updatedAt = .now` on every change).
     private var tasksChangeDigest: TasksDigest {
-        // Walk once — same cost as Equatable on the array but bounded to two
-        // scalars in @State so SwiftUI's diffing path is O(1).
+        // Walk once — same cost as Equatable on the array but bounded to a few
+        // scalars in @State so SwiftUI's diffing path is O(1). The order-independent
+        // sum term catches in-place remote-sync updates whose server `updatedAt` is
+        // ≤ the current local max (count + max alone missed those, leaving the
+        // rendered list stale after a multi-device sync).
         var latest: Date = .distantPast
-        for task in allTasks where task.updatedAt > latest {
-            latest = task.updatedAt
+        var sum: Double = 0
+        for task in allTasks {
+            if task.updatedAt > latest { latest = task.updatedAt }
+            sum += task.updatedAt.timeIntervalSinceReferenceDate
         }
-        return TasksDigest(count: allTasks.count, latestUpdate: latest)
+        return TasksDigest(count: allTasks.count, latestUpdate: latest, updateSum: sum)
     }
 
     private struct TasksDigest: Equatable {
         let count: Int
         let latestUpdate: Date
+        let updateSum: Double
     }
 
     // MARK: - Helpers

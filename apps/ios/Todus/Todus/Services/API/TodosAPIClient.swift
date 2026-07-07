@@ -132,14 +132,19 @@ final class TodosAPIClient {
     func request<T: Decodable>(
         path: String,
         method: String = "GET",
-        body: Encodable? = nil
+        body: Encodable? = nil,
+        extraHeaders: [String: String] = [:]
     ) async throws -> T {
         let url = baseURL.appending(path: path)
         let bodyData: Data? = try body.map { try JSONEncoder().encode($0) }
         let isMutation = method.uppercased() != "GET" && method.uppercased() != "HEAD"
 
         let (data, _) = try await executeURLRequest(isMutation: isMutation) {
-            self.makeRequest(url: url, method: method, body: bodyData)
+            var req = self.makeRequest(url: url, method: method, body: bodyData)
+            for (key, value) in extraHeaders {
+                req.setValue(value, forHTTPHeaderField: key)
+            }
+            return req
         }
         return try JSONDecoder.apiDecoder.decode(T.self, from: data)
     }
@@ -170,8 +175,37 @@ final class TodosAPIClient {
     // MARK: - Account
 
     /// Delete the current user's account and all associated data on the backend.
+    ///
+    /// TODO(bug-hunt): the backend (Better Auth `sendDeleteAccountVerification`)
+    /// does NOT delete passwordless accounts (Google/Apple/OTP — i.e. every iOS
+    /// user) on this call — it emails a verification link and returns 2xx. The
+    /// caller (SettingsView.performDeleteAccount) currently signs out and wipes
+    /// local SwiftData on that "success" while the account survives server-side.
+    /// Needs a verification-aware flow: keep local data until deletion is
+    /// confirmed, and tell the user to check their email.
     func deleteAccount() async throws {
-        let _: EmptyResponse = try await request(path: "api/auth/delete-user", method: "POST")
+        // Better Auth's CSRF middleware requires an Origin header on auth
+        // endpoints — every other auth call sets it, this one didn't.
+        let origin = Self.originHeaderValue(for: AppConfiguration.load().effectiveAppURL)
+        let _: EmptyResponse = try await request(
+            path: "api/auth/delete-user",
+            method: "POST",
+            extraHeaders: ["Origin": origin]
+        )
+    }
+
+    /// Builds an HTTP Origin value (scheme + host + port, no path) from the web
+    /// app base URL.
+    private static func originHeaderValue(for appURL: URL) -> String {
+        var components = URLComponents(url: appURL, resolvingAgainstBaseURL: false)
+        components?.path = ""
+        components?.query = nil
+        components?.fragment = nil
+        if let s = components?.string, !s.isEmpty { return s }
+        let scheme = appURL.scheme ?? "https"
+        let host = appURL.host ?? ""
+        let port = appURL.port.map { ":\($0)" } ?? ""
+        return "\(scheme)://\(host)\(port)"
     }
 
     /// Disconnect the user's Gmail connection on the backend.

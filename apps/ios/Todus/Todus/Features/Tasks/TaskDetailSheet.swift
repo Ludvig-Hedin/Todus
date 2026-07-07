@@ -34,6 +34,8 @@ struct TaskDetailSheet: View {
     @State private var selectedPhotoItem: PhotosPickerItem?
     /// Attachment awaiting delete confirmation — nil hides the dialog.
     @State private var pendingDeleteAttachment: String?
+    /// Drives the destructive delete-task confirmation dialog.
+    @State private var showDeleteTaskConfirmation = false
     /// Guards the Save button from double-fires while the SwiftData write +
     /// subsequent task reschedule are in flight.
     @State private var isSaving = false
@@ -62,6 +64,7 @@ struct TaskDetailSheet: View {
                 scheduleSection
                 organizationSection
                 attachmentsSection
+                deleteSection
             }
             .listStyle(.insetGrouped)
             .listRowSpacing(10)
@@ -72,6 +75,13 @@ struct TaskDetailSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") {
+                        // Attachments imported this session live on disk but were
+                        // never persisted to the task — clean them up so Cancel
+                        // doesn't leave orphaned files.
+                        let added = attachmentNames.filter { !task.attachmentNames.contains($0) }
+                        for name in added {
+                            AttachmentService.shared.delete(filename: name)
+                        }
                         dismiss()
                     }
                 }
@@ -165,8 +175,11 @@ struct TaskDetailSheet: View {
         ) {
             Button("Remove", role: .destructive) {
                 if let name = pendingDeleteAttachment {
+                    // Only drop the chip here. The file itself is deleted in
+                    // saveTask() after a successful save — deleting from disk
+                    // immediately meant Cancel left the persisted task pointing
+                    // at a file that no longer existed.
                     attachmentNames.removeAll { $0 == name }
-                    AttachmentService.shared.delete(filename: name)
                 }
                 pendingDeleteAttachment = nil
             }
@@ -174,6 +187,30 @@ struct TaskDetailSheet: View {
                 pendingDeleteAttachment = nil
             }
         }
+        .confirmationDialog(
+            "Delete this task?",
+            isPresented: $showDeleteTaskConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Task", role: .destructive) {
+                services.captureService.delete(task, in: modelContext)
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("\"\(task.title)\" will be deleted. This can't be undone.")
+        }
+    }
+
+    private var deleteSection: some View {
+        Section {
+            Button(role: .destructive) {
+                showDeleteTaskConfirmation = true
+            } label: {
+                Label("Delete Task", systemImage: "trash")
+            }
+        }
+        .listRowBackground(SheetListRowBackground())
     }
 
     private var taskSection: some View {
@@ -374,7 +411,7 @@ struct TaskDetailSheet: View {
         guard let folder = services.captureService.createFolder(named: trimmedNewFolderName, in: modelContext) else {
             folderCreationErrorMessage = "Could not create the folder. Please try a different name."
             showFolderCreationErrorAlert = true
-            print("[TaskDetailSheet] Failed to create folder named \(trimmedNewFolderName)")
+            AppLogger.shared.log("TaskDetailSheet: failed to create folder named \(trimmedNewFolderName)")
             return
         }
         selectedFolderID = folder.id
@@ -388,6 +425,9 @@ struct TaskDetailSheet: View {
     }
 
     private func saveTask() {
+        // Snapshot before updateTaskDetails mutates task.attachmentNames, so we
+        // can delete removed files from disk only after the save succeeds.
+        let originalAttachments = task.attachmentNames
         let folder = folders.first(where: { $0.id == selectedFolderID })
         services.captureService.updateTaskDetails(
             task,
@@ -406,6 +446,10 @@ struct TaskDetailSheet: View {
         // is a harmless no-op (nothing left pending to flush).
         do {
             try modelContext.save()
+            // Save landed — now it's safe to delete files the user removed.
+            for name in originalAttachments where !attachmentNames.contains(name) {
+                AttachmentService.shared.delete(filename: name)
+            }
             isSaving = false
             dismiss()
         } catch {

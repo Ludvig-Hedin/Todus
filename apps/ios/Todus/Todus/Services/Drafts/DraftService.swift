@@ -121,7 +121,8 @@ final class DraftService {
     }
 
     /// Retry all pending/failed drafts. Call on reconnect.
-    /// Also resets any "sending" records back to "pendingSend" — these were in-flight when the app last crashed.
+    /// Records stuck in "sending" (in-flight at last crash) are intentionally
+    /// left alone — see the duplicate-delivery note below.
     func flushPending(in context: ModelContext) async {
         // Re-entrant guard. Without this, a rapid offline→online→offline→online
         // bounce could fire two concurrent flushes: the second would reset a
@@ -131,16 +132,17 @@ final class DraftService {
         isFlushing = true
         defer { isFlushing = false }
 
-        // Reset stuck "sending" records so they get retried
-        let stuckDescriptor = FetchDescriptor<DraftRecord>(
-            predicate: #Predicate { $0.syncState == "sending" }
-        )
-        let stuck = (try? context.fetch(stuckDescriptor)) ?? []
-        for draft in stuck {
-            draft.syncState = "pendingSend"
-        }
-        if !stuck.isEmpty { try? context.save() }
+        // Deliberately do NOT reset stuck "sending" records for retry. A draft
+        // that was mid-flight when the app was killed may already have been
+        // delivered server-side (mail.send has no idempotency key), so
+        // auto-resending it risked DUPLICATE delivery to the recipient — worse
+        // than a rare lost send.
+        // TODO(bug-hunt): add a client idempotency key to mail.send (server
+        // dedupe) so stuck "sending" drafts can be replayed safely, and surface
+        // them in the UI for manual retry until then.
 
+        // Auto-retry drafts that never completed a send attempt: "pendingSend"
+        // (never reached the wire) and "failed" (the send call itself errored).
         let descriptor = FetchDescriptor<DraftRecord>(
             predicate: #Predicate { $0.syncState == "pendingSend" || $0.syncState == "failed" }
         )

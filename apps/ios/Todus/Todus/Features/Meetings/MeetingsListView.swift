@@ -174,7 +174,13 @@ struct MeetingsListView: View {
             Button {
                 Task { await services.meetingsService.syncFromCalendar() }
             } label: {
-                Label("Sync Calendar", systemImage: "arrow.clockwise")
+                // In-button spinner mirrors the footer sync row — a first-run user
+                // otherwise saw a dimmed button with no signal work was happening.
+                if services.meetingsService.isSyncing {
+                    ButtonInlineProgressView()
+                } else {
+                    Label("Sync Calendar", systemImage: "arrow.clockwise")
+                }
             }
             .buttonStyle(AppPrimaryButtonStyle())
             .disabled(services.meetingsService.isSyncing)
@@ -195,7 +201,10 @@ struct MeetingsListView: View {
             if calendar.isDateInToday(m.startsAt) {
                 todayItems.append(m)
             } else if calendar.isDate(m.startsAt, equalTo: today, toGranularity: .weekOfYear)
-                && calendar.isDate(m.startsAt, equalTo: today, toGranularity: .year) {
+                // `.yearForWeekOfYear`, not `.year` — around Dec 29–Jan 2 a meeting
+                // in the current ISO week can sit in the adjacent calendar year,
+                // and the `.year` clause wrongly kicked it out of "This Week".
+                && calendar.isDate(m.startsAt, equalTo: today, toGranularity: .yearForWeekOfYear) {
                 thisWeekItems.append(m)
             } else if m.startsAt > today {
                 upcomingItems.append(m)

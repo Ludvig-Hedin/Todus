@@ -7,6 +7,10 @@ struct BoardTaskCard: View {
     let task: TaskRecord
     let onOpenDetails: () -> Void
 
+    /// Drives the destructive-delete confirmation dialog — the board card was
+    /// the only task surface whose context-menu Delete fired immediately.
+    @State private var showDeleteConfirmation = false
+
     /// Desktop-style row: status icon, title, meta chips, trailing chevron (matches macOS `MacTaskRow` on the board).
     var body: some View {
         HStack(spacing: 8) {
@@ -80,6 +84,7 @@ struct BoardTaskCard: View {
             }
 
             Button {
+                AppHaptic.light.play()
                 withAnimation(AppTheme.Motion.base) {
                     services.captureService.toggleCompletion(task, in: modelContext)
                 }
@@ -108,6 +113,7 @@ struct BoardTaskCard: View {
                 Label("Copy as Markdown", systemImage: "checkmark.square")
             }
             Button {
+                AppHaptic.light.play()
                 services.captureService.captureInStatus(
                     title: task.title,
                     status: task.status,
@@ -123,6 +129,7 @@ struct BoardTaskCard: View {
                 ForEach(AppTaskPriority.allCases) { p in
                     Button {
                         guard p != task.priority else { return }
+                        AppHaptic.light.play()
                         withAnimation(AppTheme.Motion.fast) {
                             task.priority = p
                             task.updatedAt = .now
@@ -161,10 +168,22 @@ struct BoardTaskCard: View {
             Divider()
 
             Button(role: .destructive) {
-                services.captureService.delete(task, in: modelContext)
+                showDeleteConfirmation = true
             } label: {
                 Label("Delete", systemImage: "trash")
             }
+        }
+        .confirmationDialog(
+            "Delete this task?",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Task", role: .destructive) {
+                services.captureService.delete(task, in: modelContext)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("\"\(task.title)\" will be deleted. This can't be undone.")
         }
     }
 

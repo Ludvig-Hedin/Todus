@@ -414,11 +414,9 @@ struct CalendarTabView: View {
                 onEventTap: { event in presentEvent(event) },
                 onCreateEventAt: { date in
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    NotificationCenter.default.post(
-                        name: .todusCalendarRequestCreateEventAt,
-                        object: nil,
-                        userInfo: ["date": date]
-                    )
+                    // Seed the tapped slot's time into CreateSheet — otherwise it
+                    // defaults to "now" and the tap-a-slot gesture loses its point.
+                    services.createSheetSeedDate = date
                     services.requestCreateSheet = .event
                 }
             )
@@ -434,15 +432,9 @@ struct CalendarTabView: View {
                 onCreateEventAt: { date in
                     // Light haptic mirrors CalendarKit's long-press feel.
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    // Notify any infra-owned CreateSheet host that the user
-                    // tapped an empty cell at `date`. The notification name is
-                    // versioned so the (separately owned) CreateSheet can opt
-                    // in without us reaching into AppServices.
-                    NotificationCenter.default.post(
-                        name: .todusCalendarRequestCreateEventAt,
-                        object: nil,
-                        userInfo: ["date": date]
-                    )
+                    // Seed the tapped slot's time into CreateSheet — otherwise it
+                    // defaults to "now" and the tap-a-slot gesture loses its point.
+                    services.createSheetSeedDate = date
                     services.requestCreateSheet = .event
                 }
             )
@@ -514,9 +506,18 @@ struct CalendarTabView: View {
 
     // MARK: - Event Loading
 
+    /// True when at least one Google account is connected — Google events come
+    /// from the backend and don't need Apple Calendar (EventKit) permission.
+    private var hasGoogleCalendarConnection: Bool {
+        services.connectionsService.connections.contains { $0.providerId == "google" }
+    }
+
     private func loadEvents() async {
-        guard services.calendarService.canReadEvents() else {
-            // Permission was revoked — clear stale events so the UI doesn't
+        // Apple permission alone must not gate the whole tab: a Gmail-first user
+        // who declined EventKit access still has fetchable Google events
+        // (fetchAppleEvents safely returns [] without permission).
+        guard services.calendarService.canReadEvents() || hasGoogleCalendarConnection else {
+            // No readable source at all — clear stale events so the UI doesn't
             // continue to render results that no longer reflect reality.
             if !events.isEmpty { events = [] }
             return
@@ -568,7 +569,7 @@ struct CalendarTabView: View {
     }
 
     private func loadMoreListEvents() async {
-        guard services.calendarService.canReadEvents() else { return }
+        guard services.calendarService.canReadEvents() || hasGoogleCalendarConnection else { return }
         guard let lastEventDate = events.last?.startDate else { return }
         let cal = Calendar.current
         let start = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: lastEventDate)) ?? lastEventDate
@@ -597,9 +598,12 @@ struct CalendarTabView: View {
         // any other provider (e.g. Google) the lookup will simply fail and
         // we fall through to the alert below.
         let applePrefix = "\(CalendarSourceIDPrefix.apple):"
-        let ekEventID: String? = event.id.hasPrefix(applePrefix)
+        let namespacedID: String? = event.id.hasPrefix(applePrefix)
             ? String(event.id.dropFirst(applePrefix.count))
             : (event.id.contains(":") ? nil : event.id)
+        // Recurring occurrences carry a `#<start>` suffix — strip it back to the
+        // raw EventKit identifier for the store lookup.
+        let ekEventID = namespacedID.map { CalendarEvent.ekEventIdentifier(fromEventId: $0) }
 
         Task { @MainActor in
             let holder = await Task.detached(priority: .userInitiated) {

@@ -6,12 +6,6 @@ extension Notification.Name {
     /// Posted after `requestAccess()` completes so UI (e.g. `MainTabView`) can re-check
     /// `EKEventStore.authorizationStatus` while the app stays in the foreground.
     static let todusCalendarAuthorizationDidChange = Notification.Name("TodusCalendarAuthorizationDidChange")
-
-    /// Posted when the user taps an empty time slot in the multi-day grid and
-    /// expects a create-event flow seeded at that instant. The infra-owned
-    /// CreateSheet may observe this to pre-fill its date pickers.
-    /// `userInfo["date"]` is a `Date`.
-    static let todusCalendarRequestCreateEventAt = Notification.Name("TodusCalendarRequestCreateEventAt")
 }
 
 /// Lightweight sendable representation of a calendar event.
@@ -32,6 +26,13 @@ struct CalendarEvent: Identifiable, Sendable, Equatable {
     /// EKCalendar.calendarIdentifier for Apple events (nil for non-Apple sources).
     /// Used to build a real per-source id instead of a synthetic "apple:unknown".
     let calendarId: String?
+
+    /// Strips the `#<start>` occurrence suffix appended to recurring-event ids,
+    /// returning the raw EventKit `eventIdentifier` usable for store lookups.
+    static func ekEventIdentifier(fromEventId id: String) -> String {
+        guard let hash = id.firstIndex(of: "#") else { return id }
+        return String(id[..<hash])
+    }
 }
 
 /// Shared calendar service actor that manages a single EKEventStore instance.
@@ -299,11 +300,15 @@ actor CalendarService {
 
     func setFolderID(_ folderID: UUID?, for eventIdentifier: String?) {
         guard let eventIdentifier else { return }
+        // Callers pass `CalendarEvent.id`, which carries a `#<start>` suffix for
+        // recurring occurrences — normalize to the raw identifier so the map
+        // matches the bare `eventIdentifier` keys used on read.
+        let key = CalendarEvent.ekEventIdentifier(fromEventId: eventIdentifier)
         var map = folderMap
         if let folderID {
-            map[eventIdentifier] = folderID.uuidString
+            map[key] = folderID.uuidString
         } else {
-            map.removeValue(forKey: eventIdentifier)
+            map.removeValue(forKey: key)
         }
         folderMap = map
         invalidateTodayCache()
@@ -395,13 +400,24 @@ private extension EKEvent {
             return (clamp(comps[0]), clamp(comps[1]), clamp(comps[2]))
         }()
 
+        // Every occurrence of a recurring event shares the same
+        // `eventIdentifier`, so a window query returns N events with identical
+        // ids — SwiftUI `ForEach`/`Identifiable` then collapse or mis-anchor
+        // rows. Disambiguate occurrences with a `#<start>` suffix; consumers
+        // that need the raw EventKit identifier strip it via
+        // `CalendarEvent.ekEventIdentifier(fromEventId:)`.
+        let occurrenceID: String? = eventIdentifier.map { base in
+            (hasRecurrenceRules || isDetached)
+                ? "\(base)#\(Int(startDate.timeIntervalSinceReferenceDate))"
+                : base
+        }
         return CalendarEvent(
             // EventKit usually returns a stable `eventIdentifier`; when it
             // doesn't (very rare — unsaved events surfaced through some APIs)
             // build a deterministic id from the calendar/title/start so
             // `Identifiable` views like ScrollViewReader and ForEach don't
             // see new ids every refresh and lose anchors/animations.
-            id: eventIdentifier ?? Self.derivedID(
+            id: occurrenceID ?? Self.derivedID(
                 calendarTitle: calendar?.title,
                 title: title,
                 start: startDate,

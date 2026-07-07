@@ -1,8 +1,9 @@
 import SwiftUI
 import UIKit
 
-/// Multi-day view — shows 2 or 3 days side-by-side with a time grid.
-/// Configurable day count via @AppStorage("calendarMultiDayCount").
+/// Multi-day view — shows `dayCount` days side-by-side with a time grid.
+/// The count is currently fixed at 3 (nothing writes the
+/// "calendarMultiDayCount" default); a 2-vs-3 picker never shipped.
 ///
 /// Horizontal paging uses UIPageViewController under the hood (the same
 /// technology CalendarKit's day view uses) so swipes feel identical to the

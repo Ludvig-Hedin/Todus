@@ -587,7 +587,12 @@ struct PasteHandlingTextInput: UIViewRepresentable {
             }
             if modified {
                 updatedText = newLines.joined(separator: "\n")
+                // Rewriting `text` moves the caret to end-of-document, which broke
+                // editing an earlier line into a bullet. "- " → "• " is length-
+                // preserving, so the prior selection stays valid — restore it.
+                let selection = textView.selectedRange
                 textView.text = updatedText
+                textView.selectedRange = selection
             }
 
             lastKnownText = updatedText

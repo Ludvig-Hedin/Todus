@@ -157,6 +157,7 @@ struct CalendarAccountsView: View {
 
             if source.isWritable && isVisible {
                 Button {
+                    AppHaptic.selection.play()
                     if isDefault {
                         services.setDefaultCalendar(nil, forAccountKey: accountKey)
                     } else {
@@ -177,7 +178,10 @@ struct CalendarAccountsView: View {
                 "Show",
                 isOn: Binding(
                     get: { isVisible },
-                    set: { _ in services.toggleCalendarVisibility(source.id) }
+                    set: { _ in
+                        AppHaptic.selection.play()
+                        services.toggleCalendarVisibility(source.id)
+                    }
                 )
             )
             .font(.caption)

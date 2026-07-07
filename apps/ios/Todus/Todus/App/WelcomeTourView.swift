@@ -48,9 +48,9 @@ struct WelcomeTourView: View {
         ),
         TourPage(
             id: 2,
-            symbol: "rectangle.grid.2x2",
+            symbol: "paintbrush.pointed",
             title: "Make it yours",
-            body: "Next step lets you pick the pages that show up in the tab bar — iOS only has room for 5, so choose wisely."
+            body: "Set your accent color, switch dark mode, and tune notifications anytime in Settings."
         ),
     ]
 

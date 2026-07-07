@@ -145,7 +145,9 @@ final class UnifiedCalendarService {
                 colorGreen: ev.calendarColorGreen,
                 colorBlue: ev.calendarColorBlue,
                 isWritable: true,
-                providerEventId: ev.id,
+                // Strip the `#<start>` occurrence suffix so EventKit lookups
+                // via providerEventId keep working for recurring events.
+                providerEventId: CalendarEvent.ekEventIdentifier(fromEventId: ev.id),
                 googleCalendarId: nil,
                 googleConnectionId: nil
             )
@@ -189,8 +191,17 @@ final class UnifiedCalendarService {
 
         return events.compactMap { ev -> UnifiedCalendarEvent? in
             guard let start = parseDate(ev.startTime, isoFormatter, isoFormatterFallback, dateOnly),
-                  let end = parseDate(ev.endTime, isoFormatter, isoFormatterFallback, dateOnly) else {
+                  var end = parseDate(ev.endTime, isoFormatter, isoFormatterFallback, dateOnly) else {
                 return nil
+            }
+            // Google's all-day `end.date` is EXCLUSIVE (a one-day event runs
+            // 07-07 → 07-08) while EventKit's all-day end is inclusive, so
+            // unadjusted Google events painted one extra day in every view.
+            // Pull the end back one second (to 23:59:59 of the true last day),
+            // matching EventKit's inclusive semantics.
+            if ev.allDay {
+                let adjusted = end.addingTimeInterval(-1)
+                if adjusted > start { end = adjusted }
             }
             let (r, g, b) = Self.rgbFromHex(ev.color)
             return UnifiedCalendarEvent(

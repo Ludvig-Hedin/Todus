@@ -96,7 +96,10 @@ struct StartupOnboardingView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("startup.getStartedButton")
-            .accessibilityHint("Create your Todus account")
+            // Both CTAs open the same sign-in screen (which handles new + returning
+            // users), so the hints describe that honestly rather than promising two
+            // different destinations the buttons don't actually have.
+            .accessibilityHint("Continues to the sign-in screen, where you can create an account or sign in")
 
             Button {
                 services.hasSeenStartupCard = true
@@ -113,7 +116,7 @@ struct StartupOnboardingView: View {
                     .foregroundStyle(.primary)
             }
             .buttonStyle(.plain)
-            .accessibilityHint("Sign in to an existing Todus account")
+            .accessibilityHint("Continues to the same sign-in screen, where you can sign in or create an account")
         }
         .frame(maxWidth: 420)
     }

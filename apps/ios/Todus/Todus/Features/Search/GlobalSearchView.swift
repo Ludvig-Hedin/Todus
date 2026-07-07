@@ -17,6 +17,10 @@ struct GlobalSearchView: View {
     /// Debounce handle for calendar lookups — cancelled on each keystroke so we
     /// only fetch events after the user has paused typing for ~250 ms.
     @State private var calendarSearchTask: Task<Void, Never>?
+    /// True while the debounced EventKit search is pending — suppresses the
+    /// "No results" flash for calendar-only queries during the 250ms debounce
+    /// plus fetch.
+    @State private var isCalendarSearchPending = false
 
     // MARK: - Derived results (all local — no extra network calls)
 
@@ -74,7 +78,18 @@ struct GlobalSearchView: View {
                 if trimmedQuery.isEmpty {
                     emptyPrompt
                 } else if !hasResults {
-                    noResultsView
+                    // Hold off on "No results" while the calendar search is
+                    // still in flight — calendar-only matches otherwise flash
+                    // a false negative for ~a quarter second.
+                    if isCalendarSearchPending {
+                        VStack {
+                            Spacer()
+                            ProgressView()
+                            Spacer()
+                        }
+                    } else {
+                        noResultsView
+                    }
                 } else {
                     resultsList
                 }
@@ -161,6 +176,17 @@ struct GlobalSearchView: View {
                         ForEach(emailResults.prefix(5)) { thread in
                             emailRow(thread)
                         }
+                        // This section filters already-loaded threads locally —
+                        // it can't see mail that isn't in memory. Be honest
+                        // about the partial scope; the Mail tab's own search
+                        // hits the server for full coverage.
+                        // TODO(bug-hunt): call the server search here without
+                        // clobbering emailService.threads once a side-channel
+                        // search API exists.
+                        Text("Searches loaded mail — open Mail search for everything")
+                            .font(.system(size: 11))
+                            .foregroundStyle(AppTheme.mutedText)
+                            .padding(.top, 2)
                     }
                 }
 
@@ -192,9 +218,11 @@ struct GlobalSearchView: View {
 
     /// - Parameters:
     ///   - total: Full match count before the `.prefix(5)` truncation applied to `content`.
-    ///   - seeAllTab: Tab to jump to when there are more than 5 results. Pre-filling the
-    ///     query into that tab's own search would need a new cross-tab seed property, so
-    ///     for now this only navigates + dismisses; the count still communicates truncation.
+    ///   - seeAllTab: Tab to jump to when there are more than 5 results. Also seeds the
+    ///     destination tab's own search field with the current query (via
+    ///     `services.pendingEmailSearchQuery` / `services.tasksSearchSeed`) so the user
+    ///     doesn't have to retype it. Calendar has no in-tab search surface, so its "See
+    ///     all" only navigates.
     @ViewBuilder
     private func resultSection<Content: View>(
         title: String,
@@ -217,6 +245,16 @@ struct GlobalSearchView: View {
             if total > 5 {
                 if let tab = seeAllTab {
                     Button {
+                        // Seed the destination tab's own search so it opens already
+                        // filtered to this query instead of the user retyping it.
+                        switch tab {
+                        case .tasks:
+                            services.tasksSearchSeed = trimmedQuery
+                        case .email:
+                            services.pendingEmailSearchQuery = trimmedQuery
+                        default:
+                            break
+                        }
                         services.navigateTo = tab
                         dismiss()
                     } label: {
@@ -438,17 +476,27 @@ struct GlobalSearchView: View {
     }
 
     private func categoryChip(icon: String, label: String) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(.secondary)
-            Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
+        // Card styling makes these read as tappable, so make them respond:
+        // tapping focuses the search field (they were previously inert
+        // decoration that looked broken when tapped).
+        Button {
+            isSearchFocused = true
+        } label: {
+            VStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text(label)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 64, height: 56)
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
+            .contentShape(Rectangle())
         }
-        .frame(width: 64, height: 56)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
+        .buttonStyle(.plain)
+        .accessibilityLabel("Search \(label)")
     }
 
     private var noResultsView: some View {
@@ -475,6 +523,7 @@ struct GlobalSearchView: View {
 
         guard !trimmedQuery.isEmpty, services.calendarService.canReadEvents() else {
             calendarResults = []
+            isCalendarSearchPending = false
             return
         }
 
@@ -482,6 +531,7 @@ struct GlobalSearchView: View {
         let sixMonthsAgo = Calendar.current.date(byAdding: .month, value: -6, to: Date()) ?? Date()
         let oneYearAhead = Calendar.current.date(byAdding: .year, value: 1, to: Date()) ?? Date()
 
+        isCalendarSearchPending = true
         calendarSearchTask = Task { @MainActor in
             // ~250 ms debounce — feels responsive without thrashing EventKit.
             try? await Task.sleep(for: .milliseconds(250))
@@ -489,6 +539,7 @@ struct GlobalSearchView: View {
             let events = await services.calendarService.events(from: sixMonthsAgo, to: oneYearAhead)
             guard !Task.isCancelled else { return }
             calendarResults = events.filter { $0.title.lowercased().contains(q) }
+            isCalendarSearchPending = false
         }
     }
 }

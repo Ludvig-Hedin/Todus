@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 struct TaskTableView: View {
     @Environment(\.modelContext) private var modelContext
@@ -108,16 +109,21 @@ struct TaskTableView: View {
     }
 
     private var tasksChangeDigest: TasksDigest {
+        // Sum term catches in-place sync updates whose updatedAt ≤ current max
+        // (count + max alone left the list stale after multi-device sync).
         var latest: Date = .distantPast
-        for task in allTasks where task.updatedAt > latest {
-            latest = task.updatedAt
+        var sum: Double = 0
+        for task in allTasks {
+            if task.updatedAt > latest { latest = task.updatedAt }
+            sum += task.updatedAt.timeIntervalSinceReferenceDate
         }
-        return TasksDigest(count: allTasks.count, latestUpdate: latest)
+        return TasksDigest(count: allTasks.count, latestUpdate: latest, updateSum: sum)
     }
 
     private struct TasksDigest: Equatable {
         let count: Int
         let latestUpdate: Date
+        let updateSum: Double
     }
 
     // MARK: - Header Row
@@ -152,8 +158,15 @@ struct TaskTableView: View {
             // Leading checkbox column — lets users complete a row directly from
             // the table view, matching list / board parity. (UX P10.)
             Button {
+                // Same tactile pattern as TaskRowView.toggleCheckbox — the table
+                // was the only surface whose primary checkbox completed silently.
+                let willBecomeDone = !task.completed
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 withAnimation(AppTheme.Motion.base) {
                     captureService.toggleCompletion(task, in: modelContext)
+                }
+                if willBecomeDone {
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
                 }
             } label: {
                 Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")

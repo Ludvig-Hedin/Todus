@@ -48,6 +48,15 @@ struct EmailThread: Codable, Identifiable, Equatable {
     let unread: Bool
     let messageCount: Int
     let labels: [String]
+
+    /// Gmail label convention — same check `EmailThreadView` uses for its star
+    /// state. Shared here so list rows and swipe actions read one source of truth.
+    var isStarredInLabels: Bool {
+        labels.contains { name in
+            let n = name.uppercased()
+            return n == "STARRED" || n == "\\STARRED"
+        }
+    }
 }
 
 /// Maps from backend ParsedMessage JSON to our EmailMessage model.

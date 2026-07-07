@@ -17,6 +17,9 @@ struct CalendarEventBlockView: View {
 
     var body: some View {
         Button {
+            // Matches the list row's tap feedback (CalendarListView) — the grid
+            // block was the only event surface that opened silently.
+            AppHaptic.selection.play()
             onTap?()
         } label: {
             VStack(alignment: .leading, spacing: 0) {
@@ -58,11 +61,13 @@ struct CalendarEventBlockView: View {
             }
             Button {
                 UIPasteboard.general.string = event.title
+                AppHaptic.success.play()
             } label: {
                 Label("Copy title", systemImage: "doc.on.doc")
             }
             Button {
                 UIPasteboard.general.string = "\(event.title) — \(timeString)"
+                AppHaptic.success.play()
             } label: {
                 Label("Copy event summary", systemImage: "text.quote")
             }

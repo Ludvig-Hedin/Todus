@@ -21,6 +21,7 @@ struct MeetingDetailView: View {
     // Q&A
     @State private var qaMessages: [(role: String, content: String)] = []
     @State private var qaInput = ""
+    @FocusState private var qaInputFocused: Bool
     @State private var isAskingQuestion = false
 
     // Transcript
@@ -477,6 +478,7 @@ struct MeetingDetailView: View {
                 TextField("What were the key decisions?", text: $qaInput)
                     .textFieldStyle(.roundedBorder)
                     .font(.subheadline)
+                    .focused($qaInputFocused)
                     .onSubmit { Task { await askQuestion() } }
 
                 Button {
@@ -492,6 +494,12 @@ struct MeetingDetailView: View {
                 .disabled(qaInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isAskingQuestion)
                 .accessibilityLabel("Send question")
             }
+
+            // The thread is plain @State — make the ephemerality visible instead
+            // of letting users discover their Q&A vanished on re-entry.
+            Text("Answers aren't saved when you leave this meeting.")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
         }
         .padding(14)
         .background(Color.purple.opacity(0.04), in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
@@ -511,7 +519,11 @@ struct MeetingDetailView: View {
         isGeneratingSummary = true
         actionError = nil
         let result = await services.meetingsService.generateSummary(meetingId: meetingId)
-        if result == nil { actionError = "Failed to generate summary. Please try again." }
+        if result == nil {
+            actionError = "Failed to generate summary. Please try again."
+        } else {
+            AppHaptic.success.play()
+        }
         // Preserve the currently-shown meeting if the refresh fails — otherwise a
         // failed getMeeting() would nil out `meeting` and replace the just-generated
         // summary with the "Meeting not found" state.
@@ -525,7 +537,11 @@ struct MeetingDetailView: View {
         isSchedulingBot = true
         actionError = nil
         let success = await services.meetingsService.scheduleBot(meetingId: meetingId)
-        if !success { actionError = "Failed to schedule recording. Please try again." }
+        if !success {
+            actionError = "Failed to schedule recording. Please try again."
+        } else {
+            AppHaptic.success.play()
+        }
         // Preserve the currently-shown meeting if the refresh fails (see generateSummary).
         let previousMeeting = meeting
         await loadMeeting()
@@ -537,6 +553,8 @@ struct MeetingDetailView: View {
         let q = qaInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }
         qaInput = ""
+        // Drop keyboard so it doesn't cover the freshly-appended answer bubble.
+        qaInputFocused = false
         qaMessages.append((role: "user", content: q))
         isAskingQuestion = true
 

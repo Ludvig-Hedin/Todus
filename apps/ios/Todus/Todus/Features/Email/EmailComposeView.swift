@@ -103,7 +103,9 @@ struct EmailComposeView: View {
         let replyDraft = EmailDraft(
             to: [message.from.email],
             cc: ccAddresses,
-            subject: message.subject.hasPrefix("Re:") ? message.subject : "Re: \(message.subject)",
+            // Case-insensitive so an existing "RE:" / "re:" prefix isn't double-stamped
+            // into "Re: RE: …". Mirrors `forwardSubject`'s lowercased "fwd:" check.
+            subject: message.subject.lowercased().hasPrefix("re:") ? message.subject : "Re: \(message.subject)",
             body: body ?? "",
             replyToThreadId: threadId,
             replyToMessageId: message.id
@@ -742,35 +744,45 @@ struct EmailComposeView: View {
     /// Horizontal scroll of seeded attachment chips. Tapping the X removes
     /// the chip from the draft immediately, but defers file deletion until send succeeds.
     private var attachmentChipsRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(seededAttachmentNames, id: \.self) { filename in
-                    HStack(spacing: 6) {
-                        Image(systemName: AttachmentService.shared.isImageFile(filename) ? "photo" : "doc")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(AppTheme.mutedText)
-                        Text(filename)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .frame(maxWidth: 160)
-                        Button {
-                            attachmentPendingRemoval = filename
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 13))
+        VStack(alignment: .leading, spacing: 4) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(seededAttachmentNames, id: \.self) { filename in
+                        HStack(spacing: 6) {
+                            Image(systemName: AttachmentService.shared.isImageFile(filename) ? "photo" : "doc")
+                                .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(AppTheme.mutedText)
+                            Text(filename)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .frame(maxWidth: 160)
+                            Button {
+                                attachmentPendingRemoval = filename
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(AppTheme.mutedText)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Remove attachment \(filename)")
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Remove attachment \(filename)")
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(AppTheme.surfaceSecondary, in: Capsule())
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(AppTheme.surfaceSecondary, in: Capsule())
                 }
+                .padding(.horizontal, 16)
             }
-            .padding(.horizontal, 16)
+
+            // The send pipeline can't upload binary attachments yet (SendEmailInput
+            // has no attachment field), so these chips would otherwise vanish
+            // silently on send. Tell the user up front.
+            Text("Attachments can't be sent yet — mention them in your message.")
+                .font(.system(size: 11))
+                .foregroundStyle(AppTheme.mutedText)
+                .padding(.horizontal, 16)
         }
         .padding(.vertical, 8)
         // Removal was previously instant on tap — one mis-tap silently dropped a
@@ -834,26 +846,42 @@ struct EmailComposeView: View {
     ///   • `a@b.com; c@d.com; e@f.com`     (semicolons — common from desktop clients)
     ///   • `a@b.com c@d.com`               (whitespace-separated)
     ///   • `"Jane Doe" <jane@x.com>`       (display-name angle form — stripped to email)
-    /// Empty tokens are dropped, surrounding whitespace trimmed. The result is
-    /// duplicate-free preserving first-seen order, so `a@b.com, a@b.com` becomes
-    /// a single recipient.
+    /// A piece is first split on commas/semicolons/newlines/tabs. Each piece that
+    /// carries a `<addr@x>` block is a display-name form — its address is pulled out
+    /// of the brackets and the piece is NOT whitespace-split (display names contain
+    /// spaces). Bracket-free pieces ARE whitespace-split, so bare space-separated
+    /// addresses each become their own recipient. Empty tokens are dropped, surrounding
+    /// whitespace trimmed. The result is duplicate-free preserving first-seen order,
+    /// so `a@b.com, a@b.com` becomes a single recipient.
     static func tokenizeRecipients(_ raw: String) -> [String] {
         guard !raw.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
         let separators = CharacterSet(charactersIn: ",;\n\t")
         var seen = Set<String>()
         var result: [String] = []
-        for piece in raw.components(separatedBy: separators) {
-            // Pull email out of "Name <addr@x>" display-name form.
-            var token = piece.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let lt = token.firstIndex(of: "<"), let gt = token.firstIndex(of: ">"), lt < gt {
-                token = String(token[token.index(after: lt)..<gt])
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-            guard !token.isEmpty else { continue }
+
+        func append(_ candidate: String) {
+            let token = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !token.isEmpty else { return }
             let key = token.lowercased()
-            if seen.contains(key) { continue }
+            if seen.contains(key) { return }
             seen.insert(key)
             result.append(token)
+        }
+
+        for piece in raw.components(separatedBy: separators) {
+            let trimmed = piece.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            if let lt = trimmed.firstIndex(of: "<"), let gt = trimmed.firstIndex(of: ">"), lt < gt {
+                // "Name <addr@x>" display-name form — pull the address out of the
+                // brackets. Don't whitespace-split: the display name has spaces.
+                append(String(trimmed[trimmed.index(after: lt)..<gt]))
+            } else {
+                // Plain form — also split on whitespace so `a@b.com c@d.com`
+                // yields two recipients (the doc'd whitespace-separated case).
+                for sub in trimmed.split(whereSeparator: { $0.isWhitespace }) {
+                    append(String(sub))
+                }
+            }
         }
         return result
     }

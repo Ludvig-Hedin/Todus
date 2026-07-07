@@ -19,6 +19,10 @@ struct FolderEditSheet: View {
     @State private var name: String = ""
     @State private var selectedColor: String?
     @State private var selectedIcon: String?
+    /// Inline error shown when create fails (e.g. a folder with this name
+    /// already exists). Previously a failed create still played the success
+    /// haptic and dismissed, silently dropping the chosen color/icon.
+    @State private var saveError: String?
 
     var body: some View {
         NavigationStack {
@@ -27,6 +31,12 @@ struct FolderEditSheet: View {
                     TextField("Folder name", text: $name)
                         .font(.system(size: 16, weight: .medium))
                         .submitLabel(.done)
+                        .onChange(of: name) { _, _ in saveError = nil }
+                    if let saveError {
+                        Text(saveError)
+                            .font(.system(size: 13))
+                            .foregroundStyle(AppTheme.danger)
+                    }
                 }
 
                 Section("Color") {
@@ -153,13 +163,22 @@ struct FolderEditSheet: View {
 
         switch mode {
         case .create:
-            if let folder = service.createFolder(
+            switch service.createFolderExclusive(
                 named: cleaned,
                 colorHex: selectedColor,
                 iconName: selectedIcon,
                 in: modelContext
             ) {
+            case .created(let folder):
                 onSaved?(folder)
+            case .duplicate:
+                saveError = "A folder named \"\(cleaned)\" already exists."
+                AppHaptic.error.play()
+                return
+            case .invalidName:
+                saveError = "Enter a folder name."
+                AppHaptic.error.play()
+                return
             }
         case .edit(let folder):
             if folder.name != cleaned {

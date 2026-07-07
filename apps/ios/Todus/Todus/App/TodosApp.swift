@@ -512,12 +512,28 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
                         "Couldn't snooze notification — please retry."
                 }
 
+            case NotificationService.Action.archiveEmail:
+                // "Archive" action on a new-email notification: archive the thread in place
+                // instead of routing the user into the app.
+                guard let services = self.services,
+                      let threadId = threadIdString, !threadId.isEmpty else { break }
+                let archived = await services.emailService.archiveThreads(ids: [threadId])
+                if archived {
+                    // Clear the delivered notification for this thread. The scheduled identifier
+                    // carries a timestamp suffix, so remove by the captured request identifier.
+                    UNUserNotificationCenter.current()
+                        .removeDeliveredNotifications(withIdentifiers: [requestIdentifier])
+                } else {
+                    services.pendingNotificationActionError =
+                        "Couldn't archive email from notification — please retry."
+                }
+
             default:
                 // Default action (notification tap) and any other identifier: route based on payload.
                 // Covers email thread, AI conversation, email reminder, and due-task digest taps.
-                // Action-specific identifiers (TASK_COMPLETE / TASK_SNOOZE) are handled above; everything
-                // else (including `UNNotificationDefaultActionIdentifier` and `EMAIL_ARCHIVE` for now)
-                // falls through here so the user is taken to the relevant surface.
+                // Action-specific identifiers (TASK_COMPLETE / TASK_SNOOZE / EMAIL_ARCHIVE) are handled
+                // above; everything else (including `UNNotificationDefaultActionIdentifier`) falls
+                // through here so the user is taken to the relevant surface.
                 guard let services = self.services else { return }
 
                 if let threadId = threadIdString, !threadId.isEmpty {

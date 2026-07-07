@@ -33,14 +33,11 @@ struct SettingsView: View {
     @State private var isLoadingSessions = false
     // revokingSessionIDs and isRevokingAllSessions live in SessionsSettingsView now
 
-    // AI permission flags — backed by the same UserDefaults keys read by AIChatService
-    // so toggling these here updates the AI behaviour for the next request (#6).
-    @AppStorage("ai_can_read_tasks") private var aiCanReadTasks: Bool = true
-    @AppStorage("ai_can_write_tasks") private var aiCanWriteTasks: Bool = true
-    @AppStorage("ai_can_read_calendar") private var aiCanReadCalendar: Bool = true
-    @AppStorage("ai_can_write_calendar") private var aiCanWriteCalendar: Bool = true
-    @AppStorage("ai_can_read_email") private var aiCanReadEmail: Bool = true
-    @AppStorage("ai_can_send_email") private var aiCanSendEmail: Bool = true
+    // AI permission toggles bind directly to the live AIChatService (see
+    // aiPermissionsSection) so a change takes effect on the running session's
+    // next request. The service's own didSet persists to the same UserDefaults
+    // keys, and SettingsSyncModifier (which keeps its own @AppStorage copies)
+    // observes those writes to push the change to the server.
 
     private var calendarAccessGranted: Bool {
         services.calendarService.canReadEvents()
@@ -817,12 +814,17 @@ struct SettingsView: View {
                 Label("Manage Folders", systemImage: "folder")
             }
 
-            // Also reachable from the More sheet (MoreSheetView) — kept here too
-            // since it's a settings-shaped preference, not a one-off action.
-            NavigationLink {
-                TabBarCustomizationView()
-            } label: {
-                Label("Customize Tab Bar", systemImage: "square.bottomhalf.filled")
+            // Customize Tab Bar is a no-op for regular users: MainTabView renders a
+            // fixed tab set and never reads services.tabBarTabs (RootView removed the
+            // dynamic bar; see backlog BH-0613-6). Gate the entry behind the developer
+            // allowlist — same mechanism as the Design System viewer — until the
+            // dynamic bar is rewired, so users aren't handed a control that does nothing.
+            if services.isDeveloperModeUIAvailable {
+                NavigationLink {
+                    TabBarCustomizationView()
+                } label: {
+                    Label("Customize Tab Bar", systemImage: "square.bottomhalf.filled")
+                }
             }
 
             if services.isDeveloperModeUIAvailable {
@@ -870,44 +872,47 @@ struct SettingsView: View {
         }
     }
 
-    /// Quick read/write permission toggles for the AI assistant. Backed by the
-    /// same UserDefaults keys AIChatService reads on init, so toggling here
-    /// takes effect on the next request (#6).
+    /// Quick read/write permission toggles for the AI assistant. Bound to the
+    /// live AIChatService so a change reconfigures the running session (its
+    /// didSet persists to the same UserDefaults keys the service reads on init),
+    /// and the AI Assistant sub-page shows identical state for the two toggles
+    /// it duplicates (#6).
     private var aiPermissionsSection: some View {
-        Section {
-            Toggle(isOn: $aiCanReadTasks) {
+        @Bindable var ai = services.aiChatService
+        return Section {
+            Toggle(isOn: $ai.aiCanReadTasks) {
                 Label("Read Tasks", systemImage: "checklist")
             }
             .tint(AppTheme.switchTint)
 
-            Toggle(isOn: $aiCanWriteTasks) {
+            Toggle(isOn: $ai.aiCanWriteTasks) {
                 Label("Create & Edit Tasks", systemImage: "square.and.pencil")
             }
             .tint(AppTheme.switchTint)
 
-            Toggle(isOn: $aiCanReadCalendar) {
+            Toggle(isOn: $ai.aiCanReadCalendar) {
                 Label("Read Calendar", systemImage: "calendar")
             }
             .tint(AppTheme.switchTint)
 
-            Toggle(isOn: $aiCanWriteCalendar) {
+            Toggle(isOn: $ai.aiCanWriteCalendar) {
                 Label("Create Calendar Events", systemImage: "calendar.badge.plus")
             }
             .tint(AppTheme.switchTint)
 
-            Toggle(isOn: $aiCanReadEmail) {
+            Toggle(isOn: $ai.aiCanReadEmail) {
                 Label("Read Email", systemImage: "envelope")
             }
             .tint(AppTheme.switchTint)
 
-            Toggle(isOn: $aiCanSendEmail) {
+            Toggle(isOn: $ai.aiCanSendEmail) {
                 Label("Send Email", systemImage: "paperplane")
             }
             .tint(AppTheme.switchTint)
         } header: {
             Text("AI Permissions")
         } footer: {
-            Text("Control what the AI can read and write on your behalf. Disabling a permission removes that capability from the assistant's tools.")
+            Text("Control what the AI can read and write on your behalf. Changes apply to your next request.")
         }
     }
 
@@ -1278,6 +1283,9 @@ struct SessionsSettingsView: View {
     @State private var isRevokingAllSessions = false
     @State private var revokingSessionIDs: Set<String> = []
     @State private var loadError: String? = nil
+    /// Gates the "Log out all other devices" action behind a destructive confirm —
+    /// it invalidates every other session and can't be undone.
+    @State private var showsRevokeAllConfirm = false
 
     var body: some View {
         List {
@@ -1369,7 +1377,7 @@ struct SessionsSettingsView: View {
                 if activeSessions.count > 1 {
                     Section {
                         Button(role: .destructive) {
-                            Task { await revokeAllSessions() }
+                            showsRevokeAllConfirm = true
                         } label: {
                             HStack {
                                 if isRevokingAllSessions {
@@ -1379,6 +1387,18 @@ struct SessionsSettingsView: View {
                             }
                         }
                         .disabled(isRevokingAllSessions)
+                        .confirmationDialog(
+                            "Log out all other devices?",
+                            isPresented: $showsRevokeAllConfirm,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Log Out All Others", role: .destructive) {
+                                Task { await revokeAllSessions() }
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text("Every other signed-in device will be signed out. This can't be undone.")
+                        }
                     }
                 }
             }

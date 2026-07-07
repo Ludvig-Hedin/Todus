@@ -319,8 +319,14 @@ private struct EmailFolderPicker: View {
                 Divider()
             }
             List {
-                if candidates.isEmpty {
-                    Text("No emails loaded — open the Inbox tab first")
+                if candidates.isEmpty && services.emailService.isLoadingThreads {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
+                    }
+                } else if candidates.isEmpty {
+                    Text("No emails to add")
                         .font(.system(size: 13))
                         .foregroundStyle(AppTheme.mutedText)
                 } else if filtered.isEmpty {
@@ -375,6 +381,11 @@ private struct EmailFolderPicker: View {
                     AddButton(count: selectedIDs.count, folderName: folder.name) { commitEmails() }
                 }
             }
+        }
+        // Self-load like the event/doc pickers — previously this picker relied on
+        // the Inbox tab having been opened first and dead-ended otherwise.
+        .task {
+            await services.emailService.ensureInitialInboxLoaded()
         }
     }
 

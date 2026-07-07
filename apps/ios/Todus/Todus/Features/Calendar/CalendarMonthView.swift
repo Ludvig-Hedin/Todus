@@ -49,8 +49,23 @@ struct CalendarMonthView: View {
         let cal = Calendar.current
         var dict: [Date: [CalendarEvent]] = [:]
         for event in events {
-            let day = cal.startOfDay(for: event.startDate)
-            dict[day, default: []].append(event)
+            // Mark every day the event spans, not just its start day, so multi-day
+            // events remain visible after day 1. EventKit stores all-day events with
+            // an *exclusive* end (00:00 the next day), so `dayCursor < endDate`
+            // naturally stops before bleeding onto the day after a single all-day
+            // event. Guard-capped against runaway spans (mirrors CalendarYearView).
+            var dayCursor = cal.startOfDay(for: event.startDate)
+            var guardCount = 0
+            while dayCursor < event.endDate && guardCount < 400 {
+                dict[dayCursor, default: []].append(event)
+                guard let next = cal.date(byAdding: .day, value: 1, to: dayCursor) else { break }
+                dayCursor = next
+                guardCount += 1
+            }
+            // Zero/negative-duration events still get their start day.
+            if event.endDate <= event.startDate {
+                dict[cal.startOfDay(for: event.startDate), default: []].append(event)
+            }
         }
         for key in dict.keys {
             dict[key]?.sort { $0.startDate < $1.startDate }

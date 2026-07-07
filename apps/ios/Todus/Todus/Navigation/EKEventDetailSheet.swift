@@ -29,7 +29,9 @@ struct EKEventDetailSheet: UIViewControllerRepresentable {
         // a short time later. Without the detach, the sheet presentation freezes
         // the UI for several seconds on first calendar XPC.
         let coordinator = context.coordinator
-        let id = eventId
+        // Recurring occurrences carry a `#<start>` suffix on CalendarEvent.id —
+        // strip it back to the raw EventKit identifier for the store lookup.
+        let id = CalendarEvent.ekEventIdentifier(fromEventId: eventId)
         Task { @MainActor in
             let holder = await Task.detached(priority: .userInitiated) {
                 EKStoreHolder()

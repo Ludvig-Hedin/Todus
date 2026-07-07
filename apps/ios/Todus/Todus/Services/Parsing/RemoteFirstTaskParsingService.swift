@@ -16,7 +16,12 @@ struct RemoteFirstTaskParsingService: TaskParsingService {
 
     init(configuration: AppConfiguration) {
         self.configuration = configuration
-        if configuration.hasRemoteBackend {
+        // Gate on the Supabase config the client actually needs. Gating on
+        // hasRemoteBackend (the Cloudflare backendURL, always set) built a
+        // client whose invoke() always threw `.backendNotConfigured` in prod —
+        // every capture took the local fallback marked low-confidence, and the
+        // intended "local is fine" branch below never ran.
+        if configuration.hasSupabaseBackend {
             client = SupabaseEdgeFunctionClient(configuration: configuration)
         } else {
             client = nil

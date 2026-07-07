@@ -127,12 +127,19 @@ enum ModelRecommender {
             )
         }
 
-        // Filter out models the user simply doesn't have RAM for. The catalog
-        // already gates by platform; this is a final safety net so we never
-        // recommend a 14 GB model to someone with 8 GB of RAM.
+        // Filter out models the user simply doesn't have RAM — or disk — for.
+        // The catalog already gates by platform; this is a final safety net so
+        // we never recommend a 14 GB model to someone with 8 GB of RAM, or a
+        // 20 GB download to a device with 3 GB free (freeDiskGB was computed
+        // but previously never consulted).
         return picks.filter { rec in
-            // Apple FM has ramRequiredGB == 0; never gate it out.
-            rec.model.runtime == .appleFM || Double(profile.totalRamGB) >= rec.model.ramRequiredGB
+            // Apple FM has ramRequiredGB == 0 and no download; never gate it out.
+            if rec.model.runtime == .appleFM { return true }
+            guard Double(profile.totalRamGB) >= rec.model.ramRequiredGB else { return false }
+            // Require the download plus a small working margin to fit on disk.
+            // freeDiskGB == 0 means the capacity probe failed — don't gate on it.
+            let downloadGB = Double(rec.model.downloadSizeMB) / 1000
+            return profile.freeDiskGB == 0 || Double(profile.freeDiskGB) >= downloadGB + 1
         }
     }
 }

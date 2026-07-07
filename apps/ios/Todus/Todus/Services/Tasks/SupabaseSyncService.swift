@@ -17,6 +17,14 @@ final class SupabaseSyncService: SyncService {
     private let client: SupabaseEdgeFunctionClient?
     private var queue: [PendingBatch] = []
     private var isProcessing = false
+    /// Delete mutations that failed on a *network* error. Deletions remove the
+    /// local TaskRecord immediately, so unlike upserts they can't be rebuilt from
+    /// surviving records by `retryUnsyncedTasks` — dropping the batch lost the
+    /// deletion forever and the task resurrected from the server on next pull.
+    /// Held here (deduped by taskID) and replayed on the next retry pass.
+    /// TODO(bug-hunt): in-memory only — a kill before reconnect still loses the
+    /// delete. Persisting tombstones needs a schema change.
+    private var pendingDeleteRetries: [SyncMutation] = []
 
     init(configuration: AppConfiguration, authStore: AuthSessionStore) {
         self.configuration = configuration
@@ -75,9 +83,18 @@ final class SupabaseSyncService: SyncService {
                 || $0.syncState == .failed
                 || $0.syncState == .pendingUpload
         }
-        guard !toRetry.isEmpty else { return }
+        // Deletions kept from network-failed batches — their records are gone
+        // locally, so they must be replayed verbatim or the server resurrects
+        // the task on the next pull. Drain even when there are no upsert retries.
+        let deleteRetries = pendingDeleteRetries
+        pendingDeleteRetries = []
+        guard !toRetry.isEmpty || !deleteRetries.isEmpty else { return }
+        if toRetry.isEmpty {
+            await enqueue(deleteRetries, in: context)
+            return
+        }
 
-        let mutations = toRetry.map { task in
+        let mutations = deleteRetries + toRetry.map { task in
             SyncMutation(action: .upsert, task: task.asPayload(), taskID: task.id)
         }
         // Capture each task's pre-retry state so we can restore it verbatim if the
@@ -179,6 +196,15 @@ final class SupabaseSyncService: SyncService {
                     syncState: keepLocal ? .localOnly : .failed,
                     in: context
                 )
+                if keepLocal {
+                    // Preserve the batch's delete mutations for the reconnect
+                    // retry — their local records are already gone, so nothing
+                    // else can regenerate them (FolderSyncService requeues its
+                    // whole batch for the same reason).
+                    let deletes = batch.mutations.filter { $0.action == .delete }
+                    let alreadyPending = Set(pendingDeleteRetries.map(\.taskID))
+                    pendingDeleteRetries.append(contentsOf: deletes.filter { !alreadyPending.contains($0.taskID) })
+                }
             }
             batch.continuation.resume()
         }

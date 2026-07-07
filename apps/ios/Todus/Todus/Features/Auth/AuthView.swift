@@ -9,6 +9,14 @@ struct AuthView: View {
 
     private var authService: AuthService { services.authService }
 
+    /// Which stage-1 flow the user actually tapped. `authService.isLoading` is
+    /// shared across every auth call, so a single tap used to light the spinner on
+    /// *both* the Send-code button and the social buttons at once. Gating each
+    /// button's spinner on `isLoading && activeAction == <its case>` keeps only the
+    /// tapped button spinning while the shared `isLoading` still disables the rest.
+    private enum AuthAction { case otp, apple, google }
+    @State private var activeAction: AuthAction? = nil
+
     @State private var email = ""
     @State private var code = ""
     @FocusState private var isEmailFocused: Bool
@@ -211,9 +219,11 @@ struct AuthView: View {
             // discoverable; disabled + dimmed until the email looks valid.
             Button {
                 isEmailFocused = false
+                activeAction = .otp
                 Task {
                     await authService.sendEmailOTP(email: email)
                     startResendCooldown()
+                    activeAction = nil
                 }
             } label: {
                 Text("Send code")
@@ -227,9 +237,9 @@ struct AuthView: View {
             .buttonStyle(.plain)
             .disabled(!isValidEmail || authService.isLoading)
             .overlay {
-                // Match the spinner pattern used by socialButtons so the user gets
-                // visual feedback while sendEmailOTP awaits the network round-trip
-                if authService.isLoading {
+                // Spinner only when *this* button started the request — a Send tap
+                // no longer lights the social buttons' spinners too, and vice versa.
+                if authService.isLoading && activeAction == .otp {
                     ButtonInlineProgressView()
                 }
             }
@@ -368,10 +378,11 @@ struct AuthView: View {
 
             // Open email app — only render the button when the device actually has
             // a default mail handler that can open `mailto:`. Otherwise the tap is
-            // a no-op (or worse, surfaces a "can't open" toast).
+            // a no-op (or worse, surfaces a "can't open" toast). The tap itself opens
+            // the inbox (not a blank composer) via openEmailInbox().
             if let mailURL = URL(string: "mailto:"), UIApplication.shared.canOpenURL(mailURL) {
                 Button {
-                    UIApplication.shared.open(mailURL)
+                    openEmailInbox()
                 } label: {
                     Text("Open your email app")
                         .font(.system(size: 16, weight: .semibold))
@@ -426,7 +437,11 @@ struct AuthView: View {
             // Apple Sign In — custom button so logo size and label match Google exactly.
             // Taps invoke the native Sign In with Apple flow via authService.
             Button {
-                Task { await authService.signInWithApple() }
+                activeAction = .apple
+                Task {
+                    await authService.signInWithApple()
+                    activeAction = nil
+                }
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "apple.logo")
@@ -443,10 +458,24 @@ struct AuthView: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("auth.signIn.appleButton")
             .accessibilityHint("Signs you in with your Apple ID")
+            .overlay {
+                // Spinner tint matches the Apple button's foreground so it reads on
+                // the black (light mode) / white (dark mode) capsule.
+                if authService.isLoading && activeAction == .apple {
+                    ButtonInlineProgressView(
+                        tint: colorScheme == .dark ? .black : .white,
+                        side: AppTheme.Metrics.buttonInlineSpinner
+                    )
+                }
+            }
 
             // Google Sign In — outline pill with accurate multi-color Google SVG logo
             Button {
-                Task { await authService.signInWithGoogle() }
+                activeAction = .google
+                Task {
+                    await authService.signInWithGoogle()
+                    activeAction = nil
+                }
             } label: {
                 HStack(spacing: 10) {
                     GoogleLogoView()
@@ -461,14 +490,16 @@ struct AuthView: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint("Signs you in with your Google account")
-        }
-        .disabled(authService.isLoading)
-        .opacity(authService.isLoading ? 0.6 : 1)
-        .overlay {
-            if authService.isLoading {
-                ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.buttonInlineSpinner)
+            .overlay {
+                if authService.isLoading && activeAction == .google {
+                    ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.buttonInlineSpinner)
+                }
             }
         }
+        // Shared `isLoading` still disables every stage-1 button while any flow runs;
+        // only the spinner is now scoped to the tapped button (see per-button overlays).
+        .disabled(authService.isLoading)
+        .opacity(authService.isLoading ? 0.6 : 1)
     }
 
     // MARK: - Footer
@@ -538,9 +569,34 @@ struct AuthView: View {
 
     // MARK: - Open Email App
 
-    /// Opens the user's default email app via mailto: which respects the iOS default mail app setting.
-    private func openEmailApp() {
-        // mailto: opens the user's configured default email app (Gmail, Outlook, etc.)
+    /// Opens the user's email inbox — tries known app-specific inbox URL schemes
+    /// before falling back to mailto: (which opens the composer, not the inbox).
+    /// Ported from `AuthPageView.openEmailInbox()` so both auth surfaces behave the
+    /// same. NOTE: the custom schemes below only resolve via `canOpenURL` if they're
+    /// declared under `LSApplicationQueriesSchemes` in Info.plist; without that they
+    /// silently fall through to `mailto:` (still functional, just the composer).
+    private func openEmailInbox() {
+        // Ordered by most-specific inbox URL first.
+        // googlegmail:/// opens Gmail directly to the inbox (not the composer).
+        // ms-outlook://inbox opens Outlook inbox.
+        // message:// opens Apple Mail (may land in inbox).
+        let inboxSchemes = [
+            "googlegmail:///",
+            "ms-outlook://inbox",
+            "readdle-spark://",
+            "message://"
+        ]
+
+        for scheme in inboxSchemes {
+            if let url = URL(string: scheme),
+               UIApplication.shared.canOpenURL(url) {
+                UIApplication.shared.open(url)
+                return
+            }
+        }
+
+        // Last resort: mailto: opens whatever the default email app is,
+        // but lands on the compose screen on most clients.
         if let url = URL(string: "mailto:") {
             UIApplication.shared.open(url)
         }

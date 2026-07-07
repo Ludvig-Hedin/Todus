@@ -54,7 +54,6 @@
 		3199B8DCBA11697E99956276 /* SmartInsightWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 063BE5C86CEEFE3C80C0720E /* SmartInsightWidget.swift */; };
 		322D4B63AC44CE8D6CEA2F84 /* CalendarYearView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023EB3076003B59B99BF73B8 /* CalendarYearView.swift */; };
 		32972AF1089A4FFB7EDE9F6B /* BoardTaskCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41DA6A9E5127FF376460AFC2 /* BoardTaskCard.swift */; };
-		32AAE885DEDDDBA5CB96D4D2 /* OnboardingAuthSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B849859D9E2E314131B7707B /* OnboardingAuthSheet.swift */; };
 		3413BBD2399C7381A25DD931 /* EmailServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42D3E2B8B7C83DDC866BE666 /* EmailServiceTests.swift */; };
 		34C0C944B37931BDD91716E5 /* DocsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F89FF4D10BAC3CC3357465 /* DocsListView.swift */; };
 		351BC0EB54D726E981621AC4 /* TaskViewMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74998F446A103B901131C35A /* TaskViewMode.swift */; };
@@ -110,7 +109,6 @@
 		75654D27148B3E85DD3A2F4A /* SignaturesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BA23EDF5310781D095C9003 /* SignaturesView.swift */; };
 		77A3306CD3B1CE673240D8D2 /* CompleteTaskIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F56211799FA421B97A1A41A /* CompleteTaskIntent.swift */; };
 		77D47937044BC8B61B367F6E /* Formatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42AB13446D7F0CF43F8FE697 /* Formatters.swift */; };
-		77DCB3960EE8385C3A8B4C77 /* EmailAIDraftSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBBE3079FFE4590B6C45A265 /* EmailAIDraftSheet.swift */; };
 		77E5F10CA3F5A67A7F781ADF /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01A3F5BCDE946F26BADE0250 /* MainTabView.swift */; };
 		7A2B6953B61F8449740EAA9D /* RemoteFirstTaskParsingServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD9B5F280C2C2907FB1F5ABB /* RemoteFirstTaskParsingServiceTests.swift */; };
 		7AB46F3760262957C11DEAB2 /* FolderPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71D915B99F2944EA61F7D52 /* FolderPickerSheet.swift */; };
@@ -397,7 +395,6 @@
 		B394ED3BDD65D9F4BC5A2D88 /* TodosConfig.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = TodosConfig.plist; sourceTree = "<group>"; };
 		B638C89190B1EF14C896D308 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
 		B6971A4BEA3D6DE172C3DCF6 /* DocEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocEditorView.swift; sourceTree = "<group>"; };
-		B849859D9E2E314131B7707B /* OnboardingAuthSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingAuthSheet.swift; sourceTree = "<group>"; };
 		B92B8CB5B738BC442B24472D /* DailyOverviewTimelineProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyOverviewTimelineProvider.swift; sourceTree = "<group>"; };
 		B95BC8718C6E7995803A51DF /* LocalModelStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelStateStore.swift; sourceTree = "<group>"; };
 		BAFCADA3030BB983664623A6 /* EmailInboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailInboxView.swift; sourceTree = "<group>"; };
@@ -463,7 +460,6 @@
 		F71D915B99F2944EA61F7D52 /* FolderPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderPickerSheet.swift; sourceTree = "<group>"; };
 		FA421D482C842637D1399A56 /* WidgetSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshotStore.swift; sourceTree = "<group>"; };
 		FB983A0400E9A34CE847FFD1 /* CalendarWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarWidget.swift; sourceTree = "<group>"; };
-		FBBE3079FFE4590B6C45A265 /* EmailAIDraftSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailAIDraftSheet.swift; sourceTree = "<group>"; };
 		FD9B5F280C2C2907FB1F5ABB /* RemoteFirstTaskParsingServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteFirstTaskParsingServiceTests.swift; sourceTree = "<group>"; };
 		FE72D13D01086C33EE5BEDF8 /* TodusUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TodusUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FEB2C3612DD12C99BBA87EE1 /* CalendarPermissionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarPermissionView.swift; sourceTree = "<group>"; };
@@ -748,7 +744,6 @@
 		5CDC7ECD6DE85F273F2D8681 /* Email */ = {
 			isa = PBXGroup;
 			children = (
-				FBBE3079FFE4590B6C45A265 /* EmailAIDraftSheet.swift */,
 				50D16BFA6D994A391DD979B9 /* EmailComposeView.swift */,
 				5A91B7B733819603C35DEDA5 /* EmailConnectView.swift */,
 				BAFCADA3030BB983664623A6 /* EmailInboxView.swift */,
@@ -1117,7 +1112,6 @@
 			isa = PBXGroup;
 			children = (
 				3CC3BF070F3607F415955A71 /* AuthView.swift */,
-				B849859D9E2E314131B7707B /* OnboardingAuthSheet.swift */,
 			);
 			path = Auth;
 			sourceTree = "<group>";
@@ -1403,7 +1397,6 @@
 				878E6F931C6EBBC6E69E1B8C /* DraftService.swift in Sources */,
 				527E334A7969883C7845E9A2 /* EKEventDetailSheet.swift in Sources */,
 				5416A1B05BD0808FCE042CAA /* EKWrapper.swift in Sources */,
-				77DCB3960EE8385C3A8B4C77 /* EmailAIDraftSheet.swift in Sources */,
 				BB5B64639AC9F00645CBC140 /* EmailAutomationPolicyView.swift in Sources */,
 				A55BE84F3CA4EC12C06C0A22 /* EmailComposeView.swift in Sources */,
 				562F6B6238B6FD2095E557A4 /* EmailConnectView.swift in Sources */,
@@ -1454,7 +1447,6 @@
 				BD1BCF4E2931728E0E5A4931 /* NotificationService.swift in Sources */,
 				25C680E7367CBD499BF09EC0 /* NotificationsOnboardingView.swift in Sources */,
 				A8B9C0D1E2F3041523647581 /* WelcomeTourView.swift in Sources */,
-				32AAE885DEDDDBA5CB96D4D2 /* OnboardingAuthSheet.swift in Sources */,
 				2944DCA029C65F3789681CC2 /* ParseState.swift in Sources */,
 				DF6E9FC5F464199D16C7DCD1 /* PreviewData.swift in Sources */,
 				2D4618583885642DAAA32786 /* RemindersSetupView.swift in Sources */,

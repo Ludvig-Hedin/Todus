@@ -79,7 +79,9 @@ struct BoardColumnView: View {
                 Image(systemName: "plus")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(AppTheme.mutedText)
-                    .frame(width: 22, height: 22)
+                    // 44pt hit area (HIG minimum) — the glyph stays 11pt; the
+                    // previous 22×22 target was easy to miss.
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

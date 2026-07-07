@@ -142,6 +142,11 @@ private struct LocalModelRow: View {
     let reason: String?
     @Environment(AppServices.self) private var services
 
+    /// Gates "Delete weights" behind a confirm — deleting multi-GB on-device
+    /// weights is irreversible short of a full re-download, and every other
+    /// destructive action in the app confirms.
+    @State private var showDeleteConfirmation = false
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
@@ -151,7 +156,11 @@ private struct LocalModelRow: View {
                     if model.runtime == .appleFM {
                         BadgeView(text: "Built-in", tint: .green)
                     }
-                    if state.isInstalled {
+                    if isActiveModel {
+                        // Which model actually answers was previously invisible —
+                        // "Use this model" changed nothing on screen.
+                        BadgeView(text: "Active", tint: .green)
+                    } else if state.isInstalled {
                         BadgeView(text: "Installed", tint: .blue)
                     }
                 }
@@ -174,6 +183,10 @@ private struct LocalModelRow: View {
 
     private var state: LocalModelInstallState {
         services.localModelStateStore.state(for: model)
+    }
+
+    private var isActiveModel: Bool {
+        services.aiChatService.selectedModel == model.id
     }
 
     @ViewBuilder
@@ -268,13 +281,25 @@ private struct LocalModelRow: View {
             Menu {
                 Button("Use this model", systemImage: "checkmark.circle") { useModel() }
                 Button("Delete weights", systemImage: "trash", role: .destructive) {
-                    services.modelDownloadService.delete(model)
+                    showDeleteConfirmation = true
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .font(.title3)
                     .foregroundStyle(.secondary)
                     .frame(width: 32, height: 32)
+            }
+            .confirmationDialog(
+                "Delete \(model.displayName)?",
+                isPresented: $showDeleteConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Delete Weights", role: .destructive) {
+                    services.modelDownloadService.delete(model)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The downloaded weights (\(sizeLabel)) will be removed from this device. Using this model again requires a full re-download.")
             }
         case .deleting:
             ProgressView().controlSize(.small)
@@ -290,6 +315,7 @@ private struct LocalModelRow: View {
         // service's send() path (Phase 5) branches on `LocalModelCatalog.match`
         // and routes to the local runtime instead of /api/ai/chat.
         services.aiChatService.selectedModel = model.id
+        AppHaptic.selection.play()
     }
 }
 

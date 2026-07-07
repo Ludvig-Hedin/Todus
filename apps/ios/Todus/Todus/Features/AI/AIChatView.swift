@@ -90,10 +90,12 @@ struct AIChatView: View {
     // them away from what they're reading.
     @State private var userScrolledUp: Bool = false
 
-    // Edit-message undo support — captures messages that were truncated when the
-    // user long-pressed "Edit" on an earlier turn, so they can restore them via
-    // the Edit chip × button before sending the new draft.
+    // Edit-message undo support — captures the tail of messages that got truncated
+    // when the user sent an edited turn, so `undoEditBanner` can restore them for a
+    // short window afterward (UX-D4).
     @State private var lastTruncatedHistory: [AIChatMessage] = []
+    /// Index the truncated tail was removed from — where `undoEdit()` reinserts it.
+    @State private var truncatedHistoryIndex: Int?
     /// True while the composer holds the text of a message being edited (cleared on send or cancel).
     @State private var isEditingMessage: Bool = false
     /// ID of the message being edited — truncation is deferred until the user presses Send,
@@ -241,7 +243,8 @@ struct AIChatView: View {
                 chatService.confirmPendingDelete(pending, confirm: false)
             }
         } message: { pending in
-            Text("The AI wants to delete \"\(pending.title ?? "this task")\". This action cannot be undone.")
+            let base = "The AI wants to delete \"\(pending.title ?? "this task")\". This action cannot be undone."
+            Text([base, pending.subtitle].compactMap { $0 }.joined(separator: "\n"))
         }
         // Generic mutation confirmation — send email, create/update/delete calendar event.
         // Without this binding, the service's `awaitMutationConfirmation` would suspend
@@ -408,6 +411,15 @@ struct AIChatView: View {
                 try? await Task.sleep(for: .seconds(2))
                 thinkingIndex = (thinkingIndex + 1) % thinkingPhrases.count
             }
+        }
+        // Auto-dismiss the "Undo edit" chip ~30s after an edit truncates history
+        // (UX-D4). Re-runs (and cancels the prior timer) whenever a new truncation
+        // happens; a no-op once `truncatedHistoryIndex` is nil.
+        .task(id: truncatedHistoryIndex) {
+            guard truncatedHistoryIndex != nil else { return }
+            try? await Task.sleep(for: .seconds(30))
+            guard !Task.isCancelled else { return }
+            clearUndoEditState()
         }
         // Auto-save conversation when the sheet is dismissed without pressing "New Chat"
         .onDisappear {
@@ -665,6 +677,11 @@ struct AIChatView: View {
 
                 }
                 .padding(.horizontal, 16)
+
+                // Model + data-access pills — the at-a-glance trust signal
+                // (which model answers, whether Gmail/Calendar are in scope)
+                // per its own P9 comment. Built but never placed until now.
+                statusPillsRow
 
                 // Suggestions — 3 default, up to 10 when expanded
                 VStack(alignment: .leading, spacing: 0) {
@@ -1102,6 +1119,7 @@ struct AIChatView: View {
             // Pin input section directly above keyboard — 8 pt gap above keyboard for breathing room
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 6) {
+                    undoEditBanner
                     streamFailureBanner
                     inputSection
                 }
@@ -1170,6 +1188,24 @@ struct AIChatView: View {
                 DragGesture(minimumDistance: 8).onChanged { _ in
                     if !userScrolledUp { userScrolledUp = true }
                 }
+            )
+        }
+    }
+
+    // MARK: - Undo Edit Banner
+
+    /// Inline chip surfaced for ~30s after "Edit message" truncates history, letting
+    /// the user restore the turn(s) it replaced (UX-D4). Auto-dismisses via the
+    /// `.task(id: truncatedHistoryIndex)` modifier below.
+    @ViewBuilder
+    private var undoEditBanner: some View {
+        if truncatedHistoryIndex != nil, !lastTruncatedHistory.isEmpty {
+            bannerRow(
+                icon: "arrow.uturn.backward",
+                text: "Message edited — tap to undo",
+                color: AppTheme.mutedText,
+                isTappable: true,
+                action: undoEdit
             )
         }
     }
@@ -1707,13 +1743,21 @@ struct AIChatView: View {
 
         // Deferred edit truncation — we kept the conversation intact while the user
         // was editing; now that they're actually sending we truncate at the edited
-        // message ID before inserting the replacement.
-        if let editID = editingMessageID {
+        // message ID before inserting the replacement. Capture the dropped tail first
+        // so the undo chip can restore it (UX-D4). Any undo state from a prior edit is
+        // invalidated here too, since its restore index no longer lines up once a new
+        // turn starts.
+        if let editID = editingMessageID,
+           let truncateIndex = chatService.messages.firstIndex(where: { $0.id == editID }) {
+            lastTruncatedHistory = Array(chatService.messages[truncateIndex...])
+            truncatedHistoryIndex = truncateIndex
             chatService.truncateBefore(messageID: editID)
-            editingMessageID = nil
+        } else {
+            lastTruncatedHistory = []
+            truncatedHistoryIndex = nil
         }
+        editingMessageID = nil
         isEditingMessage = false
-        lastTruncatedHistory = []
         // Clear persisted draft since the message was sent
         UserDefaults.standard.removeObject(forKey: "ai_draft_input")
         // Set the current page context so the AI knows where the user is.
@@ -1765,10 +1809,24 @@ struct AIChatView: View {
         isEditingMessage = false
         editingMessageID = nil
         lastTruncatedHistory = []
+        truncatedHistoryIndex = nil
         inputText = ""
         inputMentions = []
         pendingAttachments = []
         UserDefaults.standard.removeObject(forKey: "ai_draft_input")
+    }
+
+    /// Restore the tail truncated by an "Edit message" send (UX-D4). Surfaced via
+    /// `undoEditBanner` for ~30s afterward.
+    private func undoEdit() {
+        guard let index = truncatedHistoryIndex, !lastTruncatedHistory.isEmpty else { return }
+        chatService.restoreTruncatedHistory(lastTruncatedHistory, at: index)
+        clearUndoEditState()
+    }
+
+    private func clearUndoEditState() {
+        lastTruncatedHistory = []
+        truncatedHistoryIndex = nil
     }
 
     /// Keeps the most recent user message near the top of the scroll view so long assistant replies
@@ -2033,6 +2091,7 @@ private struct MessageBubble: View {
     @State private var didCopy = false
     @State private var previewAttachment: PreviewAttachment?
     @State private var speechSynthesizer = AVSpeechSynthesizer()
+    @State private var speechDelegate = SpeechCompletionDelegate()
     @State private var isSpeaking = false
 
     private struct PreviewAttachment: Identifiable {
@@ -2094,6 +2153,14 @@ private struct MessageBubble: View {
             AttachmentPreviewSheet(filename: item.filename) {
                 previewAttachment = nil
             }
+        }
+        .onDisappear {
+            // Stop any in-flight speech when the row leaves the hierarchy so it
+            // doesn't keep talking after the chat scrolls away or the sheet closes.
+            if speechSynthesizer.isSpeaking {
+                speechSynthesizer.stopSpeaking(at: .immediate)
+            }
+            isSpeaking = false
         }
     }
 
@@ -2615,6 +2682,9 @@ private struct MessageBubble: View {
                 speechSynthesizer.stopSpeaking(at: .immediate)
                 isSpeaking = false
             } else {
+                // Reset the pill when speech ends on its own (no manual stop).
+                speechDelegate.onDone = { isSpeaking = false }
+                speechSynthesizer.delegate = speechDelegate
                 let utterance = AVSpeechUtterance(string: copyableText)
                 utterance.rate = AVSpeechUtteranceDefaultSpeechRate
                 speechSynthesizer.speak(utterance)
@@ -3687,5 +3757,20 @@ private struct SeededRNG {
     mutating func next() -> UInt64 {
         state = state &* 6364136223846793005 &+ 1442695040888963407
         return state
+    }
+}
+
+/// Bridges `AVSpeechSynthesizer` completion back to SwiftUI state so a message
+/// row's "Speak"/"Stop" pill resets when narration finishes on its own — not
+/// only on a manual stop. The owning view assigns `onDone` to clear `isSpeaking`.
+final class SpeechCompletionDelegate: NSObject, AVSpeechSynthesizerDelegate {
+    var onDone: (() -> Void)?
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        onDone?()
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        onDone?()
     }
 }

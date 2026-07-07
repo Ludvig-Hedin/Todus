@@ -18,6 +18,10 @@ final class DocsService {
     private(set) var allDocs: [DocRecordDTO] = []
     private(set) var isLoading = false
     private(set) var lastError: String?
+    /// Timestamp of the most recent successful `refresh()`. Mirrors
+    /// `MeetingsService.lastSyncedAt` so the Docs list can show a
+    /// "Last refreshed" indicator. Left untouched on failure.
+    private(set) var lastSyncedAt: Date?
 
     /// Set once we attempt to auto-create the Personal workspace so we do not
     /// race a second refresh into double-creating it.
@@ -82,6 +86,7 @@ final class DocsService {
             )
             allDocs = docs.docs
             didLogDocsUnavailable = false
+            lastSyncedAt = Date()
         } catch {
             if Self.isCancellation(error) { return }
             if case let APIError.httpError(statusCode, _) = error, statusCode == 412 {

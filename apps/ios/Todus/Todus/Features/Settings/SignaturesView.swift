@@ -17,6 +17,7 @@ struct SignaturesView: View {
             Section {
                 Button {
                     services.selectedSignatureID = nil
+                    AppHaptic.selection.play()
                 } label: {
                     HStack {
                         Text("None")
@@ -292,6 +293,9 @@ struct SignatureEditorView: View {
             }
         }
 
+        // Success tick matches sibling settings pages (VoiceAssistantSettingsView,
+        // EmailAutomationPolicyView) — saving was previously silent.
+        AppHaptic.success.play()
         dismiss()
     }
 

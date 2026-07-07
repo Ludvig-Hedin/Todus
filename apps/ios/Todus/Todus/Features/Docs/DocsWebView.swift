@@ -15,6 +15,12 @@ struct DocsBrowserView: View {
     let docId: String?
 
     @State private var isLoading: Bool = true
+    /// Set when the WebView's main navigation fails (offline, 5xx, expired
+    /// auth). Previously the spinner just vanished, leaving a blank WebView
+    /// with no error and no retry.
+    @State private var loadFailed: Bool = false
+    /// Bumps to force the representable to re-issue the request on Retry.
+    @State private var reloadToken: Int = 0
 
     init(docId: String? = nil) {
         self.docId = docId
@@ -35,7 +41,9 @@ struct DocsBrowserView: View {
                 bearerToken: services.authService.bearerToken,
                 appURL: appURL,
                 docsURL: docsURL,
-                isLoading: $isLoading
+                isLoading: $isLoading,
+                loadFailed: $loadFailed,
+                reloadToken: reloadToken
             )
             if isLoading {
                 VStack(spacing: 6) {
@@ -46,6 +54,26 @@ struct DocsBrowserView: View {
                 }
                 .padding(14)
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else if loadFailed {
+                VStack(spacing: 10) {
+                    Image(systemName: "wifi.exclamationmark")
+                        .font(.system(size: 26))
+                        .foregroundStyle(.secondary)
+                    Text("Couldn't load documents")
+                        .font(.subheadline.weight(.medium))
+                    Text("Check your connection and try again.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Retry") {
+                        loadFailed = false
+                        isLoading = true
+                        reloadToken += 1
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+                .padding(20)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
         .ignoresSafeArea()
@@ -57,6 +85,10 @@ struct DocsBrowserViewRepresentable: UIViewRepresentable {
     let appURL: URL
     let docsURL: URL
     @Binding var isLoading: Bool
+    @Binding var loadFailed: Bool
+    /// Incremented by the host's Retry button — a change forces a fresh load
+    /// even when the URL and token are unchanged.
+    var reloadToken: Int = 0
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -147,7 +179,8 @@ struct DocsBrowserViewRepresentable: UIViewRepresentable {
         let currentToken = bearerToken ?? ""
         let didUrlChange = webView.url?.absoluteString != docsURL.absoluteString
         let didTokenChange = context.coordinator.lastBearerToken != currentToken
-        guard didUrlChange || didTokenChange else { return }
+        let didRetry = context.coordinator.lastReloadToken != reloadToken
+        guard didUrlChange || didTokenChange || didRetry else { return }
 
         var request = URLRequest(url: docsURL)
         if let token = bearerToken {
@@ -155,10 +188,11 @@ struct DocsBrowserViewRepresentable: UIViewRepresentable {
         }
         webView.load(request)
         context.coordinator.lastBearerToken = currentToken
+        context.coordinator.lastReloadToken = reloadToken
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(isLoading: $isLoading, appURL: appURL)
+        Coordinator(isLoading: $isLoading, loadFailed: $loadFailed, appURL: appURL)
     }
 
     /// Restricts in-WebView navigation to Todus-owned origins (or the configured app
@@ -167,11 +201,14 @@ struct DocsBrowserViewRepresentable: UIViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate {
         @Binding var isLoading: Bool
+        @Binding var loadFailed: Bool
         var lastBearerToken: String = ""
+        var lastReloadToken: Int = 0
         let appURL: URL
 
-        init(isLoading: Binding<Bool>, appURL: URL) {
+        init(isLoading: Binding<Bool>, loadFailed: Binding<Bool>, appURL: URL) {
             self._isLoading = isLoading
+            self._loadFailed = loadFailed
             self.appURL = appURL
         }
 
@@ -206,19 +243,37 @@ struct DocsBrowserViewRepresentable: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-            Task { @MainActor in self.isLoading = true }
+            Task { @MainActor in
+                self.isLoading = true
+                self.loadFailed = false
+            }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            Task { @MainActor in self.isLoading = false }
+            Task { @MainActor in
+                self.isLoading = false
+                self.loadFailed = false
+            }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            Task { @MainActor in self.isLoading = false }
+            Task { @MainActor in
+                self.isLoading = false
+                self.loadFailed = Self.isRealFailure(error)
+            }
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            Task { @MainActor in self.isLoading = false }
+            Task { @MainActor in
+                self.isLoading = false
+                self.loadFailed = Self.isRealFailure(error)
+            }
+        }
+
+        /// NSURLErrorCancelled (-999) fires on ordinary SPA/redirect churn — not a
+        /// user-visible failure, so don't surface the error overlay for it.
+        private static func isRealFailure(_ error: Error) -> Bool {
+            (error as NSError).code != NSURLErrorCancelled
         }
 
         /// True for the configured app origin and any `*.todus.app` host.

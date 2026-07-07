@@ -27,6 +27,10 @@ struct EmailThreadView: View {
     @State private var isLoading = true
     @State private var showCompose = false
     @State private var composeMode: ComposeMode = .reply
+    /// Message the compose sheet should reply to / forward. Set by a per-message
+    /// context-menu action so it targets that specific message; nil for the
+    /// bottom-bar buttons, which act on the newest message in the thread.
+    @State private var selectedComposeMessage: EmailMessage?
     @State private var isStarred = false
     @State private var assistantThread: AssistantThreadContext? = nil
     @State private var isLoadingAssistant = true
@@ -106,8 +110,11 @@ struct EmailThreadView: View {
     /// checker doesn't blow up on the combined `.sheet` + switch statement.
     @ViewBuilder
     private var composeSheet: some View {
-        if let lastMessage = detail?.messages.last {
-            composeSheetView(for: lastMessage)
+        // Per-message context-menu Reply/Forward set `selectedComposeMessage` so the
+        // reply targets the message the user long-pressed. The bottom-bar buttons
+        // leave it nil and fall back to the newest message in the thread.
+        if let composeMessage = selectedComposeMessage ?? detail?.messages.last {
+            composeSheetView(for: composeMessage)
                 .preferredColorScheme(services.appearancePreference.colorScheme)
         }
     }
@@ -268,6 +275,9 @@ struct EmailThreadView: View {
             // user edits and sends → second Reply on the same open thread
             // session shows the previously-sent AI text again.
             assistantDraftSeed = nil
+            // Drop the per-message target so the next bottom-bar Reply/Forward
+            // falls back to the newest message instead of a stale selection.
+            selectedComposeMessage = nil
         }) { composeSheet }
         .sheet(isPresented: $showLabelEditor) {
             EditLabelsSheet(
@@ -576,6 +586,9 @@ struct EmailThreadView: View {
             Button {
                 guard !isStarBusy else { return }
                 isStarBusy = true
+                // Light haptic on tap — matches archive/mark-unread/delete in the top
+                // bar, which fire via the same `topBarActionTick`-driven feedback.
+                topBarActionTick &+= 1
                 let prior = isStarred
                 isStarred.toggle()
                 Task {
@@ -628,10 +641,11 @@ struct EmailThreadView: View {
         // Always allow loading state through so the user sees a skeleton while
         // we fetch. We can't know the thread kind yet at that point.
         if isLoadingAssistant { return true }
-        // Failed loads are silently swallowed — no card, no layout jump.
-        // The AI FAB is always accessible for follow-up questions.
-        if assistantLoadFailed { return false }
-        guard let a = assistantThread else { return false }
+        // Loaded, but no assistant context came back (fetch failed / returned
+        // nothing). Show the card so the explicit "Summarize this thread" CTA in
+        // `summaryCard`'s else-branch is reachable as a retry path, instead of
+        // hiding AI entirely with no way to re-request a summary.
+        guard let a = assistantThread else { return true }
         guard a.threadKind.isConversational else { return false }
         // `aiLeadLine` is the new primary content path; `summary` is the
         // legacy/fallback. Either signals "we have something to show".
@@ -818,10 +832,12 @@ struct EmailThreadView: View {
                     expandByDefault: index == detail.messages.count - 1,
                     emailDarkMode: $emailDarkMode,
                     onReply: {
+                        selectedComposeMessage = message
                         composeMode = .reply
                         showCompose = true
                     },
                     onForward: {
+                        selectedComposeMessage = message
                         composeMode = .forward
                         showCompose = true
                     }
@@ -1999,6 +2015,11 @@ private struct MessageRow: View {
     // MARK: - Attachments
 
     private func attachmentsView(_ attachments: [EmailAttachment]) -> some View {
+        // TODO(bug-hunt): attachment cards are intentionally non-interactive. The
+        // `EmailAttachment` model carries only id/filename/mimeType/size — no URL or
+        // bytes — and `EmailService` exposes no endpoint to fetch attachment content
+        // by message + attachment id. Once a download API lands, wire a tap here to
+        // download → QuickLook (QLPreviewController) with a per-card spinner state.
         VStack(alignment: .leading, spacing: 6) {
             ForEach(attachments) { attachment in
                 HStack(spacing: 10) {
@@ -2029,7 +2050,18 @@ private struct MessageRow: View {
                     RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
                         .stroke(AppTheme.rowStroke, lineWidth: 1)
                 )
+                // Non-interactive: no download/preview path exists client-side yet.
+                // Mark accordingly so it doesn't read as a dead tappable control.
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Attachment \(attachment.filename), \(formatSize(attachment.size)). Preview not available yet.")
             }
+
+            // Caption clarifies the cards are informational, not tappable — otherwise
+            // they look like a broken/dead core feature.
+            Text("Preview not available yet")
+                .font(.system(size: 11))
+                .foregroundStyle(AppTheme.mutedText)
+                .padding(.top, 2)
         }
     }
 

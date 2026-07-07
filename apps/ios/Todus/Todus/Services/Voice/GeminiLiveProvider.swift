@@ -23,10 +23,29 @@ final class GeminiLiveProvider: VoiceProvider, @unchecked Sendable {
 
     // MARK: - Private state
 
-    private var webSocketTask: URLSessionWebSocketTask?
+    /// Backing storage for the socket references. Read/written from the receive
+    /// loop, cleanupConnection(), and the ~10 Hz audio-send tasks concurrently —
+    /// non-atomic reference load/store under ARC is UB, so all access goes
+    /// through the lock-guarded computed properties below.
+    private var _webSocketTask: URLSessionWebSocketTask?
+    private var _webSocketSession: URLSession?
+    private var _receiveTask: Task<Void, Never>?
+
+    private var webSocketTask: URLSessionWebSocketTask? {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _webSocketTask }
+        set { stateLock.lock(); defer { stateLock.unlock() }; _webSocketTask = newValue }
+    }
+
     /// Stored so we can invalidate it in disconnect() to avoid URLSession leaks.
-    private var webSocketSession: URLSession?
-    private var receiveTask: Task<Void, Never>?
+    private var webSocketSession: URLSession? {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _webSocketSession }
+        set { stateLock.lock(); defer { stateLock.unlock() }; _webSocketSession = newValue }
+    }
+
+    private var receiveTask: Task<Void, Never>? {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _receiveTask }
+        set { stateLock.lock(); defer { stateLock.unlock() }; _receiveTask = newValue }
+    }
     /// Fires if Gemini doesn't reply with `setupComplete` within the timeout, so the UI
     /// doesn't sit on a spinner forever when the upstream silently drops the setup.
     private var setupTimeoutTask: Task<Void, Never>?
@@ -42,8 +61,10 @@ final class GeminiLiveProvider: VoiceProvider, @unchecked Sendable {
     /// Guarded by `stateLock`.
     private var _didReachSetupComplete = false
 
-    /// Protects `_lastServerError` and `_didReachSetupComplete` from concurrent access
-    /// across the receive loop, timeout task, and connect() / cleanup paths.
+    /// Protects `_lastServerError`, `_didReachSetupComplete`, and the socket
+    /// references (`_webSocketTask` / `_webSocketSession` / `_receiveTask`) from
+    /// concurrent access across the receive loop, timeout task, audio-send
+    /// tasks, and connect() / cleanup paths.
     private let stateLock = NSLock()
 
     private var lastServerError: String? {

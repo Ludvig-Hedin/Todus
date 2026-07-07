@@ -157,6 +157,9 @@ struct TasksTabView: View {
         // Deep navigation from AI chat cards — open task detail sheet
         .onAppear { consumePendingTaskNavigation() }
         .onChange(of: services.pendingTaskId) { _, _ in consumePendingTaskNavigation() }
+        // Search query seeded by GlobalSearchView's "See all N in Tasks" row
+        .onAppear { consumePendingSearchSeed() }
+        .onChange(of: services.tasksSearchSeed) { _, _ in consumePendingSearchSeed() }
         .onDisappear {
             // Cancel any in-flight delayed sheet presentation so it doesn't
             // fire after this view has gone away (Bug H6).
@@ -259,12 +262,20 @@ struct TasksTabView: View {
         }
     }
 
+    /// Picks up a search query seeded by GlobalSearchView's "See all N in Tasks" row
+    /// and applies it to this tab's own search field (flows into `InboxView` /
+    /// `BoardView` / `TaskTableView` / `CalendarTaskView` via their `searchText` param).
+    private func consumePendingSearchSeed() {
+        guard let seed = services.tasksSearchSeed else { return }
+        services.tasksSearchSeed = nil
+        searchText = seed
+    }
+
     // MARK: - Header chips
 
     /// Live "Overdue / Today" capsules in the header. Renders nothing
-    /// when there's nothing pressing. Tapping a chip flips the sort to
-    /// `.smart` so the user lands on that bucket. The chip is the single
-    /// most important orientation cue — "do I have anything urgent?".
+    /// when there's nothing pressing. Passive stat pills — the single most
+    /// important orientation cue: "do I have anything urgent?".
     @ViewBuilder
     private var todayHeaderChips: some View {
         let now = Date()
@@ -297,25 +308,21 @@ struct TasksTabView: View {
     }
 
     private func headerChip(label: String, icon: String, tint: Color) -> some View {
-        Button {
-            // Chip-tap focuses the smart sort so the bucket the user just
-            // glanced at becomes the visible scroll structure.
-            services.taskSortOrder = .smart
-            services.selectedViewMode = .list
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 9, weight: .bold))
-                Text(label)
-                    .font(.system(size: 10, weight: .semibold))
-            }
-            .foregroundStyle(tint)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(tint.opacity(0.12), in: Capsule())
-            .overlay(Capsule().stroke(tint.opacity(0.22), lineWidth: 0.5))
+        // Passive stat label. These looked like filter buttons but only flipped
+        // the sort mode — a no-op in the default list+smart configuration — so
+        // tapping "3 overdue" appeared broken. Render as plain status pills
+        // until a real per-bucket filter exists.
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .bold))
+            Text(label)
+                .font(.system(size: 10, weight: .semibold))
         }
-        .buttonStyle(.plain)
+        .foregroundStyle(tint)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(tint.opacity(0.12), in: Capsule())
+        .overlay(Capsule().stroke(tint.opacity(0.22), lineWidth: 0.5))
     }
 
     // MARK: - Header

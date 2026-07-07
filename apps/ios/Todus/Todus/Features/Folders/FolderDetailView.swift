@@ -12,6 +12,7 @@ struct FolderDetailView: View {
 
     @State private var items: [FolderContentItem] = []
     @State private var isLoading = false
+    @State private var loadFailed = false
     @State private var typeFilter: FolderItemKind? = nil
     @State private var showEditSheet = false
     @State private var showAddSheet = false
@@ -192,6 +193,20 @@ struct FolderDetailView: View {
         if isLoading && visible.isEmpty {
             HStack { Spacer(); ProgressView(); Spacer() }
                 .padding(.top, 40)
+        } else if loadFailed && items.isEmpty {
+            VStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 28, weight: .regular))
+                    .foregroundStyle(AppTheme.mutedText)
+                Text("Couldn't load items")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(AppTheme.mutedText)
+                Text("Pull to refresh.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(AppTheme.mutedText.opacity(0.8))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 40)
         } else if visible.isEmpty {
             VStack(spacing: 6) {
                 Image(systemName: "tray")
@@ -240,13 +255,9 @@ struct FolderDetailView: View {
     private func load() async {
         isLoading = true
         defer { isLoading = false }
-        // TODO: fetchFolderContents swallows network errors internally (falls back to
-        // local-only data on failure — see TaskCaptureService.fetchFolderContents) and
-        // always returns a non-throwing array, so a failed fetch is indistinguishable
-        // from a genuinely empty folder here. Surfacing a distinct error state needs
-        // fetchFolderContents to report a success/failure signal to its caller.
-        let fetched = await services.captureService.fetchFolderContents(folder, in: modelContext)
-        items = fetched
+        let result = await services.captureService.fetchFolderContents(folder, in: modelContext)
+        items = result.items
+        loadFailed = result.remoteFetchFailed
         // Refresh card cache opportunistically.
         await services.captureService.fetchFolderSummary(in: modelContext)
     }

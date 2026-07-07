@@ -264,7 +264,12 @@ final class VoiceSessionCoordinator {
             Task { [weak self] in
                 guard let self else { return }
                 let result = await self.executeTool(name: name, arguments: arguments)
+                // The user may have stopped the session while the tool ran —
+                // transitioning back to .listening here resurrected a dead,
+                // mic-released session as "active".
+                guard !self.isStopping, self.status != .idle else { return }
                 try? await self.provider.sendToolResponse(id: id, name: name, result: result)
+                guard !self.isStopping, self.status != .idle else { return }
                 self.transition(to: .listening, reason: "tool '\(name)' done")
             }
 

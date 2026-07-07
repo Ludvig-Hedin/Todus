@@ -61,6 +61,15 @@ struct EmailRowView: View {
 
                     Spacer(minLength: 0)
 
+                    // Persistent star indicator — starring via swipe previously
+                    // left the row looking identical, and starred mail was
+                    // invisible in the list.
+                    if thread.isStarredInLabels {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.yellow)
+                    }
+
                     if thread.unread {
                         Circle()
                             .fill(Color(UIColor.systemBlue))   // was: AppTheme.accentBlue (= Color.primary = black)
@@ -80,7 +89,7 @@ struct EmailRowView: View {
         .accessibilityElement(children: .combine)
         // Fall back to the sender's email when the display name is missing —
         // otherwise VoiceOver users hear "From, <subject>" with no sender at all.
-        .accessibilityLabel("\(thread.unread ? "Unread, " : "")From \(thread.from.name.isEmpty ? thread.from.email : thread.from.name), \(thread.subject), \(timeString)")
+        .accessibilityLabel("\(thread.unread ? "Unread, " : "")\(thread.isStarredInLabels ? "Starred, " : "")From \(thread.from.name.isEmpty ? thread.from.email : thread.from.name), \(thread.subject), \(timeString)")
         // Long-press copy actions so users can grab the full sender or subject
         // when either is truncated by the single-line row layout. The wrapping
         // .contextMenu modifier on the row in EmailInboxView (which adds the
