@@ -1237,6 +1237,10 @@ private struct ComposeAttachmentPickers: ViewModifier {
             }
             .fullScreenCover(isPresented: $isShowingCamera) {
                 CameraPicker { image in
+                    // TODO(perf): saveImage (JPEG encode + disk write) runs synchronously
+                    // on this main-thread UIKit callback and briefly hitches the UI. Moving
+                    // it off-main needs the UIImage boxed across the Task boundary (not
+                    // Sendable); the common photo-library path below is already off-main.
                     if let image,
                        let filename = AttachmentService.shared.saveImage(image) {
                         onImported(filename)
@@ -1248,13 +1252,20 @@ private struct ComposeAttachmentPickers: ViewModifier {
             .onChange(of: selectedPhotoItem) { _, newItem in
                 guard let newItem else { return }
                 Task {
-                    if let data = try? await newItem.loadTransferable(type: Data.self),
-                       let uiImage = UIImage(data: data),
-                       let filename = AttachmentService.shared.saveImage(uiImage) {
-                        onImported(filename)
+                    // Decode + JPEG re-encode + disk write off the main thread — a
+                    // full-resolution photo previously froze the compose UI on attach.
+                    // `data` is Sendable, so build the UIImage inside the detached task.
+                    guard let data = try? await newItem.loadTransferable(type: Data.self) else {
+                        selectedPhotoItem = nil
+                        return
                     }
+                    let filename = await Task.detached(priority: .userInitiated) {
+                        guard let uiImage = UIImage(data: data) else { return String?.none }
+                        return AttachmentService.shared.saveImage(uiImage)
+                    }.value
+                    if let filename { onImported(filename) }
+                    selectedPhotoItem = nil
                 }
-                selectedPhotoItem = nil
             }
     }
 }

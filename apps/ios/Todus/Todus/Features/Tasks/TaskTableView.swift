@@ -132,15 +132,15 @@ struct TaskTableView: View {
         HStack(spacing: 0) {
             // Leading spacer matches the checkbox column width on data rows
             // so the "Task" header aligns with the title text. (UX P10.)
-            Color.clear.frame(width: 28)
+            Color.clear.frame(width: 30)
             Text("Task")
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text("Status")
-                .frame(width: 76, alignment: .leading)
+                .frame(width: 84, alignment: .leading)
             Text("Due")
                 .frame(width: 72, alignment: .leading)
         }
-        .font(.system(size: 10, weight: .semibold))
+        .font(.system(size: 11, weight: .semibold))
         .tracking(0.4)
         .textCase(.uppercase)
         .foregroundStyle(AppTheme.mutedText)
@@ -170,9 +170,9 @@ struct TaskTableView: View {
                 }
             } label: {
                 Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(task.completed ? task.status.tintColor : AppTheme.subtleText)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 30, height: 30)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -190,7 +190,7 @@ struct TaskTableView: View {
                             .frame(width: 5, height: 5)
                     }
                     Text(task.title)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 15, weight: .medium))
                         .tracking(-0.15)
                         .foregroundStyle(.primary)
                         .lineLimit(1)
@@ -198,7 +198,7 @@ struct TaskTableView: View {
 
                 if !task.taskDescription.isEmpty && task.taskDescription != task.title {
                     Text(task.taskDescription)
-                        .font(.system(size: 11, weight: .regular))
+                        .font(.system(size: 12, weight: .regular))
                         .foregroundStyle(AppTheme.mutedText)
                         .lineLimit(1)
                 }
@@ -206,7 +206,7 @@ struct TaskTableView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             statusPill(task.status)
-                .frame(width: 76, alignment: .leading)
+                .frame(width: 84, alignment: .leading)
 
             Group {
                 if let dueDate = task.dueDate {
@@ -217,11 +217,11 @@ struct TaskTableView: View {
                         .foregroundStyle(AppTheme.mutedText.opacity(0.4))
                 }
             }
-            .font(.system(size: 11, weight: .medium))
+            .font(.system(size: 12, weight: .medium))
             .frame(width: 72, alignment: .leading)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 6)
+        .padding(.vertical, 9)
         .contentShape(Rectangle())
         .onTapGesture { selectedTask = task }
         .contextMenu {
@@ -323,9 +323,9 @@ struct TaskTableView: View {
     private func statusPill(_ status: TaskStatus) -> some View {
         HStack(spacing: 3) {
             Image(systemName: status.systemImage)
-                .font(.system(size: 8, weight: .bold))
+                .font(.system(size: 9, weight: .bold))
             Text(status.title)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .tracking(-0.1)
         }
         .foregroundStyle(status.tintColor)

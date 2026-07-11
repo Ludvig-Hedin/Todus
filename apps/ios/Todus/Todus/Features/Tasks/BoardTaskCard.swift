@@ -15,14 +15,14 @@ struct BoardTaskCard: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: task.status.systemImage)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(task.completed ? AppTheme.mutedText : task.status.tintColor)
-                .frame(width: 16, alignment: .center)
+                .frame(width: 18, alignment: .center)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .top, spacing: 4) {
                     Text(task.title)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(.primary.opacity(task.completed ? 0.5 : 0.95))
                         .strikethrough(task.completed, color: .primary.opacity(0.2))
                         .lineLimit(2)
@@ -61,11 +61,11 @@ struct BoardTaskCard: View {
             Spacer(minLength: 0)
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(AppTheme.mutedText.opacity(0.45))
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
         .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
@@ -212,7 +212,7 @@ struct BoardTaskCard: View {
 
     private func boardMetaPill(title: String, systemImage: String, tint: Color) -> some View {
         Label(title, systemImage: systemImage)
-            .font(.system(size: 9, weight: .semibold))
+            .font(.system(size: 11, weight: .semibold))
             .tracking(-0.08)
             .foregroundStyle(tint)
             .padding(.horizontal, 6)

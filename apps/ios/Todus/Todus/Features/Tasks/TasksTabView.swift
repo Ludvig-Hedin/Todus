@@ -314,13 +314,13 @@ struct TasksTabView: View {
         // until a real per-bucket filter exists.
         HStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 9, weight: .bold))
+                .font(.system(size: 10, weight: .bold))
             Text(label)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
         }
         .foregroundStyle(tint)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
         .background(tint.opacity(0.12), in: Capsule())
         .overlay(Capsule().stroke(tint.opacity(0.22), lineWidth: 0.5))
     }
@@ -345,14 +345,14 @@ struct TasksTabView: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: mode.systemImage)
-                            .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                            .font(.system(size: 15, weight: isSelected ? .semibold : .regular))
                         Text(mode.shortTitle)
-                            .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                            .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                     }
                     .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 7)
-                    .padding(.horizontal, 6)
+                    .padding(.vertical, 11)
+                    .padding(.horizontal, 8)
                     .background {
                         if isSelected {
                             Capsule(style: .continuous)
@@ -366,7 +366,7 @@ struct TasksTabView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(3)
+        .padding(4)
         .background(AppTheme.segmentedTrack, in: Capsule(style: .continuous))
     }
 
@@ -375,12 +375,12 @@ struct TasksTabView: View {
     private var searchSortBar: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(AppTheme.mutedText)
                 .padding(.leading, 2)
 
             TextField("Search tasks…", text: $searchText)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 14, weight: .medium))
                 .autocorrectionDisabled()
 
             if !searchText.isEmpty {
@@ -409,19 +409,19 @@ struct TasksTabView: View {
             } label: {
                 HStack(spacing: 4) {
                     Text(services.taskSortOrder.title)
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                     Image(systemName: "arrow.up.arrow.down")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                 }
                 .foregroundStyle(AppTheme.mutedText)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
                 .background(AppTheme.surfaceSecondary, in: Capsule())
                 .minTouchTarget()
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 2)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
         .background(AppTheme.surfacePrimary, in: Capsule())
         .overlay(
             Capsule()

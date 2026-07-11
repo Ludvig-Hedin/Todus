@@ -1699,6 +1699,11 @@ private struct MessageRow: View {
     /// Local AttachmentService filename of a downloaded attachment being previewed.
     @State private var previewedAttachment: DownloadedAttachment?
     @State private var attachmentError: String?
+    /// Plain-text version of the body for the "Copy message text" context-menu items.
+    /// Computed ONCE off-main per message (via `.task(id:)`) rather than inside the
+    /// `.contextMenu` ViewBuilder — that builder is evaluated eagerly on every render,
+    /// so the 5-pass regex strip was re-running on every scroll frame of an open thread.
+    @State private var cachedCopyText: String = ""
 
     private struct DownloadedAttachment: Identifiable {
         let localFilename: String
@@ -1830,15 +1835,9 @@ private struct MessageRow: View {
                 } label: {
                     Label("Copy subject", systemImage: "text.quote")
                 }
-                // Prefer the full body (rendered to plain text) over `plainText`,
-                // which only holds the snippet/title. Fall back to the snippet when
-                // the body is empty.
-                let copyText: String = {
-                    if !message.body.isEmpty {
-                        return htmlToPlainText(message.body)
-                    }
-                    return message.plainText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                }()
+                // Uses `cachedCopyText`, computed off-main in `.task(id: message.id)`.
+                // Never strip HTML inside this ViewBuilder — it runs every render.
+                let copyText = cachedCopyText
                 if !copyText.isEmpty {
                     Button {
                         UIPasteboard.general.string = copyText
@@ -1857,6 +1856,16 @@ private struct MessageRow: View {
                         Label("Copy as quote", systemImage: "quote.bubble")
                     }
                 }
+            }
+            .task(id: message.id) {
+                // Strip HTML → plain text once per message, OFF the main thread, and
+                // cache it for the context menu. Keeps scroll frames free of regex work.
+                let body = message.body
+                let fallback = message.plainText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let text = await Task.detached(priority: .utility) {
+                    body.isEmpty ? fallback : Self.htmlToPlainText(body)
+                }.value
+                cachedCopyText = text
             }
 
             // Expanded content
@@ -1944,7 +1953,7 @@ private struct MessageRow: View {
     /// Strip HTML tags and decode common entities so the clipboard gets readable
     /// text instead of raw markup when copying an email body. Caps the result to a
     /// reasonable length to avoid pasting megabytes of inlined HTML.
-    private func htmlToPlainText(_ html: String) -> String {
+    nonisolated private static func htmlToPlainText(_ html: String) -> String {
         var text = html
         // Drop tags entirely.
         text = text.replacingOccurrences(

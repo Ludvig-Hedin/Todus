@@ -1122,3 +1122,19 @@ Reviewed the 21 unpushed commits (`origin/main..HEAD`, 134 files, +5273/-14244) 
 ## Pre-existing (not introduced by these commits — out of scope, left as-is)
 
 - Server `tsc --noEmit` reports type errors in `routes/agent/mcp.ts`, `thread-workflow-utils/workflow-functions.ts`, `lib/driver/microsoft.ts`, `lib/bulk-delete.ts`, `lib/analyze/interests.ts`, `lib/server-utils.ts` — all in files **not** touched by this diff, mostly stale wrangler-`Env` binding noise. Do not block `wrangler deploy` (CF bundles via esbuild, no tsc gate). Pre-existing on `origin/main`.
+
+---
+
+# iOS performance pass — deferred findings, 2026-07-11
+
+Surfaced during the lag/freeze/crash bug-hunt; source-verified but deferred (lower severity or need a larger change than the pass scope). The high-severity freezes/crashes/lag from the same pass were fixed (see `CHANGELOG.md`).
+
+| ID | File | Issue | Fix direction | Why deferred |
+|----|------|-------|---------------|--------------|
+| PERF-1 | `Features/Docs/DocsListView.swift:332-389` + `Services/Docs/DocsService.swift:115-136` | `listDocs`/`children` filter+sort over ALL docs once per tree node → O(n²) render, redone every body eval | Build a `Dictionary(grouping:by: parentId)` index once per `allDocs` change, cache in `@State`/`@Observable` | Needs a caching layer; Docs is a secondary surface |
+| PERF-2 | `Features/Folders/AddToFolderSheet.swift` (email `:242-287`, event `:506-525`, doc `:625-647`) | `existingThreadIDs`/`existingEventIDs`/`existingDocIDs` run a fresh SwiftData `.fetch()` on every access; `body` reads them multiple times per keystroke via `.searchable` | Cache the fetch in `@State`, populate in `.task`/`.onAppear`, invalidate on folder/source change | 3 near-identical sites; wants a shared helper |
+| PERF-3 | `Features/Calendar/CalendarTimeGridView.swift` (now-line `Timer.publish(every:60)`) | The 60s now-line tick mutates top-level `@State now`, forcing the whole grid `body` (incl. O(cluster²) `layoutEvents` per day column) to re-run every minute | Isolate the now-indicator in `TimelineView(.periodic(...))`; drop the top-level `now` state + Combine timer | Needs careful visual re-verification of the now-line |
+| PERF-4 | `Features/Search/GlobalSearchView.swift:36-75` | `taskResults`/`emailResults`/`peopleResults` are uncached computeds, each read twice per body (`hasResults` + `resultsList`) → 2× filter work | Compute once into locals per `body`, or cache in `@State` | Low severity (in-memory datasets are small); wants a params refactor |
+| PERF-5 | `Features/Email/EmailComposeView.swift` (camera path `:1239-1244`) | `AttachmentService.saveImage` (JPEG encode + disk write) runs on the main-thread camera callback | Move off-main; requires boxing the non-`Sendable` `UIImage` across the `Task` boundary | Camera-to-email is infrequent; photo-library path already fixed. Inline `TODO(perf)` left. |
+| PERF-6 | `Features/Tasks/InboxView.swift:147-160`, `Features/Tasks/BoardView.swift:68-78` | `tasksChangeDigest`/`boardChangeDigest` walk `allTasks` O(n) on every body eval (they're the `.onChange` comparison value) | Cache digest in `@State`, bump it from `TaskCaptureService`/`SyncService` write sites instead of walking in `body` | Knowingly-accepted tradeoff (documented inline); only bites at hundreds+ tasks |
+| PERF-7 | `Services/AI/AIChatService.swift:1164` + `Features/AI/MarkdownView.swift:29-38` | Per-SSE-line `Task.detached` decode (hundreds of hops/reply) and full-markdown reparse on every ~80ms token flush (O(N²) over a long reply) | Decode on one reused background queue for the whole stream; make markdown parse incremental (diff-append) | Both sit on deliberate, documented tradeoffs; off-main already, so no hang |

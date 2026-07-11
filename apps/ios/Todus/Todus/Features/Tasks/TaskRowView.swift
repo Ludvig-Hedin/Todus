@@ -19,26 +19,26 @@ struct TaskRowView: View {
         Button {
             onOpenDetails()
         } label: {
-            HStack(alignment: .center, spacing: 4) {
+            HStack(alignment: .center, spacing: 8) {
                 // Checkbox — isolated tap target, vertically centered with the text block.
                 // Frame stays 44×44 for the HIG minimum hit area; only the glyph size
-                // changes. Outer padding tightened so the row is visibly compact.
+                // changes.
                 Button(action: { toggleCheckbox() }) {
                     Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 16, weight: .medium))
+                        .font(.system(size: 21, weight: .medium))
                         .foregroundStyle(task.completed ? task.status.tintColor : AppTheme.subtleText)
                 }
                 .buttonStyle(.plain)
-                .frame(width: 36, height: 36)
+                .frame(width: 40, height: 40)
                 .contentShape(Rectangle())
                 .accessibilityLabel(task.completed ? "Mark task incomplete" : "Mark task complete")
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .center, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 1) {
+                        VStack(alignment: .leading, spacing: 2) {
                             HStack(alignment: .firstTextBaseline, spacing: 5) {
                                 Text(task.title)
-                                    .font(.system(size: 14, weight: .medium))
+                                    .font(.system(size: 16, weight: .medium))
                                     .tracking(-0.2)
                                     .lineLimit(2)
                                     .multilineTextAlignment(.leading)
@@ -62,7 +62,7 @@ struct TaskRowView: View {
 
                             if !task.taskDescription.isEmpty && task.taskDescription != task.title {
                                 Text(task.taskDescription)
-                                    .font(.system(size: 12, weight: .regular))
+                                    .font(.system(size: 13, weight: .regular))
                                     .foregroundStyle(AppTheme.mutedText.opacity(0.95))
                                     .lineLimit(1)
                             }
@@ -75,8 +75,8 @@ struct TaskRowView: View {
                     metaChipsRow
                 }
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -256,7 +256,7 @@ struct TaskRowView: View {
             openSourceEmail()
         } label: {
             Label("Email", systemImage: "envelope.fill")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .tracking(-0.1)
                 .foregroundStyle(AppTheme.secondaryAccent)
                 .padding(.horizontal, 6)
@@ -275,9 +275,9 @@ struct TaskRowView: View {
     private func statusTag(status: TaskStatus) -> some View {
         HStack(spacing: 3) {
             Image(systemName: status.systemImage)
-                .font(.system(size: 8, weight: .bold))
+                .font(.system(size: 9, weight: .bold))
             Text(status.title)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .tracking(-0.1)
         }
         .foregroundStyle(status.tintColor)
@@ -295,7 +295,7 @@ struct TaskRowView: View {
     private func dueDateTag(_ dueDate: Date) -> some View {
         let color = dueDateColor(dueDate)
         return Label(TaskDateFormatter.dueFormatter.string(from: dueDate), systemImage: "calendar")
-            .font(.system(size: 10, weight: .semibold))
+            .font(.system(size: 11, weight: .semibold))
             .tracking(-0.1)
             .foregroundStyle(color)
             .padding(.horizontal, 6)
@@ -313,9 +313,9 @@ struct TaskRowView: View {
         let color = priorityColor(priority)
         return HStack(spacing: 3) {
             Image(systemName: "flag.fill")
-                .font(.system(size: 8, weight: .bold))
+                .font(.system(size: 9, weight: .bold))
             Text(priority.title)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .tracking(-0.1)
         }
         .foregroundStyle(color)
@@ -332,7 +332,7 @@ struct TaskRowView: View {
 
     private func tag(title: String, systemImage: String) -> some View {
         Label(title, systemImage: systemImage)
-            .font(.system(size: 10, weight: .semibold))
+            .font(.system(size: 11, weight: .semibold))
             .tracking(-0.1)
             .foregroundStyle(Color.secondary.opacity(0.9))
             .padding(.horizontal, 6)

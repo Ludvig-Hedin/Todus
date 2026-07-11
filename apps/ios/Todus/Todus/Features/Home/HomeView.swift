@@ -21,9 +21,18 @@ struct HomeView: View {
         !task.completed
     }, sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
 
-    // Unfiltered count — used to drive the "Create your first task" setup prompt so
-    // a user who has only completed tasks isn't told they haven't created any yet.
-    @Query private var allTasksIncludingCompleted: [TaskRecord]
+    // Existence probe — used only to drive the "Create your first task" setup prompt
+    // via `.isEmpty`. Bounded to a single row so a user with thousands of completed
+    // tasks doesn't materialize the entire table into memory on every task mutation.
+    @Query(Self.firstTaskProbeDescriptor) private var allTasksIncludingCompleted: [TaskRecord]
+
+    /// One-row fetch backing the emptiness check above. `fetchLimit = 1` keeps the
+    /// query O(1) instead of loading every task just to ask "is there at least one?".
+    private static var firstTaskProbeDescriptor: FetchDescriptor<TaskRecord> {
+        var descriptor = FetchDescriptor<TaskRecord>()
+        descriptor.fetchLimit = 1
+        return descriptor
+    }
 
     @State private var upcomingEvents: [CalendarEvent] = []
     @State private var isLoadingEvents = true
@@ -577,7 +586,12 @@ struct HomeView: View {
     /// sentence ("Reply to Sarah about the Q4 proposal"), separated by a hairline
     /// divider — no per-row card backgrounds, no tinted badges.
     private var todayList: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        // Compute the ranked feed once per render — `briefingFeedItems` rebuilds,
+        // dedups and ranks three collections from scratch, and was previously
+        // re-invoked up to four times in this single view (count / isEmpty ×2 /
+        // prefix). One local reference collapses that to a single pass.
+        let items = briefingFeedItems
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Text("Today")
                     .font(.system(size: 13, weight: .semibold))
@@ -585,7 +599,7 @@ struct HomeView: View {
                     .textCase(.uppercase)
                     .tracking(0.5)
                 Spacer()
-                if briefingFeedItems.count > 5 {
+                if items.count > 5 {
                     Button("See all in Mail") {
                         services.navigateTo = .email
                     }
@@ -596,11 +610,11 @@ struct HomeView: View {
 
             if isLoadingAssistantBriefing && services.emailService.assistantBriefing == nil {
                 loadingState(message: "Preparing your day")
-            } else if briefingDidFail && briefingFeedItems.isEmpty {
+            } else if briefingDidFail && items.isEmpty {
                 // Briefing fetch timed out or errored — surface a calm retry CTA instead
                 // of "You're caught up", which would lie to the user.
                 briefingFailureCard
-            } else if briefingFeedItems.isEmpty {
+            } else if items.isEmpty {
                 HStack(spacing: 10) {
                     Image(systemName: "checkmark.seal")
                         .font(.system(size: 16, weight: .regular))
@@ -613,10 +627,10 @@ struct HomeView: View {
                 .padding(.vertical, 18)
             } else {
                 VStack(spacing: 0) {
-                    let items = Array(briefingFeedItems.prefix(5).enumerated())
-                    ForEach(items, id: \.element.id) { pair in
+                    let rows = Array(items.prefix(5).enumerated())
+                    ForEach(rows, id: \.element.id) { pair in
                         todayRow(pair.element)
-                        if pair.offset < items.count - 1 {
+                        if pair.offset < rows.count - 1 {
                             Divider()
                                 .padding(.leading, 36)
                         }

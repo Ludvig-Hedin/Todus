@@ -211,6 +211,10 @@ final class AIChatService {
     // Cached calendar context string — fetched async before each stream so buildPayload stays sync.
     private var calendarSnapshot: String? = nil
 
+    // Cached serialized attachments — encoded OFF the main actor before each stream so
+    // buildPayload stays sync and the 5–12MB file read + base64 never blocks the UI.
+    private var attachmentSnapshot: [SerializedFilePayload]? = nil
+
     /// Current page/tab context injected by the view before each send — included in system prompt.
     var currentPageContext: String? = nil
     
@@ -912,8 +916,9 @@ final class AIChatService {
 
         defer { finaliseStream(messageID: assistantMessageID) }
 
-        // Pre-fetch calendar events async so buildPayload stays sync
+        // Pre-fetch calendar events + serialize attachments async so buildPayload stays sync
         await refreshCalendarSnapshot()
+        await refreshAttachmentSnapshot(conversationMessages: requestMessages)
 
         // Build the initial payload once — reused across tool-agent loop steps.
         let payload = buildPayload(allTasks: allTasks, conversationMessages: requestMessages)
@@ -1634,11 +1639,13 @@ final class AIChatService {
 
     // MARK: - Payload Building
 
-    private static let maxAttachmentBytes = 5 * 1024 * 1024
-    private static let maxTotalAttachmentBytes = 12 * 1024 * 1024
+    nonisolated private static let maxAttachmentBytes = 5 * 1024 * 1024
+    nonisolated private static let maxTotalAttachmentBytes = 12 * 1024 * 1024
 
     /// Reads local attachment files and serializes them for `/api/ai/chat` (matches server `serializedFileSchema`).
-    private static func buildSerializedAttachments(fileNames: [String]) -> [SerializedFilePayload] {
+    /// `nonisolated` so `refreshAttachmentSnapshot` can run the multi-megabyte file read +
+    /// base64 encode off the main actor (all dependencies here are thread-safe).
+    nonisolated private static func buildSerializedAttachments(fileNames: [String]) -> [SerializedFilePayload] {
         var total = 0
         var out: [SerializedFilePayload] = []
         for name in fileNames {
@@ -1798,12 +1805,9 @@ final class AIChatService {
             }
         }
 
-        let attachmentPayload: [SerializedFilePayload]? = {
-            guard let lastUser = activeMessages.reversed().first(where: { $0.role == .user }),
-                  !lastUser.attachmentFileNames.isEmpty else { return nil }
-            let serialized = Self.buildSerializedAttachments(fileNames: lastUser.attachmentFileNames)
-            return serialized.isEmpty ? nil : serialized
-        }()
+        // Use the snapshot serialized off-main by `refreshAttachmentSnapshot`; never
+        // read/encode files here (this runs on the main actor).
+        let attachmentPayload = attachmentSnapshot
 
         return ChatRequest(
             messages: apiMessages,
@@ -2370,6 +2374,23 @@ final class AIChatService {
         """
     }
 
+    /// Reads + base64-encodes the latest user message's attachments OFF the main actor
+    /// and stores the result in `attachmentSnapshot` so `buildPayload` (sync, @MainActor)
+    /// never blocks the UI on a multi-megabyte file read. Mirrors `refreshCalendarSnapshot`.
+    private func refreshAttachmentSnapshot(conversationMessages: [AIChatMessage]?) async {
+        let activeMessages = conversationMessages ?? messages
+        guard let lastUser = activeMessages.reversed().first(where: { $0.role == .user }),
+              !lastUser.attachmentFileNames.isEmpty else {
+            attachmentSnapshot = nil
+            return
+        }
+        let fileNames = lastUser.attachmentFileNames
+        let serialized = await Task.detached(priority: .userInitiated) {
+            Self.buildSerializedAttachments(fileNames: fileNames)
+        }.value
+        attachmentSnapshot = serialized.isEmpty ? nil : serialized
+    }
+
     // MARK: - Saved Prompts
 
     /// User-saved prompts, persisted to UserDefaults.
@@ -2434,7 +2455,7 @@ final class AIChatService {
 // MARK: - Request / Response Models
 
 /// Wire format for uploaded files — matches `serializedFileSchema` on the server.
-struct SerializedFilePayload: Encodable {
+struct SerializedFilePayload: Encodable, Sendable {
     let name: String
     let type: String
     let size: Int

@@ -335,12 +335,26 @@ final class CalendarViewController: DayViewController {
                 presentEditingViewForEvent(editingEvent.ekEvent)
             } else {
                 guard let store = eventStore else { return }
-                do {
-                    try store.save(editingEvent.ekEvent, span: .thisEvent)
-                } catch {
-                    AppLogger.shared.log("[CalendarViewController] Failed to save edited event: \(error)")
-                    onSaveError?(error)
+                // EKEventStore.save is a synchronous XPC call to the calendar daemon
+                // and can block the caller for seconds ("Fence Hang"). This delegate
+                // callback runs on the main thread, so hop to backgroundQueue for the
+                // save (matching how EKEventStore() init and fetches are handled in
+                // this file) and reload on main once it completes.
+                let boxedStore = SendableStoreBox(store: store)
+                let ekEvent = editingEvent.ekEvent
+                backgroundQueue.async { [weak self] in
+                    do {
+                        try boxedStore.store.save(ekEvent, span: .thisEvent)
+                        DispatchQueue.main.async { self?.reloadData() }
+                    } catch {
+                        DispatchQueue.main.async {
+                            AppLogger.shared.log("[CalendarViewController] Failed to save edited event: \(error)")
+                            self?.onSaveError?(error)
+                            self?.reloadData()
+                        }
+                    }
                 }
+                return
             }
         }
         reloadData()

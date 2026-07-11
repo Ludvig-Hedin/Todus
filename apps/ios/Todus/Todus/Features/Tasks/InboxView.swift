@@ -66,7 +66,7 @@ struct InboxView<Footer: View>: View {
                                 } onOpenDetails: {
                                     selectedTask = task
                                 }
-                                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+                                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
                             }
@@ -257,18 +257,18 @@ struct InboxView<Footer: View>: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(bucket.title)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .tracking(-0.2)
                         .foregroundStyle(.primary)
                     Text("\(count)")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundStyle(tint)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)
                         .background(tint.opacity(0.12), in: Capsule())
                 }
                 Text(bucket.subtitle)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(AppTheme.mutedText)
             }
             Spacer()
@@ -386,11 +386,11 @@ struct InboxView<Footer: View>: View {
     private func completedRow(_ task: TaskRecord) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(AppTheme.mutedText.opacity(0.7))
-                .frame(width: 24, height: 24)
+                .frame(width: 26, height: 26)
             Text(task.title)
-                .font(.system(size: 13, weight: .regular))
+                .font(.system(size: 14, weight: .regular))
                 .foregroundStyle(AppTheme.mutedText)
                 .strikethrough(color: AppTheme.mutedText.opacity(0.45))
                 .lineLimit(1)

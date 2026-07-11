@@ -19,6 +19,13 @@ final class VoiceAudioCapture: @unchecked Sendable {
 
     private var engine: AVAudioEngine?
     private var sendTimer: DispatchSourceTimer?
+    /// Set by `stop()` so a `start()` whose engine finishes booting *after* stop
+    /// tears itself down instead of publishing a live engine (mic-never-releases bug).
+    private var isStopped = false
+    /// Guards `engine` / `sendTimer` / `isStopped`. `start()` assigns these from a
+    /// background queue while `stop()` may read/nil them from another thread — without
+    /// this lock a rapid start→stop double-tap races those writes.
+    private let stateLock = NSLock()
     private var pcmBuffer = Data()
     private let pcmBufferLock = NSLock()
 
@@ -31,7 +38,11 @@ final class VoiceAudioCapture: @unchecked Sendable {
     /// off-main so the caller's UI doesn't stall (the watchdog has terminated
     /// us during cold starts before — this is intentional).
     func start() async -> SetupResult {
-        await withCheckedContinuation { cont in
+        // A fresh start clears any prior stop flag so a reused instance can boot again.
+        // `withLock` (scoped) instead of bare lock/unlock — NSLock.lock() is unavailable
+        // from async contexts.
+        stateLock.withLock { isStopped = false }
+        return await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self else {
                     cont.resume(returning: .failed("Voice capture was cancelled"))
@@ -115,18 +126,36 @@ final class VoiceAudioCapture: @unchecked Sendable {
                     ))
                     return
                 }
+                // Publish the engine + timer atomically. If stop() already ran while
+                // this engine was booting, tear it down instead of leaving a live mic.
+                self.stateLock.lock()
+                if self.isStopped {
+                    self.stateLock.unlock()
+                    input.removeTap(onBus: 0)
+                    engine.stop()
+                    cont.resume(returning: .failed("Voice capture was cancelled"))
+                    return
+                }
                 self.engine = engine
-                self.startSendTimer()
+                let timer = self.makeSendTimer()
+                self.sendTimer = timer
+                self.stateLock.unlock()
+                timer.resume()
                 cont.resume(returning: .success)
             }
         }
     }
 
     func stop() {
-        sendTimer?.cancel()
+        stateLock.lock()
+        isStopped = true
+        let timerToCancel = sendTimer
         sendTimer = nil
         let engineToStop = engine
         engine = nil
+        stateLock.unlock()
+
+        timerToCancel?.cancel()
         pcmBufferLock.lock()
         pcmBuffer = Data()
         pcmBufferLock.unlock()
@@ -140,7 +169,9 @@ final class VoiceAudioCapture: @unchecked Sendable {
         }
     }
 
-    private func startSendTimer() {
+    /// Builds the 100ms chunk-flush timer WITHOUT resuming it — the caller assigns
+    /// `sendTimer` under `stateLock` and resumes outside the lock.
+    private func makeSendTimer() -> DispatchSourceTimer {
         let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInteractive))
         timer.schedule(deadline: .now(), repeating: .milliseconds(100))
         timer.setEventHandler { [weak self] in
@@ -152,8 +183,7 @@ final class VoiceAudioCapture: @unchecked Sendable {
             guard !chunk.isEmpty else { return }
             self.onChunk?(chunk)
         }
-        timer.resume()
-        sendTimer = timer
+        return timer
     }
 }
 
