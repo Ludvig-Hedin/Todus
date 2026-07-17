@@ -1,6 +1,9 @@
 import { task, taskFolder, folderItem, aiConversation } from '../../db/schema';
 import { eq, and, desc, asc, like, sql, inArray, isNotNull, lte } from 'drizzle-orm';
+import { resolveModelFromSettings } from '../../lib/ai-model-resolver';
 import { privateProcedure, router } from '../trpc';
+import { getZeroDB } from '../../lib/server-utils';
+import { generateObject } from 'ai';
 import { createDb } from '../../db';
 import { env } from '../../env';
 import { z } from 'zod';
@@ -259,6 +262,93 @@ export const tasksRouter = router({
       } finally {
         await conn.end();
       }
+    }),
+
+  // AI-assisted inbox organization — assigns unfiled tasks to existing folders
+  // (or proposes up to two new ones). Pure suggestion endpoint: nothing is
+  // written here; the client applies accepted assignments through its normal
+  // move/create mutations.
+  organize: privateProcedure
+    .input(
+      z.object({
+        tasks: z
+          .array(
+            z.object({
+              id: z.string(),
+              title: z.string().max(500),
+              description: z.string().max(2000).optional().default(''),
+            }),
+          )
+          .min(1)
+          .max(100),
+        folders: z
+          .array(z.object({ id: z.string(), name: z.string().max(200) }))
+          .max(50),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const zeroDB = await getZeroDB(ctx.sessionUser.id);
+      const settingsRow = await zeroDB.findUserSettings();
+
+      const folderList = input.folders.map((f) => `- id=${f.id} name="${f.name}"`).join('\n');
+      const taskList = input.tasks
+        .map(
+          (t) =>
+            `- id=${t.id} title="${t.title}"${t.description ? ` description="${t.description}"` : ''}`,
+        )
+        .join('\n');
+
+      const result = await generateObject({
+        model: resolveModelFromSettings(settingsRow?.settings, env),
+        system: [
+          'You organize a personal to-do inbox into folders.',
+          'For each task, pick the best-fitting existing folder id, or — only when no existing folder fits and several tasks share an obvious theme — propose a short new folder name (1-2 words, in the language the tasks are written in).',
+          'Propose at most 2 distinct new folder names across the whole batch.',
+          'If a task fits nothing confidently, return folderId=null and newFolderName=null so it stays in the inbox.',
+          'Never invent folder ids. Return exactly one assignment per task id.',
+        ].join(' '),
+        prompt: `Existing folders:\n${folderList || '(none)'}\n\nUnfiled tasks:\n${taskList}`,
+        schema: z.object({
+          assignments: z.array(
+            z.object({
+              taskId: z.string(),
+              folderId: z.string().nullable(),
+              newFolderName: z.string().nullable(),
+            }),
+          ),
+        }),
+        output: 'object',
+      });
+
+      // Sanitize: unknown folder ids are dropped, new-folder proposals clamped
+      // to the 2 most common names, one assignment per known task id.
+      const knownFolderIds = new Set(input.folders.map((f) => f.id));
+      const knownTaskIds = new Set(input.tasks.map((t) => t.id));
+      const newNameCounts = new Map<string, number>();
+      for (const a of result.object.assignments) {
+        const name = a.newFolderName?.trim();
+        if (name && !a.folderId) {
+          newNameCounts.set(name, (newNameCounts.get(name) ?? 0) + 1);
+        }
+      }
+      const allowedNewNames = new Set(
+        [...newNameCounts.entries()]
+          .sort((x, y) => y[1] - x[1])
+          .slice(0, 2)
+          .map(([name]) => name),
+      );
+
+      const seen = new Set<string>();
+      const assignments = result.object.assignments
+        .filter((a) => knownTaskIds.has(a.taskId) && !seen.has(a.taskId) && seen.add(a.taskId))
+        .map((a) => {
+          const folderId = a.folderId && knownFolderIds.has(a.folderId) ? a.folderId : null;
+          const trimmed = a.newFolderName?.trim() ?? null;
+          const newFolderName = !folderId && trimmed && allowedNewNames.has(trimmed) ? trimmed : null;
+          return { taskId: a.taskId, folderId, newFolderName };
+        });
+
+      return { assignments };
     }),
 });
 

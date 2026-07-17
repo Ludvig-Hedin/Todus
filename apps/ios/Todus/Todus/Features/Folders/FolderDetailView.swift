@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 /// Mixed-type detail view for a single folder. Rendered when the user taps
 /// a folder card on Home or the Tasks page.
@@ -17,6 +18,7 @@ struct FolderDetailView: View {
     @State private var showEditSheet = false
     @State private var showAddSheet = false
     @State private var showDeleteConfirm = false
+    @State private var isInboxDropTargeted = false
 
     private var accent: Color {
         if let hex = folder.colorHex, !hex.isEmpty {
@@ -223,10 +225,61 @@ struct FolderDetailView: View {
             .padding(.top, 40)
         } else {
             VStack(spacing: 8) {
+                if items.contains(where: { $0.kind == .task }) {
+                    inboxDropStrip
+                }
                 ForEach(visible) { item in
-                    FolderContentRow(item: item, accent: accent)
+                    if case .task(let task) = item {
+                        // Draggable out of the folder — drop on the strip above
+                        // to move the task back to the inbox.
+                        FolderContentRow(item: item, accent: accent)
+                            .draggable(task.id.uuidString)
+                    } else {
+                        FolderContentRow(item: item, accent: accent)
+                    }
                 }
             }
+        }
+    }
+
+    /// Drop target for dragging a task out of this folder back to the inbox.
+    /// Only rendered when the folder actually contains tasks.
+    private var inboxDropStrip: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "tray.and.arrow.up")
+                .font(.system(size: 13, weight: .semibold))
+            Text(isInboxDropTargeted ? "Release to move to Inbox" : "Drag a task here to move it back to Inbox")
+                .font(.system(size: 12, weight: .medium))
+            Spacer()
+        }
+        .foregroundStyle(isInboxDropTargeted ? accent : AppTheme.mutedText)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
+                .fill(isInboxDropTargeted ? accent.opacity(0.10) : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
+                .strokeBorder(
+                    isInboxDropTargeted ? accent : AppTheme.cardBorder,
+                    style: StrokeStyle(lineWidth: isInboxDropTargeted ? 1.5 : 1, dash: [5, 4])
+                )
+        )
+        .animation(AppTheme.Motion.fast, value: isInboxDropTargeted)
+        .dropDestination(for: String.self) { droppedItems, _ in
+            guard
+                let payload = droppedItems.first,
+                let taskID = UUID(uuidString: payload)
+            else { return false }
+            let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID })
+            guard let task = try? modelContext.fetch(descriptor).first, task.folder != nil else { return false }
+            services.captureService.move(task, to: nil, in: modelContext)
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            Task { await load() }
+            return true
+        } isTargeted: { targeting in
+            isInboxDropTargeted = targeting
         }
     }
 

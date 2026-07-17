@@ -88,6 +88,8 @@
 		5E23A87138D76B1101D76C76 /* NotificationCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11622A2189A970DECE5C542C /* NotificationCenterView.swift */; };
 		5F0187072D5F5E605363FDE0 /* ModelDownloadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4554A8F57B978E3BC806FA07 /* ModelDownloadService.swift */; };
 		62B7AF22C16D289F5DD7A168 /* TaskRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA4DC21FEF1420D4009595C4 /* TaskRowView.swift */; };
+		A11C0DE000000000000000B1 /* TaskOrganizeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0DE000000000000000A1 /* TaskOrganizeService.swift */; };
+		A11C0DE000000000000000B2 /* OrganizeReviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0DE000000000000000A2 /* OrganizeReviewSheet.swift */; };
 		62C8FF4A57AD22A6AE28C9A1 /* TodosApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D837D4D5B5A51B1720E6FD22 /* TodosApp.swift */; };
 		6344933A085BDE548D4D38BF /* TodosAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E9B87404CFFB558F706EFD2 /* TodosAPIClient.swift */; };
 		65C2E70539C3A4BC78838C4F /* ChatUISpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4E63434C6EBCA9F4070FB0C /* ChatUISpec.swift */; };
@@ -413,6 +415,8 @@
 		C86B9712A2D657354559E36B /* TabBarOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabBarOnboardingView.swift; sourceTree = "<group>"; };
 		C96CE3CD9C7618CB3B765B0C /* TaskDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDetailSheet.swift; sourceTree = "<group>"; };
 		CA4DC21FEF1420D4009595C4 /* TaskRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskRowView.swift; sourceTree = "<group>"; };
+		A11C0DE000000000000000A1 /* TaskOrganizeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskOrganizeService.swift; sourceTree = "<group>"; };
+		A11C0DE000000000000000A2 /* OrganizeReviewSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrganizeReviewSheet.swift; sourceTree = "<group>"; };
 		CBCCEB4BDF41611906248F96 /* LocalTaskParsingServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalTaskParsingServiceTests.swift; sourceTree = "<group>"; };
 		E1CEE0611A784E9FE4BC844F /* SnoozeOptionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnoozeOptionTests.swift; sourceTree = "<group>"; };
 		CBE0EAB595D1C5E93BB868B0 /* TaskStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskStatus.swift; sourceTree = "<group>"; };
@@ -1009,6 +1013,7 @@
 				88350A1CC7D8CB464C62F81C /* SupabaseSyncService.swift */,
 				7ED9B5FEADD2CD0E19882F17 /* SyncService.swift */,
 				3C4426FFB04E56E648F3B5E1 /* TaskCaptureService.swift */,
+				A11C0DE000000000000000A1 /* TaskOrganizeService.swift */,
 			);
 			path = Tasks;
 			sourceTree = "<group>";
@@ -1036,6 +1041,7 @@
 				8BE81EF0B7F98A23F59343C0 /* InboxView.swift */,
 				C96CE3CD9C7618CB3B765B0C /* TaskDetailSheet.swift */,
 				CA4DC21FEF1420D4009595C4 /* TaskRowView.swift */,
+				A11C0DE000000000000000A2 /* OrganizeReviewSheet.swift */,
 				AEC29F3D28A6879176EAC2F8 /* TasksTabView.swift */,
 				AA716E1C8C741C7BEC56217B /* TaskTableView.swift */,
 			);
@@ -1469,6 +1475,8 @@
 				99BAF431506F436515B7DA84 /* TabBarCustomizationView.swift in Sources */,
 				C9C3E398D3BE7CAF56B2EDC8 /* TabBarOnboardingView.swift in Sources */,
 				5C0CB538215740C38894DF22 /* TaskCaptureService.swift in Sources */,
+				A11C0DE000000000000000B1 /* TaskOrganizeService.swift in Sources */,
+				A11C0DE000000000000000B2 /* OrganizeReviewSheet.swift in Sources */,
 				8AF29C77DCA819CCEA783F08 /* TaskDetailSheet.swift in Sources */,
 				B62EF103200A90D6AFDBE367 /* TaskParserModels.swift in Sources */,
 				2258CD2AFF4BBC217CD30FCA /* TaskParsingService.swift in Sources */,

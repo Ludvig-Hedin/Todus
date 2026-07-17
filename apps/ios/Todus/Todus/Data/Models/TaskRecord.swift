@@ -34,6 +34,10 @@ final class TaskRecord: Identifiable {
     var parseStateRawValue: String
     var syncStateRawValue: String
     var folder: FolderRecord?
+    /// AI folder suggestion for a freshly captured, unfiled task. Local-only UX
+    /// state (not synced): set once after enrichment, cleared on accept/dismiss,
+    /// never re-suggested.
+    var suggestedFolderID: UUID?
 
     init(
         id: UUID = UUID(),

@@ -66,7 +66,7 @@ struct InboxView<Footer: View>: View {
                                 } onOpenDetails: {
                                     selectedTask = task
                                 }
-                                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                                .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
                             }
@@ -81,7 +81,7 @@ struct InboxView<Footer: View>: View {
                             } onOpenDetails: {
                                 selectedTask = task
                             }
-                            .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+                            .listRowInsets(EdgeInsets(top: 5, leading: 0, bottom: 5, trailing: 0))
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                         }

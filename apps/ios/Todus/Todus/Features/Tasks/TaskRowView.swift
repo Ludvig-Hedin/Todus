@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import UIKit
 
 struct TaskRowView: View {
@@ -19,13 +20,13 @@ struct TaskRowView: View {
         Button {
             onOpenDetails()
         } label: {
-            HStack(alignment: .center, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
                 // Checkbox — isolated tap target, vertically centered with the text block.
-                // Frame stays 44×44 for the HIG minimum hit area; only the glyph size
+                // Frame stays 40×40 for the HIG minimum hit area; only the glyph size
                 // changes.
                 Button(action: { toggleCheckbox() }) {
                     Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 21, weight: .medium))
+                        .font(.system(size: 23, weight: .medium))
                         .foregroundStyle(task.completed ? task.status.tintColor : AppTheme.subtleText)
                 }
                 .buttonStyle(.plain)
@@ -69,14 +70,20 @@ struct TaskRowView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                        statusTag(status: task.status)
+                        // The default "Todo" pill carried zero information and
+                        // repeated on every row — pure noise. Status renders
+                        // only for non-default states. (Tasks UX overhaul.)
+                        if task.status != .todo {
+                            statusTag(status: task.status)
+                        }
                     }
 
                     metaChipsRow
+                    suggestionChipRow
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -86,6 +93,11 @@ struct TaskRowView: View {
                 .stroke(AppTheme.rowStroke, lineWidth: 0.5)
         )
         .contentShape(Rectangle())
+        // Long-press-and-move drags the task onto a folder card (Tasks tab
+        // footer) or the Inbox strip (folder detail). Payload is the task UUID
+        // string; drop targets validate it. Coexists with the context menu:
+        // hold shows the menu, hold-and-move starts the drag.
+        .draggable(task.id.uuidString)
         .contextMenu {
             Button {
                 onOpenDetails()
@@ -247,6 +259,42 @@ struct TaskRowView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Folder suggestion chip (accept / dismiss)
+
+    /// Quiet AI suggestion for unfiled captures: "→ Work  ✓ ✕". Rendered only
+    /// while `suggestedFolderID` is set and the task is still unfiled. Accept
+    /// moves the task; dismiss clears the suggestion for good.
+    @ViewBuilder
+    private var suggestionChipRow: some View {
+        // Folder name resolved synchronously (one fetch by unique id, and only
+        // for rows that carry a suggestion). An async `.task` fetch inside the
+        // chip never fired: the chip rendered EmptyView until the name loaded,
+        // and SwiftUI doesn't run task/onAppear modifiers on EmptyView.
+        if task.folder == nil,
+           let suggestedID = task.suggestedFolderID,
+           let folderName = folderName(for: suggestedID) {
+            TaskFolderSuggestionChip(
+                folderName: folderName,
+                onAccept: {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(AppTheme.Motion.base) {
+                        services.captureService.acceptSuggestion(for: task, in: modelContext)
+                    }
+                },
+                onDismiss: {
+                    withAnimation(AppTheme.Motion.fast) {
+                        services.captureService.dismissSuggestion(for: task, in: modelContext)
+                    }
+                }
+            )
+        }
+    }
+
+    private func folderName(for id: UUID) -> String? {
+        let descriptor = FetchDescriptor<FolderRecord>(predicate: #Predicate { $0.id == id })
+        return (try? modelContext.fetch(descriptor).first)?.name
     }
 
     // MARK: - Email-origin Tag (rebuilds trust when AI extracted the task)
@@ -426,6 +474,54 @@ struct TaskRowView: View {
         case .low:    return Color(red: 0.50, green: 0.60, blue: 0.70)
         default:      return AppTheme.mutedText
         }
+    }
+}
+
+/// The "→ Folder ✓ ✕" suggestion chip. Pure presentation — the parent
+/// resolves the folder name so this never renders empty.
+private struct TaskFolderSuggestionChip: View {
+    let folderName: String
+    let onAccept: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: "sparkle")
+                    .font(.system(size: 9, weight: .semibold))
+                Text("Move to \(folderName)?")
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(-0.1)
+                    .lineLimit(1)
+            }
+            .foregroundStyle(AppTheme.secondaryAccent)
+
+            Button(action: onAccept) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(AppTheme.secondaryAccent)
+                    .frame(width: 26, height: 22)
+                    .background(AppTheme.secondaryAccent.opacity(0.14), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Move to \(folderName)")
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(AppTheme.mutedText)
+                    .frame(width: 26, height: 22)
+                    .background(AppTheme.surfaceSecondary.opacity(0.7), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss suggestion")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(AppTheme.secondaryAccent.opacity(0.07), in: Capsule())
+        .overlay(
+            Capsule().stroke(AppTheme.secondaryAccent.opacity(0.15), lineWidth: 0.5)
+        )
     }
 }
 

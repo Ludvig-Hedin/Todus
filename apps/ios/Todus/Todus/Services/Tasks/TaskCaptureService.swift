@@ -10,7 +10,9 @@ final class TaskCaptureService {
     private let authStore: AuthSessionStore
     private let remindersSyncService: AppleRemindersSyncService
     private let remindersSyncState: RemindersSyncState
-    private let apiClient: TodosAPIClient
+    /// Internal (not private) so the organize extension in
+    /// `TaskOrganizeService.swift` can reach the backend.
+    let apiClient: TodosAPIClient
     /// Offline mutation queue for folder create/update/delete operations.
     /// Shared with AppServices so all folder mutations flow through one queue.
     let folderSyncService: FolderSyncService
@@ -667,6 +669,14 @@ final class TaskCaptureService {
             // Schedule notification if enrichment applied a new due date
             if appliedNewDueDate {
                 scheduleNotificationIfNeeded(task)
+            }
+
+            // Quiet folder suggestion for unfiled captures — one shot, chip UX,
+            // never moves anything itself. Runs BEFORE the sync enqueue: the
+            // suggestion is local UX and must not wait on (or be lost to) a
+            // slow/failed network round-trip. (Tasks UX overhaul, 2026-07-17.)
+            if task.folder == nil {
+                await suggestFolder(for: task, in: context)
             }
 
             let mutation = SyncMutation(action: .upsert, task: task.asPayload(), taskID: task.id)

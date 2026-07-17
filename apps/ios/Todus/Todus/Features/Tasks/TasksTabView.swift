@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 /// The Tasks tab — extracted from the original MiniTaskApp RootView.
 /// Contains the view mode picker, folder strip, search bar, and task list/board/table/calendar views.
@@ -19,6 +20,7 @@ struct TasksTabView: View {
     @State private var pendingTaskRecord: TaskRecord?
     @State private var selectedFolder: FolderRecord?
     @State private var showFolderEditSheet = false
+    @State private var showOrganizeSheet = false
     @State private var showClearCompletedConfirm = false
     @State private var folderToDelete: FolderRecord?
     @Namespace private var taskViewModeSegmentNamespace
@@ -178,6 +180,11 @@ struct TasksTabView: View {
         }
         .sheet(isPresented: $showFolderEditSheet) {
             FolderEditSheet(mode: .create)
+                .appSheetBackground()
+        }
+        .sheet(isPresented: $showOrganizeSheet) {
+            OrganizeReviewSheet()
+                .presentationDragIndicator(.visible)
                 .appSheetBackground()
         }
         // Header ellipsis menu actions
@@ -397,6 +404,26 @@ struct TasksTabView: View {
 
             Divider().frame(height: 10)
 
+            // AI + rules inbox cleanup. Opens a review sheet — nothing moves
+            // without an explicit Apply. (Tasks UX overhaul.)
+            Button {
+                showOrganizeSheet = true
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Organize")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundStyle(AppTheme.secondaryAccent)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(AppTheme.secondaryAccent.opacity(0.10), in: Capsule())
+                .minTouchTarget()
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Auto-organize tasks into folders")
+
             Menu {
                 ForEach(TaskSortOrder.allCases) { order in
                     Button {
@@ -451,23 +478,10 @@ struct TasksTabView: View {
             }
             LazyVGrid(columns: columns, spacing: 12) {
                 ForEach(folders) { folder in
-                    Button {
+                    DroppableFolderCard(folder: folder) {
                         selectedFolder = folder
-                    } label: {
-                        FolderCardView(folder: folder, layout: .grid)
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        Button {
-                            selectedFolder = folder
-                        } label: {
-                            Label("Open", systemImage: "arrow.up.right.square")
-                        }
-                        Button(role: .destructive) {
-                            folderToDelete = folder
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
+                    } onDelete: {
+                        folderToDelete = folder
                     }
                 }
                 NewFolderCard(layout: .grid) {
@@ -478,5 +492,63 @@ struct TasksTabView: View {
         .padding(.horizontal, 6)
         .padding(.top, 24)
         .padding(.bottom, 8)
+    }
+}
+
+/// Folder card that accepts a dragged task (UUID-string payload from
+/// `TaskRowView`'s `.draggable`) and moves it into the folder on drop.
+/// Highlights with the folder accent while a drag hovers over it.
+private struct DroppableFolderCard: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(AppServices.self) private var services
+
+    let folder: FolderRecord
+    let onOpen: () -> Void
+    let onDelete: () -> Void
+
+    @State private var isTargeted = false
+
+    private var accent: Color {
+        if let hex = folder.colorHex, !hex.isEmpty {
+            return Color(hex: hex)
+        }
+        return AppTheme.subtleText
+    }
+
+    var body: some View {
+        Button(action: onOpen) {
+            FolderCardView(folder: folder, layout: .grid)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button(action: onOpen) {
+                Label("Open", systemImage: "arrow.up.right.square")
+            }
+            Button(role: .destructive, action: onDelete) {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
+                .stroke(accent, lineWidth: isTargeted ? 2 : 0)
+        )
+        .scaleEffect(isTargeted ? 1.03 : 1.0)
+        .animation(AppTheme.Motion.fast, value: isTargeted)
+        .dropDestination(for: String.self) { items, _ in
+            guard
+                let payload = items.first,
+                let taskID = UUID(uuidString: payload)
+            else { return false }
+            let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID })
+            guard let task = try? modelContext.fetch(descriptor).first else { return false }
+            task.suggestedFolderID = nil
+            withAnimation(AppTheme.Motion.base) {
+                services.captureService.move(task, to: folder, in: modelContext)
+            }
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            return true
+        } isTargeted: { targeting in
+            isTargeted = targeting
+        }
     }
 }
