@@ -460,18 +460,30 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
                         predicate: #Predicate { task in task.id == taskID }
                     )
                     if let task = (try? context.fetch(descriptor))?.first {
-                        task.completed = true
-                        task.status = .done
-                        task.updatedAt = .now
-                        do {
-                            try context.save()
-                        } catch {
-                            AppLogger.shared.log(
-                                "[TodosApp] Failed to save task completion from notification: \(error.localizedDescription)"
-                            )
-                            // Surface to next app open so the user knows the toggle didn't stick.
-                            self.services?.pendingNotificationActionError =
-                                "Couldn't mark task complete from notification — please retry."
+                        if let captureService = self.services?.captureService {
+                            // Route through the capture service so the completion gets a
+                            // syncState, a server enqueue, and the Reminders mirror — the
+                            // previous direct completed/status write here bypassed all
+                            // three, so the task stayed open on web/macOS/Reminders and
+                            // could be resurrected by the next server pull. (TD-06)
+                            captureService.setStatus(task, status: .done, in: context)
+                        } else {
+                            // Services not wired yet (container is assigned just before
+                            // services in deferred init) — fall back to the local-only
+                            // write so the action still completes the task on-device.
+                            task.completed = true
+                            task.status = .done
+                            task.updatedAt = .now
+                            do {
+                                try context.save()
+                            } catch {
+                                AppLogger.shared.log(
+                                    "[TodosApp] Failed to save task completion from notification: \(error.localizedDescription)"
+                                )
+                                // Surface to next app open so the user knows the toggle didn't stick.
+                                self.services?.pendingNotificationActionError =
+                                    "Couldn't mark task complete from notification — please retry."
+                            }
                         }
                     }
                 }

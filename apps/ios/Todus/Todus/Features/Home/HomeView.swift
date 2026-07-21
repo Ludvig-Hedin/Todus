@@ -363,14 +363,14 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 Text(greeting)
-                    .font(.system(size: 26, weight: .bold))
+                    .scaledFont(size: 26, weight: .bold)
                     .foregroundStyle(.primary)
                 if isAssistantBriefingRefreshing {
                     InlineRefreshBadge()
                 }
             }
             Text(Date.now, format: .dateTime.weekday(.wide).month(.wide).day())
-                .font(.system(size: 13, weight: .medium))
+                .scaledFont(size: 13, weight: .medium)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -397,7 +397,7 @@ struct HomeView: View {
     private var setupChecklist: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Finish setting up")
-                .font(.system(size: 15, weight: .semibold))
+                .scaledFont(size: 15, weight: .semibold)
                 .foregroundStyle(.primary)
 
             VStack(spacing: 8) {
@@ -444,24 +444,24 @@ struct HomeView: View {
         Button(action: action) {
             HStack(spacing: 12) {
                 Image(systemName: icon)
-                    .font(.system(size: 15, weight: .semibold))
+                    .scaledFont(size: 15, weight: .semibold)
                     .foregroundStyle(AppTheme.accent)
                     .frame(width: 28, height: 28)
                     .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.system(size: 14, weight: .semibold))
+                        .scaledFont(size: 14, weight: .semibold)
                         .foregroundStyle(.primary)
                     Text(subtitle)
-                        .font(.system(size: 12))
+                        .scaledFont(size: 12)
                         .foregroundStyle(.secondary)
                 }
 
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
+                    .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                     .foregroundStyle(AppTheme.mutedText)
             }
             .contentShape(Rectangle())
@@ -594,7 +594,7 @@ struct HomeView: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Text("Today")
-                    .font(.system(size: 13, weight: .semibold))
+                    .scaledFont(size: 13, weight: .semibold)
                     .foregroundStyle(.secondary)
                     .textCase(.uppercase)
                     .tracking(0.5)
@@ -603,7 +603,7 @@ struct HomeView: View {
                     Button("See all in Mail") {
                         services.navigateTo = .email
                     }
-                    .font(.system(size: 12, weight: .semibold))
+                    .scaledFont(size: 12, weight: .semibold)
                     .foregroundStyle(AppTheme.accent)
                 }
             }
@@ -617,10 +617,10 @@ struct HomeView: View {
             } else if items.isEmpty {
                 HStack(spacing: 10) {
                     Image(systemName: "checkmark.seal")
-                        .font(.system(size: 16, weight: .regular))
+                        .scaledFont(size: 16, weight: .regular)
                         .foregroundStyle(AppTheme.mutedText)
                     Text("You're caught up.")
-                        .font(.system(size: 14))
+                        .scaledFont(size: 14)
                         .foregroundStyle(.secondary)
                     Spacer()
                 }
@@ -683,7 +683,7 @@ struct HomeView: View {
         } label: {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: glyph(for: item.display.badge))
-                    .font(.system(size: 16, weight: .semibold))
+                    .scaledFont(size: 16, weight: .semibold)
                     .foregroundStyle(item.display.badge == .draft || item.display.badge == .reply
                                     ? AppTheme.accent : AppTheme.mutedText)
                     .frame(width: 24, height: 24, alignment: .center)
@@ -691,14 +691,14 @@ struct HomeView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(primary)
-                        .font(.system(size: 15, weight: .semibold))
+                        .scaledFont(size: 15, weight: .semibold)
                         .foregroundStyle(.primary)
                         .multilineTextAlignment(.leading)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                     if !meta.isEmpty {
                         Text(meta)
-                            .font(.system(size: 12))
+                            .scaledFont(size: 12)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
@@ -710,7 +710,7 @@ struct HomeView: View {
                     briefingRowActionMenu(for: item)
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.system(size: 14, weight: .semibold))
+                        .scaledFont(size: 14, weight: .semibold)
                         .foregroundStyle(AppTheme.mutedText)
                         .frame(width: 32, height: 32)
                         .contentShape(Rectangle())
@@ -959,17 +959,17 @@ struct HomeView: View {
             // Day header strip
             HStack(spacing: 5) {
                 Text(section.dayName)
-                    .font(.system(size: 12, weight: .bold))
+                    .scaledFont(size: 12, weight: .bold)
                     .foregroundStyle(section.isToday ? AppTheme.accent : .secondary)
                 Text("·")
-                    .font(.system(size: 12))
+                    .scaledFont(size: 12)
                     .foregroundStyle(.tertiary)
                 Text(section.shortDate)
-                    .font(.system(size: 12, weight: .medium))
+                    .scaledFont(size: 12, weight: .medium)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text("\(section.items.count)")
-                    .font(.system(size: 11, weight: .semibold))
+                    .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 12)
@@ -1004,15 +1004,15 @@ struct HomeView: View {
                         .frame(width: 8, height: 8)
                         .padding(.leading, 4)
                     Text(event.title)
-                        .font(.system(size: 14, weight: .medium))
+                        .scaledFont(size: 14, weight: .medium)
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                     Spacer()
                     Text(event.isAllDay ? "All day" : event.startDate.formatted(.dateTime.hour().minute()))
-                        .font(.system(size: 13))
+                        .scaledFont(size: 13)
                         .foregroundStyle(.secondary)
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
+                        .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                         .foregroundStyle(.tertiary)
                 }
                 .padding(.horizontal, 12)
@@ -1034,12 +1034,12 @@ struct HomeView: View {
                         .frame(width: 8, height: 8)
                         .padding(.leading, 4)
                     Text(task.title)
-                        .font(.system(size: 14, weight: .medium))
+                        .scaledFont(size: 14, weight: .medium)
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                     Spacer()
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
+                        .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                         .foregroundStyle(.tertiary)
                 }
                 .padding(.horizontal, 12)
@@ -1126,21 +1126,21 @@ struct HomeView: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     HStack(alignment: .firstTextBaseline) {
                                         Text(thread.from.name)
-                                            .font(.system(size: 14, weight: thread.unread ? .bold : .medium))
+                                            .scaledFont(size: 14, weight: thread.unread ? .bold : .medium)
                                             .lineLimit(1)
                                             .foregroundStyle(.primary)
                                         Spacer()
                                         Text(emailTimeLabel(thread.date))
-                                            .font(.system(size: 12))
+                                            .scaledFont(size: 12)
                                             .foregroundStyle(.secondary)
                                     }
                                     Text(thread.subject)
-                                        .font(.system(size: 13, weight: thread.unread ? .semibold : .medium))
+                                        .scaledFont(size: 13, weight: thread.unread ? .semibold : .medium)
                                         .lineLimit(1)
                                         .foregroundStyle(.primary.opacity(0.85))
                                     if !thread.snippet.isEmpty {
                                         Text(thread.snippet)
-                                            .font(.system(size: 12))
+                                            .scaledFont(size: 12)
                                             .lineLimit(2)
                                             .foregroundStyle(.secondary)
                                     }
@@ -1208,10 +1208,10 @@ struct HomeView: View {
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: services.meetingsService.isSyncing ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
-                            .font(.system(size: 14, weight: .semibold))
+                            .scaledFont(size: 14, weight: .semibold)
                             .foregroundStyle(AppTheme.subtleText)
                         Text(services.meetingsService.isSyncing ? "Syncing calendar…" : "Sync Google Calendar to import meetings")
-                            .font(.system(size: 13, weight: .medium))
+                            .scaledFont(size: 13, weight: .medium)
                             .foregroundStyle(AppTheme.subtleText)
                             .multilineTextAlignment(.leading)
                         Spacer(minLength: 0)
@@ -1244,18 +1244,18 @@ struct HomeView: View {
     private func homeMeetingRow(_ meeting: MeetingItem) -> some View {
         HStack(spacing: 12) {
             Image(systemName: homeMeetingStatusIcon(meeting.status))
-                .font(.system(size: 13, weight: .medium))
+                .scaledFont(size: 13, weight: .medium)
                 .foregroundStyle(homeMeetingStatusColor(meeting.status))
                 .frame(width: 28, height: 28)
                 .background(homeMeetingStatusColor(meeting.status).opacity(0.12), in: Circle())
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(meeting.title)
-                    .font(.system(size: 14, weight: .medium))
+                    .scaledFont(size: 14, weight: .medium)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 Text(meeting.startsAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.system(size: 12))
+                    .scaledFont(size: 12)
                     .foregroundStyle(.secondary)
             }
 
@@ -1263,12 +1263,12 @@ struct HomeView: View {
 
             if meeting.aiSummary != nil {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 11))
+                    .scaledFont(size: 11, relativeTo: .caption2)
                     .foregroundStyle(.secondary.opacity(0.5))
             }
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .semibold))
+                .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                 .foregroundStyle(.tertiary)
         }
         .padding(12)
@@ -1326,10 +1326,10 @@ struct HomeView: View {
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "folder.badge.plus")
-                            .font(.system(size: 14, weight: .semibold))
+                            .scaledFont(size: 14, weight: .semibold)
                             .foregroundStyle(AppTheme.subtleText)
                         Text("Create your first folder to group emails, tasks, chats, and events.")
-                            .font(.system(size: 13, weight: .medium))
+                            .scaledFont(size: 13, weight: .medium)
                             .foregroundStyle(AppTheme.subtleText)
                             .multilineTextAlignment(.leading)
                         Spacer(minLength: 0)
@@ -1384,14 +1384,14 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Image(systemName: "square.grid.2x2")
-                        .font(.system(size: 14, weight: .semibold))
+                        .scaledFont(size: 14, weight: .semibold)
                         .foregroundStyle(.secondary)
                     Text("More pages")
-                        .font(.system(size: 15, weight: .semibold))
+                        .scaledFont(size: 15, weight: .semibold)
                 }
 
                 Text("Places outside the main tab bar")
-                    .font(.system(size: 12, weight: .medium))
+                    .scaledFont(size: 12, weight: .medium)
                     .foregroundStyle(.secondary)
             }
 
@@ -1447,7 +1447,7 @@ struct HomeView: View {
     ) -> some View {
         HStack(spacing: 14) {
             Image(systemName: icon)
-                .font(.system(size: 18, weight: .medium))
+                .scaledFont(size: 18, weight: .medium)
                 .foregroundStyle(isSecondary ? AppTheme.mutedText : .primary)
                 .frame(width: 36, height: 36)
                 .background(
@@ -1457,17 +1457,17 @@ struct HomeView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .scaledFont(size: 15, weight: .semibold)
                     .foregroundStyle(isSecondary ? Color.primary.opacity(0.82) : Color.primary)
                 Text(subtitle)
-                    .font(.system(size: 13))
+                    .scaledFont(size: 13)
                     .foregroundStyle(.secondary)
             }
 
             Spacer()
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
+                .scaledFont(size: 12, weight: .semibold)
                 .foregroundStyle(AppTheme.mutedText)
         }
         .padding(14)
@@ -1497,17 +1497,17 @@ struct HomeView: View {
     ) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
+                .scaledFont(size: 14, weight: .semibold)
                 .foregroundStyle(.secondary)
                 // Decorative — the adjacent title already labels the section.
                 // Without this, SF Symbols leak their system VoiceOver names
                 // ("Get Mail", "Facetime Video Call", "Move") onto the header.
                 .accessibilityHidden(true)
             Text(title)
-                .font(.system(size: 15, weight: .semibold))
+                .scaledFont(size: 15, weight: .semibold)
             if count > 0 {
                 Text("\(count)")
-                    .font(.system(size: 12, weight: .bold))
+                    .scaledFont(size: 12, weight: .bold)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
@@ -1518,15 +1518,20 @@ struct HomeView: View {
             }
             Spacer()
 
+            // Text link renders at ~14pt tall — grow the hit area to the HIG
+            // 44pt minimum without changing the glyph size. The row already
+            // holds a 44pt sibling (the add button), so no layout shift. (TD-18)
             Button(actionTitle, action: onOpen)
-                .font(.system(size: 12, weight: .semibold))
+                .scaledFont(size: 12, weight: .semibold)
                 .foregroundStyle(AppTheme.accent)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
 
             // Trailing action — creates a new item in this category (or, for
             // sections that pass a custom `addIcon`, runs that action instead).
             Button(action: onAdd) {
                 Image(systemName: addIcon)
-                    .font(.system(size: 13, weight: .semibold))
+                    .scaledFont(size: 13, weight: .semibold)
                     .foregroundStyle(.secondary)
                     .frame(width: 28, height: 28)
                     .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous))
@@ -1537,6 +1542,9 @@ struct HomeView: View {
             }
             .buttonStyle(.plain)
             .minTouchTarget()
+            // Icon-only control — without a label VoiceOver reads the raw SF
+            // Symbol name ("Add", "Clockwise Arrow"). (TD-12)
+            .accessibilityLabel(addIcon == "plus" ? "Add to \(title)" : "Sync \(title)")
         }
     }
 
@@ -1550,11 +1558,11 @@ struct HomeView: View {
         } label: {
             VStack(spacing: 8) {
                 Text(message)
-                    .font(.system(size: 14))
+                    .scaledFont(size: 14)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                 Text(actionTitle)
-                    .font(.system(size: 13, weight: .semibold))
+                    .scaledFont(size: 13, weight: .semibold)
                     .foregroundStyle(AppTheme.accent)
             }
             .frame(maxWidth: .infinity)
@@ -1575,12 +1583,12 @@ struct HomeView: View {
             HStack {
                 Spacer()
                 Text(message)
-                    .font(.system(size: 14))
+                    .scaledFont(size: 14)
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
+                    .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                     .foregroundStyle(.quaternary)
             }
             .padding(20)
@@ -1607,21 +1615,21 @@ struct HomeView: View {
     private var briefingFailureCard: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "exclamationmark.bubble")
-                .font(.system(size: 16, weight: .regular))
+                .scaledFont(size: 16, weight: .regular)
                 .foregroundStyle(.secondary)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Couldn't prep your day.")
-                    .font(.system(size: 14, weight: .semibold))
+                    .scaledFont(size: 14, weight: .semibold)
                 Text("Your calendar and inbox below are still live — tap retry to try the AI summary again.")
-                    .font(.system(size: 12))
+                    .scaledFont(size: 12)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button {
                     Task { await retryBriefing() }
                 } label: {
                     Text("Retry")
-                        .font(.system(size: 13, weight: .semibold))
+                        .scaledFont(size: 13, weight: .semibold)
                         .foregroundStyle(AppTheme.accent)
                         .padding(.top, 2)
                 }
@@ -1840,7 +1848,7 @@ private struct ProgressiveLoadingRow: View {
                 .controlSize(.regular)
                 .frame(width: spinnerSize, height: spinnerSize)
             Text(displayMessage)
-                .font(.system(size: 13, weight: .medium))
+                .scaledFont(size: 13, weight: .medium)
                 .foregroundStyle(.secondary)
                 .animation(.easeInOut(duration: 0.25), value: hasReassured)
             Spacer()

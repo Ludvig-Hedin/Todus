@@ -1,4 +1,3 @@
-import Combine
 import SwiftUI
 
 /// Reusable 24-hour time grid with positioned event blocks.
@@ -15,12 +14,6 @@ struct CalendarTimeGridView: View {
 
     private let gutterWidth: CGFloat = 50
     private var totalHeight: CGFloat { 24 * hourHeight }
-
-    @State private var now = Date()
-    /// Explicit Combine subscription so multi-day pages don't leak a Timer per
-    /// page once the user swipes away. Subscribed in `.onAppear`, cancelled in
-    /// `.onDisappear`.
-    @State private var timerCancellable: AnyCancellable?
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -52,8 +45,10 @@ struct CalendarTimeGridView: View {
                         // Now line spans the full content area (all columns), with
                         // a red dot placed at the start of today's column.
                         if let todayIndex = todayColumnIndex {
-                            nowIndicator(todayColumnIndex: todayIndex,
-                                         totalColumns: columns.count)
+                            NowIndicatorView(todayColumnIndex: todayIndex,
+                                             totalColumns: columns.count,
+                                             hourHeight: hourHeight,
+                                             totalHeight: totalHeight)
                         }
                     }
                 }
@@ -67,18 +62,6 @@ struct CalendarTimeGridView: View {
             }
             .onAppear {
                 proxy.scrollTo("scroll-anchor-7am", anchor: .top)
-                // Start a single 60-second tick. Storing the cancellable lets
-                // `.onDisappear` tear it down — otherwise each MultiDay page
-                // would leak its own timer.
-                if timerCancellable == nil {
-                    timerCancellable = Timer.publish(every: 60, on: .main, in: .common)
-                        .autoconnect()
-                        .sink { _ in now = Date() }
-                }
-            }
-            .onDisappear {
-                timerCancellable?.cancel()
-                timerCancellable = nil
             }
         }
     }
@@ -178,40 +161,6 @@ struct CalendarTimeGridView: View {
             }
         }
         .frame(height: totalHeight)
-    }
-
-    // MARK: - Now Indicator
-
-    /// Red line spans the full content area (all visible columns), matching
-    /// Apple Calendar's multi-day behaviour. The leading red dot marks today's
-    /// column specifically.
-    private func nowIndicator(todayColumnIndex: Int, totalColumns: Int) -> some View {
-        let cal = Calendar.current
-        let minutesSinceMidnight = CGFloat(cal.component(.hour, from: now) * 60 + cal.component(.minute, from: now))
-        let yOffset = minutesSinceMidnight * (hourHeight / 60)
-
-        return GeometryReader { geo in
-            let width = geo.size.width
-            // Account for the 0.5pt separators between columns (HStack above) so the
-            // today-dot lands at the true start of today's column, not drifted right.
-            let separatorWidth: CGFloat = 0.5
-            let separatorTotal = totalColumns > 1 ? separatorWidth * CGFloat(totalColumns - 1) : 0
-            let columnWidth = totalColumns > 0 ? (width - separatorTotal) / CGFloat(totalColumns) : width
-            let dotX = CGFloat(todayColumnIndex) * (columnWidth + separatorWidth)
-            ZStack(alignment: .topLeading) {
-                Rectangle()
-                    .fill(Color(red: 0.92, green: 0.23, blue: 0.21))
-                    .frame(width: width, height: 1.5)
-
-                Circle()
-                    .fill(Color(red: 0.92, green: 0.23, blue: 0.21))
-                    .frame(width: 8, height: 8)
-                    .offset(x: dotX - 4, y: -3.25)
-            }
-            .offset(y: yOffset)
-        }
-        .frame(height: totalHeight)
-        .allowsHitTesting(false)
     }
 
     // MARK: - Event Layout Algorithm
@@ -361,6 +310,60 @@ struct CalendarTimeGridView: View {
                 ? UIColor(white: 1.0, alpha: 0.22)
                 : UIColor(white: 0.0, alpha: 0.15)
         })
+    }
+}
+
+// MARK: - Now Indicator
+
+/// Red line spans the full content area (all visible columns), matching
+/// Apple Calendar's multi-day behaviour. The leading red dot marks today's
+/// column specifically.
+///
+/// Self-contained `TimelineView(.periodic)` so the 60s minute tick only
+/// re-renders this thin layer — previously it mutated grid-level `@State`,
+/// forcing the whole time grid (incl. the O(cluster²) event layout per
+/// column) to re-run every minute.
+private struct NowIndicatorView: View {
+    let todayColumnIndex: Int
+    let totalColumns: Int
+    let hourHeight: CGFloat
+    let totalHeight: CGFloat
+
+    private static let lineColor = Color(red: 0.92, green: 0.23, blue: 0.21)
+
+    var body: some View {
+        // Align ticks to the next minute boundary so the line moves exactly
+        // when the wall-clock minute changes.
+        let nextMinute = Calendar.current.date(bySetting: .second, value: 0, of: .now) ?? .now
+        TimelineView(.periodic(from: nextMinute, by: 60)) { context in
+            let cal = Calendar.current
+            let minutesSinceMidnight = CGFloat(cal.component(.hour, from: context.date) * 60 + cal.component(.minute, from: context.date))
+            let yOffset = minutesSinceMidnight * (hourHeight / 60)
+
+            GeometryReader { geo in
+                let width = geo.size.width
+                // Account for the 0.5pt separators between columns (HStack in the
+                // grid) so the today-dot lands at the true start of today's
+                // column, not drifted right.
+                let separatorWidth: CGFloat = 0.5
+                let separatorTotal = totalColumns > 1 ? separatorWidth * CGFloat(totalColumns - 1) : 0
+                let columnWidth = totalColumns > 0 ? (width - separatorTotal) / CGFloat(totalColumns) : width
+                let dotX = CGFloat(todayColumnIndex) * (columnWidth + separatorWidth)
+                ZStack(alignment: .topLeading) {
+                    Rectangle()
+                        .fill(Self.lineColor)
+                        .frame(width: width, height: 1.5)
+
+                    Circle()
+                        .fill(Self.lineColor)
+                        .frame(width: 8, height: 8)
+                        .offset(x: dotX - 4, y: -3.25)
+                }
+                .offset(y: yOffset)
+            }
+        }
+        .frame(height: totalHeight)
+        .allowsHitTesting(false)
     }
 }
 

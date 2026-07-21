@@ -9,6 +9,8 @@ struct OrganizeReviewSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
+    /// Gate for the repeating loading-sparkle pulse. (TD-11)
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var proposals: [OrganizeProposal] = []
     @State private var isLoading = true
@@ -73,7 +75,7 @@ struct OrganizeReviewSheet: View {
             HStack(spacing: 8) {
                 Image(systemName: "sparkle")
                     .font(.system(size: 15, weight: .semibold))
-                    .symbolEffect(.pulse.wholeSymbol, options: .repeating)
+                    .symbolEffect(.pulse.wholeSymbol, options: .repeating, isActive: !reduceMotion)
                 Text("Sorting your inbox…")
                     .font(.system(size: 15, weight: .medium))
             }

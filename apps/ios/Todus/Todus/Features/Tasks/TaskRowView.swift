@@ -5,6 +5,9 @@ import UIKit
 struct TaskRowView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppServices.self) private var services
+    /// Gate for the repeating pulse on the pending-parse sparkle — vestibular-
+    /// sensitive users get the static symbol instead. (TD-11)
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let task: TaskRecord
     let onMoveRequested: () -> Void
@@ -26,7 +29,7 @@ struct TaskRowView: View {
                 // changes.
                 Button(action: { toggleCheckbox() }) {
                     Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 23, weight: .medium))
+                        .scaledFont(size: 23, weight: .medium)
                         .foregroundStyle(task.completed ? task.status.tintColor : AppTheme.subtleText)
                 }
                 .buttonStyle(.plain)
@@ -39,7 +42,7 @@ struct TaskRowView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(alignment: .firstTextBaseline, spacing: 5) {
                                 Text(task.title)
-                                    .font(.system(size: 16, weight: .medium))
+                                    .scaledFont(size: 16, weight: .medium)
                                     .tracking(-0.2)
                                     .lineLimit(2)
                                     .multilineTextAlignment(.leading)
@@ -49,10 +52,10 @@ struct TaskRowView: View {
                                 if task.parseState == .pending {
                                     HStack(spacing: 3) {
                                         Image(systemName: "sparkle")
-                                            .font(.system(size: 9, weight: .semibold))
-                                            .symbolEffect(.pulse.wholeSymbol, options: .repeating)
+                                            .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
+                                            .symbolEffect(.pulse.wholeSymbol, options: .repeating, isActive: !reduceMotion)
                                         Text("Setting up…")
-                                            .font(.system(size: 10, weight: .semibold))
+                                            .scaledFont(size: 10, weight: .semibold, relativeTo: .caption2)
                                             .tracking(-0.1)
                                     }
                                     .foregroundStyle(Color.primary.opacity(0.55))
@@ -63,7 +66,7 @@ struct TaskRowView: View {
 
                             if !task.taskDescription.isEmpty && task.taskDescription != task.title {
                                 Text(task.taskDescription)
-                                    .font(.system(size: 13, weight: .regular))
+                                    .scaledFont(size: 13, weight: .regular)
                                     .foregroundStyle(AppTheme.mutedText.opacity(0.95))
                                     .lineLimit(1)
                             }
@@ -186,6 +189,17 @@ struct TaskRowView: View {
             }
             .tint(AppTheme.switchTint)
         }
+        // Mirror the swipe actions as VoiceOver custom actions — swipe gestures
+        // on nested-button rows are ambiguous under VO focus. (TD-22)
+        .accessibilityAction(named: task.completed ? "Mark incomplete" : "Mark complete") {
+            toggleCheckbox()
+        }
+        .accessibilityAction(named: "Snooze") {
+            showSnoozeOptions = true
+        }
+        .accessibilityAction(named: "Move to folder") {
+            onMoveRequested()
+        }
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button {
                 toggleCheckbox()
@@ -304,7 +318,7 @@ struct TaskRowView: View {
             openSourceEmail()
         } label: {
             Label("Email", systemImage: "envelope.fill")
-                .font(.system(size: 11, weight: .semibold))
+                .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                 .tracking(-0.1)
                 .foregroundStyle(AppTheme.secondaryAccent)
                 .padding(.horizontal, 6)
@@ -323,9 +337,9 @@ struct TaskRowView: View {
     private func statusTag(status: TaskStatus) -> some View {
         HStack(spacing: 3) {
             Image(systemName: status.systemImage)
-                .font(.system(size: 9, weight: .bold))
+                .scaledFont(size: 11, weight: .bold, relativeTo: .caption2)
             Text(status.title)
-                .font(.system(size: 11, weight: .semibold))
+                .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                 .tracking(-0.1)
         }
         .foregroundStyle(status.tintColor)
@@ -342,10 +356,20 @@ struct TaskRowView: View {
 
     private func dueDateTag(_ dueDate: Date) -> some View {
         let color = dueDateColor(dueDate)
-        return Label(TaskDateFormatter.dueFormatter.string(from: dueDate), systemImage: "calendar")
-            .font(.system(size: 11, weight: .semibold))
+        let isToday = Calendar.current.isDateInToday(dueDate)
+        let isOverdue = !isToday && dueDate < Date()
+        let dateText = TaskDateFormatter.dueFormatter.string(from: dueDate)
+        // Overdue swaps the glyph so urgency isn't carried by color alone;
+        // the a11y label spells the state out for VoiceOver. (TD-20)
+        return Label(dateText, systemImage: isOverdue ? "exclamationmark.circle.fill" : "calendar")
+            .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
             .tracking(-0.1)
             .foregroundStyle(color)
+            .accessibilityLabel(
+                isOverdue ? "Overdue, due \(dateText)"
+                    : isToday ? "Due today, \(dateText)"
+                    : "Due \(dateText)"
+            )
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous))
@@ -361,9 +385,9 @@ struct TaskRowView: View {
         let color = priorityColor(priority)
         return HStack(spacing: 3) {
             Image(systemName: "flag.fill")
-                .font(.system(size: 9, weight: .bold))
+                .scaledFont(size: 11, weight: .bold, relativeTo: .caption2)
             Text(priority.title)
-                .font(.system(size: 11, weight: .semibold))
+                .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                 .tracking(-0.1)
         }
         .foregroundStyle(color)
@@ -380,7 +404,7 @@ struct TaskRowView: View {
 
     private func tag(title: String, systemImage: String) -> some View {
         Label(title, systemImage: systemImage)
-            .font(.system(size: 11, weight: .semibold))
+            .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
             .tracking(-0.1)
             .foregroundStyle(Color.secondary.opacity(0.9))
             .padding(.horizontal, 6)
@@ -488,9 +512,9 @@ private struct TaskFolderSuggestionChip: View {
         HStack(spacing: 6) {
             HStack(spacing: 4) {
                 Image(systemName: "sparkle")
-                    .font(.system(size: 9, weight: .semibold))
+                    .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                 Text("Move to \(folderName)?")
-                    .font(.system(size: 11, weight: .semibold))
+                    .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                     .tracking(-0.1)
                     .lineLimit(1)
             }
@@ -498,7 +522,7 @@ private struct TaskFolderSuggestionChip: View {
 
             Button(action: onAccept) {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 10, weight: .bold))
+                    .scaledFont(size: 10, weight: .bold, relativeTo: .caption2)
                     .foregroundStyle(AppTheme.secondaryAccent)
                     .frame(width: 26, height: 22)
                     .background(AppTheme.secondaryAccent.opacity(0.14), in: Capsule())
@@ -508,7 +532,7 @@ private struct TaskFolderSuggestionChip: View {
 
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
+                    .scaledFont(size: 11, weight: .bold, relativeTo: .caption2)
                     .foregroundStyle(AppTheme.mutedText)
                     .frame(width: 26, height: 22)
                     .background(AppTheme.surfaceSecondary.opacity(0.7), in: Capsule())

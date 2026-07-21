@@ -131,6 +131,9 @@ struct EmailInboxView: View {
     @State private var selectedSender: SenderDestination?
     /// Thread queued for delete confirmation. Setting this presents the confirmation dialog.
     @State private var pendingDeleteThread: EmailThread?
+    /// "Archived" confirmation toast with an Undo action — swipe-archive fires
+    /// immediately (no confirmation), so this is the recovery path.
+    @State private var archiveToast: ToastMessage?
     /// True after a pagination request fails so we can show a tap-to-retry CTA instead of an
     /// indefinite spinner. Reset whenever a new pagination attempt starts.
     @State private var paginationFailed = false
@@ -240,6 +243,9 @@ struct EmailInboxView: View {
         .animation(.easeInOut(duration: 0.18), value: emailService.hasResolvedConnection)
         .animation(.easeInOut(duration: 0.18), value: emailService.hasConnection)
         .toolbar(.hidden, for: .navigationBar)
+        // "Archived" + Undo — inset above the floating tab bar / FAB like the
+        // capture toast in MainTabView.
+        .toast($archiveToast, duration: 4, bottomInset: MainTabView.fabClearance)
         .task {
             // Initial load — use ensureInitialInboxLoaded for inbox (avoids double-fetch
             // if threads are already cached), load fresh for other folders
@@ -267,7 +273,11 @@ struct EmailInboxView: View {
                 guard !Task.isCancelled,
                       emailService.hasConnection,
                       !emailService.isLoadingThreads,
-                      !emailService.isReconciling
+                      !emailService.isReconciling,
+                      // Skip the tick while a search is active: this call passes no
+                      // `query:`, so it would replace server-side search results with
+                      // the unfiltered first page while the field still shows the query.
+                      searchText.isEmpty
                 else { continue }
                 // Routine polling tick — pass `triggerSync: true` so the backend's
                 // soft-sync path (non-destructive: upserts newest 20 thread IDs from
@@ -286,7 +296,10 @@ struct EmailInboxView: View {
             guard newPhase == .active,
                   emailService.hasConnection,
                   !emailService.isLoadingThreads,
-                  !emailService.isReconciling
+                  !emailService.isReconciling,
+                  // Skip while a search is active — same query-clobber hazard as the
+                  // 60s poll above; the user's search survives a backgrounding.
+                  searchText.isEmpty
             else { return }
             // Re-foreground triggers a soft sync — user expects to see new mail on
             // open, not a stale snapshot from last launch. Cooldown still applies so
@@ -519,7 +532,7 @@ struct EmailInboxView: View {
         AppTopHeader(title: "Mail") {
             HStack(spacing: 8) {
                 Text("Mail")
-                    .font(.system(size: 18, weight: .bold))
+                    .scaledFont(size: 18, weight: .bold)
                     .tracking(-0.3)
                     .foregroundStyle(.primary)
 
@@ -556,10 +569,10 @@ struct EmailInboxView: View {
             } label: {
                 HStack(spacing: 4) {
                     Text(selectedFolder.title)
-                        .font(.system(size: 15, weight: .semibold))
+                        .scaledFont(size: 15, weight: .semibold)
                         .foregroundStyle(.primary)
                     Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
+                        .scaledFont(size: 10, weight: .semibold, relativeTo: .caption2)
                         .foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 12)
@@ -696,9 +709,9 @@ struct EmailInboxView: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 12, weight: .semibold))
+                            .scaledFont(size: 12, weight: .semibold)
                         Text(isLoadingNextPage ? "Retrying…" : "Tap to retry")
-                            .font(.system(size: 13, weight: .semibold))
+                            .scaledFont(size: 13, weight: .semibold)
                     }
                     .foregroundStyle(AppTheme.mutedText)
                     .frame(maxWidth: .infinity)
@@ -762,6 +775,10 @@ struct EmailInboxView: View {
                 lastVisibleId = thread.id
                 selectedThreadId = thread.id
             }
+            // The row opens via a bare tap gesture — expose it to VoiceOver as a
+            // button so it's activatable and announced as one (TD-12).
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Opens conversation")
             .contextMenu {
                 Button {
                     threadAwaitingFolderPick = thread
@@ -777,7 +794,20 @@ struct EmailInboxView: View {
                     // Reserve the destructive role (and the system's red colour) for
                     // Delete, which is what users actually need to think twice about.
                     Button {
-                        Task { await emailService.archiveThreads(ids: [thread.id]) }
+                        Task {
+                            guard await emailService.archiveThreads(ids: [thread.id]) else { return }
+                            // Full-swipe archive fires with no confirmation — offer an
+                            // Undo (Apple Mail sets the expectation). `thread` is the
+                            // pre-archive snapshot, so unarchive can restore it as-is.
+                            archiveToast = ToastMessage(
+                                text: "Archived",
+                                style: .success,
+                                actionTitle: "Undo",
+                                action: {
+                                    Task { await services.emailService.unarchiveThreads([thread]) }
+                                }
+                            )
+                        }
                     } label: {
                         Label("Archive", systemImage: "archivebox")
                     }
@@ -883,20 +913,20 @@ struct EmailInboxView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(alignment: .firstTextBaseline) {
                                 Text(group.name)
-                                    .font(.system(size: 15, weight: group.unreadCount > 0 ? .semibold : .regular))
+                                    .scaledFont(size: 15, weight: group.unreadCount > 0 ? .semibold : .regular)
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)
 
                                 Spacer(minLength: 8)
 
                                 Text("\(group.threads.count)")
-                                    .font(.system(size: 12, weight: .medium))
+                                    .scaledFont(size: 12, weight: .medium)
                                     .foregroundStyle(AppTheme.mutedText)
                             }
 
                             HStack(spacing: 6) {
                                 Text(group.threads.first?.subject ?? "")
-                                    .font(.system(size: 14, weight: group.unreadCount > 0 ? .semibold : .regular))
+                                    .scaledFont(size: 14, weight: group.unreadCount > 0 ? .semibold : .regular)
                                     .foregroundStyle(group.unreadCount > 0 ? .primary : AppTheme.subtleText)
                                     .lineLimit(1)
 
@@ -904,7 +934,7 @@ struct EmailInboxView: View {
 
                                 if group.unreadCount > 0 {
                                     Text("\(group.unreadCount)")
-                                        .font(.system(size: 11, weight: .bold))
+                                        .scaledFont(size: 11, weight: .bold, relativeTo: .caption2)
                                         .foregroundStyle(.white)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
@@ -913,7 +943,7 @@ struct EmailInboxView: View {
                             }
 
                             Text(group.email)
-                                .font(.system(size: 13))
+                                .scaledFont(size: 13)
                                 .foregroundStyle(AppTheme.mutedText)
                                 .lineLimit(1)
                         }
@@ -974,10 +1004,10 @@ struct EmailInboxView: View {
         } label: {
             HStack(spacing: 4) {
                 Text(viewMode.rawValue)
-                    .font(.system(size: 15, weight: .semibold))
+                    .scaledFont(size: 15, weight: .semibold)
                     .foregroundStyle(.primary)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
+                    .scaledFont(size: 10, weight: .semibold, relativeTo: .caption2)
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 10)
@@ -994,7 +1024,7 @@ struct EmailInboxView: View {
     private var assistantNudgesInList: some View {
         // Section label row
         Text("ASSISTANT")
-            .font(.system(size: 10, weight: .semibold))
+            .scaledFont(size: 10, weight: .semibold, relativeTo: .caption2)
             .tracking(0.6)
             .foregroundStyle(AppTheme.mutedText)
             .textCase(nil)
@@ -1012,17 +1042,17 @@ struct EmailInboxView: View {
                 HStack(alignment: .top, spacing: 10) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(nudge.title)
-                            .font(.system(size: 13, weight: .semibold))
+                            .scaledFont(size: 13, weight: .semibold)
                             .foregroundStyle(.primary)
                         Text(nudge.description)
-                            .font(.system(size: 12))
+                            .scaledFont(size: 12)
                             .foregroundStyle(AppTheme.mutedText)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                     }
                     Spacer()
                     Text("\(nudge.count)")
-                        .font(.system(size: 10.5, weight: .semibold))
+                        .scaledFont(size: 10.5, weight: .semibold, relativeTo: .caption2)
                         .foregroundStyle(AppTheme.subtleText)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -1070,9 +1100,9 @@ struct EmailInboxView: View {
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "envelope.fill")
-                            .font(.system(size: 10, weight: .semibold))
+                            .scaledFont(size: 10, weight: .semibold, relativeTo: .caption2)
                         Text("All")
-                            .font(.system(size: 12, weight: .semibold))
+                            .scaledFont(size: 12, weight: .semibold)
                     }
                     .foregroundStyle(connectionsService.isAllEnabled ? AppTheme.accent : AppTheme.mutedText)
                     .padding(.horizontal, 10)
@@ -1091,6 +1121,8 @@ struct EmailInboxView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(connectionsService.isAllEnabled)
+                .accessibilityLabel("All accounts")
+                .accessibilityValue(connectionsService.isAllEnabled ? "On" : "Off")
 
                 // Per-connection chips
                 ForEach(connectionsService.connections) { connection in
@@ -1103,7 +1135,9 @@ struct EmailInboxView: View {
                                 .fill(Color(hex: connection.displayColor))
                                 .frame(width: 8, height: 8)
                             Text(truncatedEmail(connection.email))
-                                .font(.system(size: 12, weight: .semibold))
+                                // Weight doubles as a non-color enabled cue —
+                                // tint alone fails for color-blind users (TD-20).
+                                .scaledFont(size: 12, weight: isEnabled ? .semibold : .regular)
                                 .lineLimit(1)
                         }
                         .foregroundStyle(isEnabled ? Color(hex: connection.displayColor) : AppTheme.mutedText)
@@ -1122,6 +1156,8 @@ struct EmailInboxView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(connection.email)
+                    .accessibilityValue(isEnabled ? "On" : "Off")
                 }
             }
         }
@@ -1156,11 +1192,11 @@ struct EmailInboxView: View {
     private var searchBar: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 13, weight: .medium))
+                .scaledFont(size: 13, weight: .medium)
                 .foregroundStyle(AppTheme.mutedText)
 
             TextField("Search…", text: $searchText)
-                .font(.system(size: 14))
+                .scaledFont(size: 14)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .focused($searchFieldFocused)
@@ -1184,7 +1220,7 @@ struct EmailInboxView: View {
                     searchFieldFocused = false
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14))
+                        .scaledFont(size: 14)
                         .foregroundStyle(AppTheme.mutedText)
                 }
                 .buttonStyle(.plain)
@@ -1218,7 +1254,7 @@ struct EmailInboxView: View {
                 ProgressView()
                     .scaleEffect(0.6)
                 Text("Searching \(selectedFolder.title.lowercased())…")
-                    .font(.system(size: 12, weight: .medium))
+                    .scaledFont(size: 12, weight: .medium)
                     .foregroundStyle(AppTheme.mutedText)
             } else {
                 // Search finished — surface the result count so the user knows
@@ -1227,7 +1263,7 @@ struct EmailInboxView: View {
                 // request was still running or had simply returned a few matches.
                 let count = filteredThreads.count
                 Text(count == 1 ? "1 result" : "\(count) results")
-                    .font(.system(size: 12, weight: .medium))
+                    .scaledFont(size: 12, weight: .medium)
                     .foregroundStyle(AppTheme.mutedText)
             }
         }
@@ -1307,19 +1343,19 @@ struct EmailInboxView: View {
                 // Search returned no results — offer clear action rather than Refresh
                 VStack(spacing: 12) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 44, weight: .light))
+                        .scaledFont(size: 44, weight: .light)
                         .foregroundStyle(AppTheme.mutedText)
                     Text("No results for \"\(truncatedSearchQuery)\"")
-                        .font(.system(size: 17, weight: .semibold))
+                        .scaledFont(size: 17, weight: .semibold)
                     Text("Try a different search term.")
-                        .font(.system(size: 14))
+                        .scaledFont(size: 14)
                         .foregroundStyle(AppTheme.subtleText)
                     Button {
                         searchText = ""
                         Task { await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true) }
                     } label: {
                         Text("Clear Search")
-                            .font(.system(size: 14, weight: .semibold))
+                            .scaledFont(size: 14, weight: .semibold)
                             .foregroundStyle(.primary)
                     }
                     .buttonStyle(.plain)
@@ -1329,12 +1365,12 @@ struct EmailInboxView: View {
                 // Folder is genuinely empty
                 VStack(spacing: 12) {
                     Image(systemName: selectedFolder.systemImage)
-                        .font(.system(size: 44, weight: .light))
+                        .scaledFont(size: 44, weight: .light)
                         .foregroundStyle(AppTheme.mutedText)
                     Text(selectedFolder.emptyStateTitle)
-                        .font(.system(size: 17, weight: .semibold))
+                        .scaledFont(size: 17, weight: .semibold)
                     Text(selectedFolder.emptyStateDescription)
-                        .font(.system(size: 14))
+                        .scaledFont(size: 14)
                         .foregroundStyle(AppTheme.subtleText)
                     // Refresh CTA is only useful for folders that receive a server
                     // sync (inbox/drafts/sent/archive). Snoozed/Spam/Trash are
@@ -1346,7 +1382,7 @@ struct EmailInboxView: View {
                             Task { await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true, triggerSync: true) }
                         } label: {
                             Text("Refresh")
-                                .font(.system(size: 14, weight: .semibold))
+                                .scaledFont(size: 14, weight: .semibold)
                                 .foregroundStyle(.primary)
                         }
                         .buttonStyle(.plain)
@@ -1378,13 +1414,13 @@ struct EmailInboxView: View {
             Spacer()
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 44, weight: .light))
+                    .scaledFont(size: 44, weight: .light)
                     .foregroundStyle(AppTheme.mutedText)
                 Text("Couldn't load \(selectedFolder.title)")
-                    .font(.system(size: 17, weight: .semibold))
+                    .scaledFont(size: 17, weight: .semibold)
                 if let errorMessage = emailService.errorMessage {
                     Text(errorMessage)
-                        .font(.system(size: 13))
+                        .scaledFont(size: 13)
                         .foregroundStyle(AppTheme.subtleText)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 32)
@@ -1393,7 +1429,7 @@ struct EmailInboxView: View {
                     Task { await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true, triggerSync: true) }
                 } label: {
                     Text("Try Again")
-                        .font(.system(size: 14, weight: .semibold))
+                        .scaledFont(size: 14, weight: .semibold)
                         .foregroundStyle(.primary)
                 }
                 .buttonStyle(.plain)
@@ -1419,12 +1455,12 @@ struct EmailInboxView: View {
             Spacer()
             VStack(spacing: 12) {
                 Image(systemName: "wifi.exclamationmark")
-                    .font(.system(size: 44, weight: .light))
+                    .scaledFont(size: 44, weight: .light)
                     .foregroundStyle(AppTheme.mutedText)
                 Text("Still checking…")
-                    .font(.system(size: 17, weight: .semibold))
+                    .scaledFont(size: 17, weight: .semibold)
                 Text("This is taking longer than usual. Check your connection and try again.")
-                    .font(.system(size: 13))
+                    .scaledFont(size: 13)
                     .foregroundStyle(AppTheme.subtleText)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
@@ -1433,7 +1469,7 @@ struct EmailInboxView: View {
                     Task { await emailService.checkConnection(force: true) }
                 } label: {
                     Text("Try Again")
-                        .font(.system(size: 14, weight: .semibold))
+                        .scaledFont(size: 14, weight: .semibold)
                         .foregroundStyle(.primary)
                 }
                 .buttonStyle(.plain)
@@ -1594,6 +1630,9 @@ struct SenderThreadsView: View {
     @Environment(AppServices.self) private var services
     @State private var selectedThreadId: String?
     @State private var pendingDeleteThread: EmailThread?
+    /// "Archived + Undo" toast — mirrors the main inbox pattern so swipe-archive
+    /// from the People drill-in is recoverable too.
+    @State private var archiveToast: ToastMessage?
     /// Cached filtered+sorted thread list for this sender. Recomputed only when the
     /// underlying thread pool or the search query changes — previously this was a
     /// computed property that re-filtered + re-sorted the entire inbox on every
@@ -1670,6 +1709,7 @@ struct SenderThreadsView: View {
         .navigationDestination(item: $selectedThreadId) { threadId in
             EmailThreadView(threadId: threadId)
         }
+        .toast($archiveToast, duration: 4, bottomInset: MainTabView.fabClearance)
     }
 
     @ViewBuilder
@@ -1680,6 +1720,9 @@ struct SenderThreadsView: View {
             .listRowSeparator(.visible)
             .listRowSeparatorTint(AppTheme.divider)
             .onTapGesture { selectedThreadId = thread.id }
+            // Same VoiceOver treatment as the main inbox rows (TD-12).
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Opens conversation")
 
         if services.swipeGesturesEnabled {
             baseRow
@@ -1687,7 +1730,19 @@ struct SenderThreadsView: View {
                     // Archive is reversible — keep it orange but drop the destructive
                     // role so the system doesn't tint it red on full swipe.
                     Button {
-                        Task { await emailService.archiveThreads(ids: [thread.id]) }
+                        Task {
+                            guard await emailService.archiveThreads(ids: [thread.id]) else { return }
+                            // Same Undo recovery as the main inbox — `thread` is the
+                            // pre-archive snapshot, so unarchive restores it as-is.
+                            archiveToast = ToastMessage(
+                                text: "Archived",
+                                style: .success,
+                                actionTitle: "Undo",
+                                action: {
+                                    Task { await services.emailService.unarchiveThreads([thread]) }
+                                }
+                            )
+                        }
                     } label: {
                         Label("Archive", systemImage: "archivebox")
                     }

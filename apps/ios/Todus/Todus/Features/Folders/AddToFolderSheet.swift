@@ -75,6 +75,22 @@ struct AddToFolderSheet: View {
 
 // MARK: - Shared helpers
 
+/// One-shot fetch of the item IDs already in `folder` for a given kind.
+/// Pickers cache the result in `@State` (populated in `.task`) instead of
+/// running a fresh SwiftData fetch on every `.searchable` keystroke — the
+/// membership set can't change while the picker is up (commit dismisses).
+private func fetchExistingItemIDs(kind: FolderItemKind, folder: FolderRecord, context: ModelContext) -> Set<String> {
+    let folderID = folder.id
+    let itemType = kind.rawValue
+    let descriptor = FetchDescriptor<FolderItemRecord>(
+        predicate: #Predicate { item in
+            item.folder?.id == folderID && item.itemType == itemType
+        }
+    )
+    let items = (try? context.fetch(descriptor)) ?? []
+    return Set(items.map(\.itemId))
+}
+
 private func filterChipStyle(isSelected: Bool) -> some ShapeStyle {
     isSelected ? AnyShapeStyle(Color.accentColor.opacity(0.15)) : AnyShapeStyle(AppTheme.surfaceSecondary)
 }
@@ -238,18 +254,8 @@ private struct EmailFolderPicker: View {
     @State private var searchText = ""
     @State private var selectedIDs = Set<String>()
     @State private var senderFilter: String? = nil
-
-    private var existingThreadIDs: Set<String> {
-        let folderID = folder.id
-        let emailType = FolderItemKind.email.rawValue
-        let descriptor = FetchDescriptor<FolderItemRecord>(
-            predicate: #Predicate { item in
-                item.folder?.id == folderID && item.itemType == emailType
-            }
-        )
-        let items = (try? modelContext.fetch(descriptor)) ?? []
-        return Set(items.map(\.itemId))
-    }
+    /// Cached in `.task` — see `fetchExistingItemIDs`.
+    @State private var existingThreadIDs: Set<String> = []
 
     private var candidates: [EmailThread] {
         services.emailService.threads.filter { !existingThreadIDs.contains($0.id) }
@@ -385,6 +391,7 @@ private struct EmailFolderPicker: View {
         // Self-load like the event/doc pickers — previously this picker relied on
         // the Inbox tab having been opened first and dead-ended otherwise.
         .task {
+            existingThreadIDs = fetchExistingItemIDs(kind: .email, folder: folder, context: modelContext)
             await services.emailService.ensureInitialInboxLoaded()
         }
     }
@@ -502,18 +509,8 @@ private struct EventFolderPicker: View {
     @State private var isLoading = true
     @State private var searchText = ""
     @State private var selectedIDs = Set<String>()
-
-    private var existingEventIDs: Set<String> {
-        let folderID = folder.id
-        let eventType = FolderItemKind.event.rawValue
-        let descriptor = FetchDescriptor<FolderItemRecord>(
-            predicate: #Predicate { item in
-                item.folder?.id == folderID && item.itemType == eventType
-            }
-        )
-        let items = (try? modelContext.fetch(descriptor)) ?? []
-        return Set(items.map(\.itemId))
-    }
+    /// Cached in `.task` — see `fetchExistingItemIDs`.
+    @State private var existingEventIDs: Set<String> = []
 
     private var candidates: [CalendarEvent] {
         events.filter { !existingEventIDs.contains($0.id) }
@@ -586,6 +583,7 @@ private struct EventFolderPicker: View {
             }
         }
         .task {
+            existingEventIDs = fetchExistingItemIDs(kind: .event, folder: folder, context: modelContext)
             isLoading = true
             let start = Date()
             let end = Calendar.current.date(byAdding: .day, value: 30, to: start) ?? start
@@ -621,18 +619,8 @@ private struct DocFolderPicker: View {
     @State private var searchText = ""
     @State private var selectedIDs = Set<String>()
     @State private var isLoading = false
-
-    private var existingDocIDs: Set<String> {
-        let folderID = folder.id
-        let docType = FolderItemKind.doc.rawValue
-        let descriptor = FetchDescriptor<FolderItemRecord>(
-            predicate: #Predicate { item in
-                item.folder?.id == folderID && item.itemType == docType
-            }
-        )
-        let items = (try? modelContext.fetch(descriptor)) ?? []
-        return Set(items.map(\.itemId))
-    }
+    /// Cached in `.task` — see `fetchExistingItemIDs`.
+    @State private var existingDocIDs: Set<String> = []
 
     private var candidates: [DocRecordDTO] {
         services.docsService.allDocs.filter { !existingDocIDs.contains($0.id) }
@@ -707,6 +695,7 @@ private struct DocFolderPicker: View {
             }
         }
         .task {
+            existingDocIDs = fetchExistingItemIDs(kind: .doc, folder: folder, context: modelContext)
             if services.docsService.allDocs.isEmpty {
                 isLoading = true
                 await services.docsService.refresh()

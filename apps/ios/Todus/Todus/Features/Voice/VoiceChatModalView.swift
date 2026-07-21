@@ -19,6 +19,7 @@ struct VoiceChatModalView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(AppServices.self) private var services
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Query(sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
 
     @State private var viewModel: VoiceChatViewModel?
@@ -258,11 +259,14 @@ struct VoiceChatModalView: View {
                             .stroke(aiGradient, lineWidth: 2)
                             .frame(width: CGFloat(80 + i * 24), height: CGFloat(80 + i * 24))
                             .opacity(0.3 - Double(i) * 0.1)
-                            .scaleEffect(viewModel?.isAssistantSpeaking == true ? 1.1 : 0.9)
+                            // Reduce Motion: static rings instead of pulsing (TD-11).
+                            .scaleEffect(viewModel?.isAssistantSpeaking == true && !reduceMotion ? 1.1 : 1.0)
                             .animation(
-                                .easeInOut(duration: 1.2)
-                                    .repeatForever(autoreverses: true)
-                                    .delay(Double(i) * 0.2),
+                                reduceMotion
+                                    ? nil
+                                    : .easeInOut(duration: 1.2)
+                                        .repeatForever(autoreverses: true)
+                                        .delay(Double(i) * 0.2),
                                 value: viewModel?.isAssistantSpeaking
                             )
                     }

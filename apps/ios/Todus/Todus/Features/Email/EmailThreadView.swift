@@ -188,16 +188,16 @@ struct EmailThreadView: View {
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 32, weight: .light))
+                        .scaledFont(size: 32, weight: .light)
                         .foregroundStyle(AppTheme.mutedText)
                     Text("Could not load thread")
-                        .font(.system(size: 15, weight: .medium))
+                        .scaledFont(size: 15, weight: .medium)
                         .foregroundStyle(AppTheme.subtleText)
                     Button("Try Again") {
                         isLoading = true
                         Task { await loadThread() }
                     }
-                    .font(.system(size: 14))
+                    .scaledFont(size: 14)
                     .foregroundStyle(Color.accentColor)
                     .padding(.top, 4)
                 }
@@ -212,7 +212,7 @@ struct EmailThreadView: View {
             if isLoading || detail == nil || (detail?.messages.isEmpty ?? true) {
                 Button { dismiss() } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .semibold))
+                        .scaledFont(size: 16, weight: .semibold)
                         .foregroundStyle(.primary)
                         .frame(width: 38, height: 38)
                 }
@@ -348,7 +348,7 @@ struct EmailThreadView: View {
                 // Back button — standalone pill
                 Button { dismiss() } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .semibold))
+                        .scaledFont(size: 16, weight: .semibold)
                         .foregroundStyle(.primary)
                         .frame(width: 38, height: 38)
                 }
@@ -383,7 +383,7 @@ struct EmailThreadView: View {
                         }
                     } label: {
                         Image(systemName: "envelope.badge")
-                            .font(.system(size: 15, weight: .medium))
+                            .scaledFont(size: 15, weight: .medium)
                             .foregroundStyle(.primary)
                             .frame(width: 42, height: 38)
                     }
@@ -407,7 +407,7 @@ struct EmailThreadView: View {
                         }
                     } label: {
                         Image(systemName: "archivebox")
-                            .font(.system(size: 15, weight: .medium))
+                            .scaledFont(size: 15, weight: .medium)
                             .foregroundStyle(.primary)
                             .frame(width: 42, height: 38)
                     }
@@ -426,7 +426,7 @@ struct EmailThreadView: View {
             // Scroll-aware title — fades in when subject has scrolled off screen
             if showTitleInHeader {
                 Text(subjectForHeader)
-                    .font(.system(size: 15, weight: .medium))
+                    .scaledFont(size: 15, weight: .medium)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .frame(maxWidth: 200)
@@ -566,7 +566,7 @@ struct EmailThreadView: View {
             // Show an em dash for missing subjects — feels less like an error state
             // than the parenthetical "(no subject)" placeholder.
             Text(threadSubjectDisplay(detail))
-                .font(.system(size: 20, weight: .bold))
+                .scaledFont(size: 20, weight: .bold)
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
@@ -602,7 +602,7 @@ struct EmailThreadView: View {
                 }
             } label: {
                 Image(systemName: isStarred ? "star.fill" : "star")
-                    .font(.system(size: 18, weight: .regular))
+                    .scaledFont(size: 18, weight: .regular)
                     .foregroundStyle(isStarred ? Color.yellow : AppTheme.mutedText)
             }
             .buttonStyle(.plain)
@@ -675,10 +675,10 @@ struct EmailThreadView: View {
             if isLoadingAssistant {
                 HStack(spacing: 8) {
                     Image(systemName: "sparkles")
-                        .font(.system(size: 12, weight: .semibold))
+                        .scaledFont(size: 12, weight: .semibold)
                         .foregroundStyle(aiGradient)
                     Text("Summarizing…")
-                        .font(.system(size: 13))
+                        .scaledFont(size: 13)
                         .foregroundStyle(AppTheme.mutedText)
                 }
             } else if let a = assistantThread {
@@ -690,11 +690,11 @@ struct EmailThreadView: View {
                 if !lead.isEmpty {
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "sparkles")
-                            .font(.system(size: 12, weight: .semibold))
+                            .scaledFont(size: 12, weight: .semibold)
                             .foregroundStyle(aiGradient)
                             .padding(.top, 2)
                         Text(lead)
-                            .font(.system(size: 14))
+                            .scaledFont(size: 14)
                             .foregroundStyle(.primary)
                             .lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
@@ -706,7 +706,7 @@ struct EmailThreadView: View {
                 // thread and can scroll to see what's new.
                 if let change = a.changedSinceLastOpen.first {
                     Text(change)
-                        .font(.system(size: 12))
+                        .scaledFont(size: 12)
                         .foregroundStyle(AppTheme.mutedText)
                         .lineLimit(2)
                 }
@@ -721,11 +721,11 @@ struct EmailThreadView: View {
                             ButtonInlineProgressView(tint: AppTheme.mutedText, side: AppTheme.Metrics.compactInlineSpinner)
                         } else {
                             Image(systemName: "sparkles")
-                                .font(.system(size: 12, weight: .semibold))
+                                .scaledFont(size: 12, weight: .semibold)
                                 .foregroundStyle(aiGradient)
                         }
                         Text(isSummarizing ? "Summarizing…" : "Summarize this thread")
-                            .font(.system(size: 13, weight: .medium))
+                            .scaledFont(size: 13, weight: .medium)
                             .foregroundStyle(.primary)
                     }
                 }
@@ -881,9 +881,9 @@ struct EmailThreadView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "plus")
-                            .font(.system(size: 10, weight: .bold))
+                            .scaledFont(size: 10, weight: .bold, relativeTo: .caption2)
                         Text(visible.isEmpty ? "Add label" : "Edit")
-                            .font(.system(size: 11, weight: .medium))
+                            .scaledFont(size: 11, weight: .medium, relativeTo: .caption2)
                     }
                     .foregroundStyle(AppTheme.mutedText)
                     .padding(.horizontal, 9)
@@ -917,9 +917,9 @@ struct EmailThreadView: View {
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: icon)
-                            .font(.system(size: 12, weight: .semibold))
+                            .scaledFont(size: 12, weight: .semibold)
                         Text(label)
-                            .font(.system(size: 14, weight: .semibold))
+                            .scaledFont(size: 14, weight: .semibold)
                     }
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity)
@@ -1196,7 +1196,7 @@ struct EmailThreadView: View {
             }
         } label: {
             Image(systemName: "ellipsis")
-                .font(.system(size: 15, weight: .medium))
+                .scaledFont(size: 15, weight: .medium)
                 .foregroundStyle(.primary)
                 .frame(width: 42, height: 38)
         }
@@ -1292,7 +1292,7 @@ private struct LabelChip: View {
 
     var body: some View {
         Text(name)
-            .font(.system(size: 11, weight: .semibold))
+            .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
             .foregroundStyle(AppTheme.subtleText)
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
@@ -1331,17 +1331,17 @@ private struct EditLabelsSheet: View {
                 } else if let errorMessage {
                     VStack(spacing: 8) {
                         Image(systemName: "exclamationmark.triangle")
-                            .font(.system(size: 24, weight: .light))
+                            .scaledFont(size: 24, weight: .light)
                             .foregroundStyle(AppTheme.mutedText)
                         Text(errorMessage)
-                            .font(.system(size: 13))
+                            .scaledFont(size: 13)
                             .foregroundStyle(AppTheme.subtleText)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 32)
                     }
                 } else if availableLabels.isEmpty {
                     Text("No labels yet. Create one in Gmail to use it here.")
-                        .font(.system(size: 13))
+                        .scaledFont(size: 13)
                         .foregroundStyle(AppTheme.mutedText)
                         .padding(.horizontal, 32)
                         .multilineTextAlignment(.center)
@@ -1361,7 +1361,7 @@ private struct EditLabelsSheet: View {
                                     Spacer()
                                     if selectedIds.contains(label.id) {
                                         Image(systemName: "checkmark")
-                                            .font(.system(size: 14, weight: .semibold))
+                                            .scaledFont(size: 14, weight: .semibold)
                                             .foregroundStyle(.tint)
                                     }
                                 }
@@ -1459,10 +1459,10 @@ private struct ThreadActionButton: View {
                 if let confirmedLabel {
                     // Confirmation state: green check + "Created" label.
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 12, weight: .semibold))
+                        .scaledFont(size: 12, weight: .semibold)
                         .foregroundStyle(.green)
                     Text(confirmedLabel)
-                        .font(.system(size: 13, weight: .semibold))
+                        .scaledFont(size: 13, weight: .semibold)
                         .foregroundStyle(.primary)
                 } else if isLoading {
                     ButtonInlineProgressView(
@@ -1470,13 +1470,13 @@ private struct ThreadActionButton: View {
                         side: AppTheme.Metrics.compactInlineSpinner
                     )
                     Text(label)
-                        .font(.system(size: 13, weight: .semibold))
+                        .scaledFont(size: 13, weight: .semibold)
                         .foregroundStyle(isPrimary ? AppTheme.backgroundTop : Color.primary)
                 } else {
                     Image(systemName: icon)
-                        .font(.system(size: 12, weight: .semibold))
+                        .scaledFont(size: 12, weight: .semibold)
                     Text(label)
-                        .font(.system(size: 13, weight: .semibold))
+                        .scaledFont(size: 13, weight: .semibold)
                 }
             }
             .foregroundStyle(isPrimary ? AppTheme.backgroundTop : Color.primary)
@@ -1540,7 +1540,7 @@ private struct VerificationCodeAction: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Verification code")
-                        .font(.system(size: 11, weight: .semibold))
+                        .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                         .foregroundStyle(AppTheme.mutedText)
                         .textCase(.uppercase)
                     Text(code)
@@ -1551,9 +1551,9 @@ private struct VerificationCodeAction: View {
                 Spacer()
                 HStack(spacing: 5) {
                     Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 13, weight: .semibold))
+                        .scaledFont(size: 13, weight: .semibold)
                     Text(didCopy ? "Copied" : "Copy")
-                        .font(.system(size: 13, weight: .semibold))
+                        .scaledFont(size: 13, weight: .semibold)
                 }
                 .foregroundStyle(AppTheme.backgroundTop)
                 .padding(.horizontal, 14)
@@ -1589,14 +1589,14 @@ private struct ReceiptInfoChip: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "receipt")
-                .font(.system(size: 14, weight: .semibold))
+                .scaledFont(size: 14, weight: .semibold)
                 .foregroundStyle(AppTheme.mutedText)
                 .frame(width: 28, height: 28)
                 .background(AppTheme.surfaceSecondary, in: Circle())
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(receipt.vendor)
-                    .font(.system(size: 14, weight: .semibold))
+                    .scaledFont(size: 14, weight: .semibold)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     // `.lineLimit(1)` can truncate a long vendor name — surface the
@@ -1605,18 +1605,18 @@ private struct ReceiptInfoChip: View {
                 HStack(spacing: 6) {
                     if let amount = receipt.amount, !amount.isEmpty {
                         Text(amount)
-                            .font(.system(size: 13, weight: .medium))
+                            .scaledFont(size: 13, weight: .medium)
                             .foregroundStyle(AppTheme.subtleText)
                             .help(amount)
                     }
                     if receipt.amount != nil, formattedDate != nil {
                         Text("·")
-                            .font(.system(size: 13))
+                            .scaledFont(size: 13)
                             .foregroundStyle(AppTheme.mutedText)
                     }
                     if let date = formattedDate {
                         Text(date)
-                            .font(.system(size: 13))
+                            .scaledFont(size: 13)
                             .foregroundStyle(AppTheme.mutedText)
                     }
                 }
@@ -1625,9 +1625,9 @@ private struct ReceiptInfoChip: View {
             Button(action: onForward) {
                 HStack(spacing: 5) {
                     Image(systemName: "arrowshape.turn.up.right")
-                        .font(.system(size: 11, weight: .semibold))
+                        .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                     Text("Forward")
-                        .font(.system(size: 12, weight: .semibold))
+                        .scaledFont(size: 12, weight: .semibold)
                 }
                 .foregroundStyle(.primary)
                 .padding(.horizontal, 11)
@@ -1761,7 +1761,7 @@ private struct MessageRow: View {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(alignment: .firstTextBaseline) {
                             Text(message.from.name)
-                                .font(.system(size: 14, weight: .semibold))
+                                .scaledFont(size: 14, weight: .semibold)
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
 
@@ -1772,7 +1772,7 @@ private struct MessageRow: View {
                             // actively in than a date stamp. Older messages keep the
                             // abbreviated date format.
                             Text(Self.formattedHeaderDate(message.date))
-                                .font(.system(size: 11))
+                                .scaledFont(size: 11, relativeTo: .caption2)
                                 .foregroundStyle(AppTheme.mutedText)
                                 // Don't let long sender names truncate the date — its
                                 // information value beats the truncation symmetry.
@@ -1785,7 +1785,7 @@ private struct MessageRow: View {
                             // placeholder so the row never renders blank.
                             let snippet = (message.plainText.flatMap { $0.isEmpty ? nil : $0 }) ?? (message.subject.isEmpty ? "(no preview)" : message.subject)
                             Text(snippet)
-                                .font(.system(size: 13))
+                                .scaledFont(size: 13)
                                 .foregroundStyle(AppTheme.mutedText)
                                 .lineLimit(1)
                         } else {
@@ -1795,10 +1795,10 @@ private struct MessageRow: View {
                             } label: {
                                 HStack(spacing: 4) {
                                     Text("To: \(toNames.isEmpty ? "Me" : toNames)")
-                                        .font(.system(size: 12))
+                                        .scaledFont(size: 12)
                                         .foregroundStyle(AppTheme.mutedText)
                                     Image(systemName: showDetails ? "chevron.up" : "chevron.down")
-                                        .font(.system(size: 10))
+                                        .scaledFont(size: 10, relativeTo: .caption2)
                                         .foregroundStyle(AppTheme.mutedText)
                                 }
                             }
@@ -1897,7 +1897,7 @@ private struct MessageRow: View {
                     } else if let plain = message.plainText, !plain.isEmpty {
                         // Show plain text while WKWebView initializes in the background
                         Text(plain)
-                            .font(.system(size: 15))
+                            .scaledFont(size: 15)
                             .foregroundStyle(.primary)
                             .lineSpacing(2)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1913,7 +1913,7 @@ private struct MessageRow: View {
                     }
                 } else if let plain = message.plainText, !plain.isEmpty {
                     Text(plain)
-                        .font(.system(size: 15))
+                        .scaledFont(size: 15)
                         .foregroundStyle(.primary)
                         .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1922,7 +1922,7 @@ private struct MessageRow: View {
                         .textSelection(.enabled)
                 } else {
                     Text("No content")
-                        .font(.system(size: 14))
+                        .scaledFont(size: 14)
                         .foregroundStyle(AppTheme.mutedText)
                         .italic()
                         .padding(.horizontal, 16)
@@ -2014,17 +2014,17 @@ private struct MessageRow: View {
     private func detailRow(label: String, value: String, secondary: String?) -> some View {
         HStack(spacing: 8) {
             Text(label)
-                .font(.system(size: 12))
+                .scaledFont(size: 12)
                 .foregroundStyle(AppTheme.mutedText)
                 .frame(width: 36, alignment: .leading)
             Text(value)
-                .font(.system(size: 12, weight: .medium))
+                .scaledFont(size: 12, weight: .medium)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
             if let secondary {
                 Spacer(minLength: 4)
                 Text(secondary)
-                    .font(.system(size: 12))
+                    .scaledFont(size: 12)
                     .foregroundStyle(AppTheme.mutedText)
                     .lineLimit(1)
             }
@@ -2048,17 +2048,17 @@ private struct MessageRow: View {
                             .frame(width: 36, height: 36)
                             .overlay(
                                 Text(attachmentLabel(for: attachment.mimeType))
-                                    .font(.system(size: 9, weight: .bold))
+                                    .scaledFont(size: 9, weight: .bold, relativeTo: .caption2)
                                     .foregroundStyle(.white)
                             )
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(attachment.filename)
-                                .font(.system(size: 13, weight: .medium))
+                                .scaledFont(size: 13, weight: .medium)
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
                             Text(formatSize(attachment.size))
-                                .font(.system(size: 11))
+                                .scaledFont(size: 11, relativeTo: .caption2)
                                 .foregroundStyle(AppTheme.mutedText)
                         }
                         Spacer()
@@ -2066,7 +2066,7 @@ private struct MessageRow: View {
                             ButtonInlineProgressView(tint: .secondary, side: AppTheme.Metrics.compactInlineSpinner)
                         } else {
                             Image(systemName: "arrow.down.circle")
-                                .font(.system(size: 15))
+                                .scaledFont(size: 15)
                                 .foregroundStyle(AppTheme.mutedText)
                         }
                     }
@@ -2086,7 +2086,7 @@ private struct MessageRow: View {
 
             if let attachmentError {
                 Text(attachmentError)
-                    .font(.system(size: 11))
+                    .scaledFont(size: 11, relativeTo: .caption2)
                     .foregroundStyle(AppTheme.danger)
                     .padding(.top, 2)
             }

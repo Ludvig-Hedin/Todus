@@ -23,6 +23,10 @@ struct MainTabView: View {
     @State private var showCreateSheet = false
     @State private var createSheetInitialType: CreateItemType = .auto
     @State private var showSessionExpiredConfirm = false
+    /// Unsynced-task count captured when the session-expired banner is tapped —
+    /// signing in again wipes local data, so the confirm warns before deleting
+    /// tasks that never reached the server (TD-03).
+    @State private var sessionExpiredUnsyncedCount = 0
     @State private var calendarPermissionGranted = false
 
     @State private var homeTabId = UUID()
@@ -72,34 +76,49 @@ struct MainTabView: View {
 
     // MARK: - Body
 
+    /// Any transient top banner active — drives the top safe-area inset so the
+    /// stack reserves space instead of overlaying the nav/toolbar row.
+    private var anyTopBannerVisible: Bool {
+        !services.networkMonitor.isConnected
+            || services.authService.isSessionExpired
+            || captureFailureVisible
+            || captureTruncatedVisible
+    }
+
     var body: some View {
-        ZStack(alignment: .top) {
-            tabView
+        tabView
+        // Stacked transient banners — VStack keeps them from overlapping when
+        // more than one is active (e.g. offline + capture failure). Rendered as
+        // a top safeAreaInset so they reserve space and push each tab's
+        // nav/toolbar row down instead of covering the title and trailing
+        // buttons (TD-25).
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if anyTopBannerVisible {
+                VStack(spacing: 6) {
+                    if !services.networkMonitor.isConnected {
+                        offlineBanner
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
 
-            // Stacked transient banners — VStack keeps them from overlapping
-            // when more than one is active (e.g. offline + capture failure).
-            VStack(spacing: 6) {
-                if !services.networkMonitor.isConnected {
-                    offlineBanner
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
+                    if services.authService.isSessionExpired {
+                        sessionExpiredBanner
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
 
-                if services.authService.isSessionExpired {
-                    sessionExpiredBanner
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
+                    if captureFailureVisible {
+                        captureFailureBanner
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
 
-                if captureFailureVisible {
-                    captureFailureBanner
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                    if captureTruncatedVisible {
+                        captureTruncatedBanner
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                 }
-
-                if captureTruncatedVisible {
-                    captureTruncatedBanner
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
+                .padding(.top, 4)
+                .padding(.bottom, 6)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
-            .padding(.top, 4)
         }
         .animation(.easeInOut(duration: 0.3), value: services.networkMonitor.isConnected)
         .animation(.easeInOut(duration: 0.3), value: services.authService.isSessionExpired)
@@ -535,6 +554,7 @@ struct MainTabView: View {
 
     private var sessionExpiredBanner: some View {
         Button {
+            sessionExpiredUnsyncedCount = services.unsyncedTaskCount()
             showSessionExpiredConfirm = true
         } label: {
             HStack(spacing: 8) {
@@ -553,11 +573,19 @@ struct MainTabView: View {
         }
         .buttonStyle(.plain)
         .confirmationDialog("Your session has expired", isPresented: $showSessionExpiredConfirm, titleVisibility: .visible) {
-            Button("Sign In Again") {
+            // Destructive when unsynced tasks exist — signing in again wipes
+            // local data, deleting tasks that never reached the server (TD-03).
+            Button("Sign In Again", role: sessionExpiredUnsyncedCount > 0 ? .destructive : nil) {
                 services.authService.isSessionExpired = false
                 services.signOut()
             }
             Button("Cancel", role: .cancel) {}
+        } message: {
+            if sessionExpiredUnsyncedCount > 0 {
+                Text(sessionExpiredUnsyncedCount == 1
+                    ? "1 task hasn't synced yet and will be deleted."
+                    : "\(sessionExpiredUnsyncedCount) tasks haven't synced yet and will be deleted.")
+            }
         }
     }
 }

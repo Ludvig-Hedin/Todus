@@ -322,8 +322,10 @@ final class TaskCaptureService {
     }
 
     func clearCompletedTasks(filteredBy folderID: UUID?, in context: ModelContext) {
+        // Skip models already deleted but not yet saved — touching them mutates
+        // deleted PersistentModels, a known SwiftData crash vector. (TD-13)
         let tasks = ((try? context.fetch(FetchDescriptor<TaskRecord>())) ?? []).filter { task in
-            task.status == .done && (folderID == nil || task.folderID == folderID)
+            !task.isDeleted && task.status == .done && (folderID == nil || task.folderID == folderID)
         }
 
         guard !tasks.isEmpty else { return }
@@ -543,6 +545,12 @@ final class TaskCaptureService {
             for remote in remoteFolders {
                 guard let uuid = UUID(uuidString: remote.id) else { continue }
                 if let local = foldersByID[uuid] {
+                    // Skip the server-wins overwrite while a local mutation for this
+                    // folder is still queued/in flight — a stale list response would
+                    // otherwise revert an in-flight rename. The pending upsert pushes
+                    // local state up; the next sync pass reconciles. (TD-21a)
+                    // uuid.uuidString matches the uppercase ids used at enqueue time.
+                    if folderSyncService.hasPending(id: uuid.uuidString) { continue }
                     local.name = remote.name
                     local.colorHex = remote.color
                     local.iconName = remote.icon
@@ -644,7 +652,13 @@ final class TaskCaptureService {
                 return
             }
 
-            task.title = parsed.title
+            // Only apply the AI-parsed title if the user hasn't already renamed the
+            // task — updateTitle/updateTaskDetails flip parseState to .parsed, so a
+            // still-.pending state means the instant title is untouched. Without this
+            // guard, an immediate manual rename snapped back seconds later. (TD-08)
+            if task.parseState == .pending {
+                task.title = parsed.title
+            }
             // Only apply AI-parsed date if user didn't manually set one in the composer
             let appliedNewDueDate: Bool
             if task.dueDate == nil, let parsedDate = parsed.dueDate {
@@ -888,7 +902,7 @@ final class TaskCaptureService {
         // Optimistic count was bumped above. Roll back on sync failure so the local
         // mirror doesn't drift from the server over time. fetchFolderSummary still
         // reconciles eventually, but rolling back keeps the UI honest in the meantime.
-        Task { @MainActor [weak self, folder, title, subtitle] in
+        Task { @MainActor [weak self, folder, item, title, subtitle] in
             guard let self else { return }
             do {
                 try await syncFolderItemAdd(
@@ -899,6 +913,12 @@ final class TaskCaptureService {
                     subtitle: subtitle
                 )
             } catch {
+                // Roll back BOTH halves of the optimistic insert — the count AND the
+                // FolderItemRecord row. Decrementing only the count left a phantom row
+                // the server never learned about. (TD-21b)
+                if !item.isDeleted {
+                    context.delete(item)
+                }
                 folder.cachedItemCount = max(0, folder.cachedItemCount - 1)
                 try? context.save()
             }

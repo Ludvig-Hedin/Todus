@@ -890,6 +890,23 @@ final class AppServices {
         }
     }
 
+    /// Number of local tasks that have never reached the server (`.localOnly`,
+    /// `.pendingUpload`, `.failed`). Those rows exist only on this device, so
+    /// the sign-out confirmations use this to warn before
+    /// `wipeLocalAccountData()` deletes them.
+    func unsyncedTaskCount() -> Int {
+        guard let context = modelContainer?.mainContext else { return 0 }
+        let unsyncedStates = [
+            SyncState.localOnly.rawValue,
+            SyncState.pendingUpload.rawValue,
+            SyncState.failed.rawValue,
+        ]
+        let descriptor = FetchDescriptor<TaskRecord>(
+            predicate: #Predicate { unsyncedStates.contains($0.syncStateRawValue) }
+        )
+        return (try? context.fetchCount(descriptor)) ?? 0
+    }
+
     /// Deletes SwiftData TaskRecord/FolderRecord rows so a sign-in by a
     /// different user on this device starts with a clean local store. Local
     /// rows are not authoritative — they re-sync from the backend on first

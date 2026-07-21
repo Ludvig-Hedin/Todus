@@ -60,7 +60,11 @@ struct InboxView<Footer: View>: View {
                     ForEach(smartBuckets, id: \.bucket.id) { group in
                         Section {
                             bucketHeader(group.bucket, count: group.tasks.count)
-                            ForEach(group.tasks) { task in
+                            // Filter deleted models at render time: a body pass can run
+                            // between a delete-save and the deferred digest recompute,
+                            // and touching a deleted PersistentModel is a known
+                            // SwiftData crash vector. (TD-13)
+                            ForEach(group.tasks.filter { !$0.isDeleted }) { task in
                                 TaskRowView(task: task) {
                                     taskPendingMove = task
                                 } onOpenDetails: {
@@ -75,7 +79,8 @@ struct InboxView<Footer: View>: View {
                     completedSection
                 } else {
                     Section {
-                        ForEach(visibleTasks) { task in
+                        // Skip deleted models — see the smart-bucket ForEach above. (TD-13)
+                        ForEach(visibleTasks.filter { !$0.isDeleted }) { task in
                             TaskRowView(task: task) {
                                 taskPendingMove = task
                             } onOpenDetails: {
@@ -251,13 +256,13 @@ struct InboxView<Footer: View>: View {
         let tint = bucketTint(bucket)
         HStack(spacing: 8) {
             Image(systemName: bucket.systemImage)
-                .font(.system(size: 11, weight: .bold))
+                .scaledFont(size: 11, weight: .bold, relativeTo: .caption2)
                 .foregroundStyle(tint)
                 .frame(width: 16, height: 16)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(bucket.title)
-                        .font(.system(size: 15, weight: .semibold))
+                        .scaledFont(size: 15, weight: .semibold)
                         .tracking(-0.2)
                         .foregroundStyle(.primary)
                     Text("\(count)")
@@ -268,7 +273,7 @@ struct InboxView<Footer: View>: View {
                         .background(tint.opacity(0.12), in: Capsule())
                 }
                 Text(bucket.subtitle)
-                    .font(.system(size: 12, weight: .medium))
+                    .scaledFont(size: 12, weight: .medium)
                     .foregroundStyle(AppTheme.mutedText)
             }
             Spacer()
@@ -297,14 +302,14 @@ struct InboxView<Footer: View>: View {
             Section {
                 HStack {
                     Text("Recently completed")
-                        .font(.system(size: 12, weight: .semibold))
+                        .scaledFont(size: 12, weight: .semibold)
                         .tracking(-0.1)
                         .foregroundStyle(AppTheme.mutedText)
                     Spacer()
                     Button("Clear all") {
                         showsClearCompletedConfirmation = true
                     }
-                    .font(.system(size: 12, weight: .semibold))
+                    .scaledFont(size: 12, weight: .semibold)
                     .foregroundStyle(Color(red: 0.85, green: 0.30, blue: 0.25))
                 }
                 .padding(.top, 14)
@@ -315,9 +320,13 @@ struct InboxView<Footer: View>: View {
                 .listRowSeparator(.hidden)
                 .accessibilityAddTraits(.isHeader)
 
-                let visibleCompleted = showsOlderCompleted
+                // Filter deleted models at render time — after "Clear all" saves the
+                // bulk delete, a body pass can still run against these cached arrays
+                // before the digest-driven recompute lands. (TD-13)
+                let visibleCompleted = (showsOlderCompleted
                     ? (completedTasks + olderCompletedTasks)
-                    : completedTasks
+                    : completedTasks)
+                    .filter { !$0.isDeleted }
 
                 // Tight list with dividers instead of card-per-item: removes the
                 // big card backgrounds + stacked 2pt row insets that were producing
@@ -365,7 +374,7 @@ struct InboxView<Footer: View>: View {
                         Text(showsOlderCompleted
                              ? "Hide older"
                              : "Show \(olderCompletedTasks.count) older completed")
-                            .font(.system(size: 12, weight: .semibold))
+                            .scaledFont(size: 12, weight: .semibold)
                             .foregroundStyle(AppTheme.mutedText)
                             .padding(.vertical, 8)
                             .padding(.leading, 32)
@@ -384,27 +393,33 @@ struct InboxView<Footer: View>: View {
     /// vertical padding, just a checkmark + strikethrough title. Dividers are
     /// added by the caller via overlay so they don't ride the swipe action.
     private func completedRow(_ task: TaskRecord) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(AppTheme.mutedText.opacity(0.7))
-                .frame(width: 26, height: 26)
-            Text(task.title)
-                .font(.system(size: 14, weight: .regular))
-                .foregroundStyle(AppTheme.mutedText)
-                .strikethrough(color: AppTheme.mutedText.opacity(0.45))
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer()
-        }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-        .onTapGesture {
+        // Real Button instead of a bare onTapGesture so VoiceOver / Switch
+        // Control can reach and operate the restore action. (TD-12)
+        Button {
             withAnimation(.snappy(duration: 0.22)) {
                 captureService.toggleCompletion(task, in: modelContext)
             }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .scaledFont(size: 15, weight: .medium)
+                    .foregroundStyle(AppTheme.mutedText.opacity(0.7))
+                    .frame(width: 26, height: 26)
+                Text(task.title)
+                    .scaledFont(size: 14, weight: .regular)
+                    .foregroundStyle(AppTheme.mutedText)
+                    .strikethrough(color: AppTheme.mutedText.opacity(0.45))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(task.title), completed")
+        .accessibilityHint("Restores the task to the active list")
     }
 
     private var emptyState: some View {
@@ -412,16 +427,16 @@ struct InboxView<Footer: View>: View {
             Spacer()
 
             Image(systemName: emptyStateIcon)
-                .font(.system(size: 32, weight: .medium))
+                .scaledFont(size: 32, weight: .medium)
                 .foregroundStyle(emptyStateTint)
                 .appIconButton(size: 48)
 
             Text(emptyStateTitle)
-                .font(.system(size: 22, weight: .semibold))
+                .scaledFont(size: 22, weight: .semibold)
                 .tracking(-0.4)
 
             Text(emptyStateSubtitle)
-                .font(.system(size: 14, weight: .medium))
+                .scaledFont(size: 14, weight: .medium)
                 .tracking(-0.2)
                 .foregroundStyle(AppTheme.mutedText)
                 .multilineTextAlignment(.center)

@@ -32,7 +32,7 @@ struct EmailRowView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(thread.from.name)
-                        .font(.system(size: 15, weight: thread.unread ? .bold : .semibold))
+                        .scaledFont(size: 15, weight: thread.unread ? .bold : .semibold)
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         // `.lineLimit(1)` truncates long sender names. VoiceOver already
@@ -45,14 +45,14 @@ struct EmailRowView: View {
                     Spacer(minLength: 8)
 
                     Text(timeString)
-                        .font(.system(size: 12, weight: .medium))
+                        .scaledFont(size: 12, weight: .medium)
                         .foregroundStyle(AppTheme.subtleText)
                 }
 
                 // Subject + unread indicator on the right
                 HStack(spacing: 6) {
                     Text(thread.subject)
-                        .font(.system(size: 14, weight: thread.unread ? .semibold : .medium))
+                        .scaledFont(size: 14, weight: thread.unread ? .semibold : .medium)
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         // Same rationale as the sender name above — full subject on
@@ -66,7 +66,7 @@ struct EmailRowView: View {
                     // invisible in the list.
                     if thread.isStarredInLabels {
                         Image(systemName: "star.fill")
-                            .font(.system(size: 10))
+                            .scaledFont(size: 10, relativeTo: .caption2)
                             .foregroundStyle(.yellow)
                     }
 
@@ -78,7 +78,7 @@ struct EmailRowView: View {
                 }
 
                 Text(thread.snippet)
-                    .font(.system(size: 13))
+                    .scaledFont(size: 13)
                     .foregroundStyle(AppTheme.subtleText)
                     .lineLimit(1)
             }

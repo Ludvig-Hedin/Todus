@@ -8,6 +8,10 @@ struct MoreSheetView: View {
     @Environment(AppServices.self) private var services
     var showsDone: Bool = true
     let onNavigate: (AppTab) -> Void
+    /// Settings is normally reached via the avatar button, but users hunting for
+    /// it expect the overflow tab to have it too (audit TD-24). Presented as a
+    /// sheet because SettingsView owns its own NavigationStack.
+    @State private var showSettings = false
 
     /// Content tabs the user hasn't placed in the bar — these are the pages
     /// that need this overflow to stay reachable.
@@ -46,6 +50,15 @@ struct MoreSheetView: View {
                     Text("Pick up to 4 tabs for the bar. Everything else stays here.")
                 }
 
+                Section {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Label("Settings", systemImage: "gearshape")
+                            .foregroundStyle(.primary)
+                    }
+                }
+
                 // Legacy web shim — an internal fallback, not something to show
                 // every user next to the native Docs entry. Gate behind the
                 // developer allowlist (same mechanism as the Design System viewer).
@@ -67,6 +80,9 @@ struct MoreSheetView: View {
             .background(AppTheme.backgroundTop)
             .navigationTitle("More")
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
+            }
             .toolbar {
                 if showsDone {
                     ToolbarItem(placement: .topBarTrailing) {

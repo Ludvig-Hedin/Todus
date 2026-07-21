@@ -1,3 +1,4 @@
+import Accessibility
 import SwiftUI
 
 /// Lightweight transient toast for surfacing the result of an async action
@@ -17,11 +18,27 @@ struct ToastMessage: Equatable, Identifiable {
     let id: UUID
     let text: String
     let style: Style
+    /// Optional inline action (e.g. "Undo") rendered as a trailing button in
+    /// the capsule. Tapping it runs `action` and dismisses the toast.
+    let actionTitle: String?
+    let action: (() -> Void)?
 
-    init(text: String, style: Style = .info) {
+    init(
+        text: String,
+        style: Style = .info,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) {
         self.id = UUID()
         self.text = text
         self.style = style
+        self.actionTitle = actionTitle
+        self.action = action
+    }
+
+    // Closures aren't Equatable — identity is all the toast modifier compares.
+    static func == (lhs: ToastMessage, rhs: ToastMessage) -> Bool {
+        lhs.id == rhs.id
     }
 
     static func success(_ text: String) -> ToastMessage { .init(text: text, style: .success) }
@@ -31,6 +48,9 @@ struct ToastMessage: Equatable, Identifiable {
 
 struct ToastOverlay: View {
     let message: ToastMessage
+    /// Called after the action button fires so the presenting modifier can
+    /// dismiss the toast without each call site having to clear the binding.
+    var onAction: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 10) {
@@ -42,6 +62,11 @@ struct ToastOverlay: View {
                 .foregroundStyle(.primary)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
+            if let actionTitle = message.actionTitle {
+                Button(actionTitle) { runAction() }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -51,6 +76,19 @@ struct ToastOverlay: View {
         .padding(.horizontal, 24)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(message.text)
+        // Surface the action to VoiceOver as a named custom action — the inline
+        // button is merged away by `.combine`, so without this "Undo" would be
+        // invisible to assistive tech.
+        .accessibilityActions {
+            if let actionTitle = message.actionTitle {
+                Button(actionTitle) { runAction() }
+            }
+        }
+    }
+
+    private func runAction() {
+        message.action?()
+        onAction?()
     }
 
     private var iconName: String {
@@ -81,7 +119,7 @@ private struct ToastModifier: ViewModifier {
         content
             .overlay(alignment: .bottom) {
                 if let message {
-                    ToastOverlay(message: message)
+                    ToastOverlay(message: message, onAction: { dismiss() })
                         .padding(.bottom, bottomInset)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                         .onTapGesture { dismiss() }
@@ -92,6 +130,12 @@ private struct ToastModifier: ViewModifier {
             .onChange(of: message?.id) { _, newId in
                 dismissTask?.cancel()
                 guard newId != nil else { return }
+                // Announce the toast to VoiceOver — it auto-dismisses, so without
+                // an announcement confirmations like "Task added to Inbox" and
+                // failure toasts are silent to screen-reader users (TD-12).
+                if let message {
+                    AccessibilityNotification.Announcement(message.text).post()
+                }
                 dismissTask = Task { @MainActor in
                     try? await Task.sleep(for: .seconds(duration))
                     guard !Task.isCancelled else { return }

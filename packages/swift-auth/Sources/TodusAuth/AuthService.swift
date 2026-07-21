@@ -80,6 +80,15 @@ public final class AuthService: NSObject {
     /// UI shows a "Session expired" banner when true.
     public var isSessionExpired = false
 
+    /// True when there is a real session that can expire — authenticated, or a
+    /// bearer token is still present. Guests and signed-out users have no
+    /// session, so 401s from their unauthenticated requests must never raise
+    /// the "Session expired" banner. Callers should capture this BEFORE
+    /// `attemptSilentRefresh()`, which hard-signs-out on confirmed expiry.
+    public var hasSessionToExpire: Bool {
+        isAuthenticated || bearerToken != nil
+    }
+
     /// Set true by `_uiTesting_seedAuthenticatedSession`. When a seeded XCUITest
     /// session is active, the silent-refresh and profile-fetch paths skip the
     /// network and never sign out — the fake bearer the harness injects is

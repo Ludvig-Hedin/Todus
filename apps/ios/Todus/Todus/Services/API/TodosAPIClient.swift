@@ -418,6 +418,11 @@ final class TodosAPIClient {
                 authService.captureRotatedToken(from: http)
 
                 if http.statusCode == 401 {
+                    // Captured before the refresh attempt (which hard-signs-out on
+                    // confirmed expiry). Guests fire unauthenticated calls that 401
+                    // by design — they have no session to expire, so the banner
+                    // must never appear for them.
+                    let hadSession = authService.hasSessionToExpire
                     if !didRefresh {
                         didRefresh = true
                         let refreshed = await authService.attemptSilentRefresh()
@@ -425,7 +430,7 @@ final class TodosAPIClient {
                     }
                     // A seeded UI-testing session legitimately 401s against the real
                     // backend; don't raise the global "Session expired" banner for it.
-                    if !authService.isUITestingSession {
+                    if hadSession && !authService.isUITestingSession {
                         authService.isSessionExpired = true
                     }
                     throw APIError.unauthorized

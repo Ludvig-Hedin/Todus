@@ -140,7 +140,7 @@ struct TaskTableView: View {
             Text("Due")
                 .frame(width: 72, alignment: .leading)
         }
-        .font(.system(size: 11, weight: .semibold))
+        .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
         .tracking(0.4)
         .textCase(.uppercase)
         .foregroundStyle(AppTheme.mutedText)
@@ -154,76 +154,82 @@ struct TaskTableView: View {
     @State private var hoveringRow: UUID? = nil
 
     private func tableRow(_ task: TaskRecord) -> some View {
-        HStack(spacing: 0) {
-            // Leading checkbox column — lets users complete a row directly from
-            // the table view, matching list / board parity. (UX P10.)
-            Button {
-                // Same tactile pattern as TaskRowView.toggleCheckbox — the table
-                // was the only surface whose primary checkbox completed silently.
-                let willBecomeDone = !task.completed
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                withAnimation(AppTheme.Motion.base) {
-                    captureService.toggleCompletion(task, in: modelContext)
-                }
-                if willBecomeDone {
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                }
-            } label: {
-                Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(task.completed ? task.status.tintColor : AppTheme.subtleText)
-                    .frame(width: 30, height: 30)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(task.completed ? "Mark as incomplete" : "Mark as complete")
-
-            // Inner status icon removed — TaskStatus.todo's symbol is `circle`,
-            // which collided with the checkbox column to render as a double-circle.
-            // The trailing Status pill already shows the same icon + label, so the
-            // duplicate was pure noise.
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    if task.priority != .none {
-                        Circle()
-                            .fill(priorityColor(task.priority))
-                            .frame(width: 5, height: 5)
+        // Real Button (matching TaskRowView's row pattern) instead of a bare
+        // onTapGesture so VoiceOver / Switch Control can open the task. (TD-12)
+        Button {
+            selectedTask = task
+        } label: {
+            HStack(spacing: 0) {
+                // Leading checkbox column — lets users complete a row directly from
+                // the table view, matching list / board parity. (UX P10.)
+                Button {
+                    // Same tactile pattern as TaskRowView.toggleCheckbox — the table
+                    // was the only surface whose primary checkbox completed silently.
+                    let willBecomeDone = !task.completed
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(AppTheme.Motion.base) {
+                        captureService.toggleCompletion(task, in: modelContext)
                     }
-                    Text(task.title)
-                        .font(.system(size: 15, weight: .medium))
-                        .tracking(-0.15)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
+                    if willBecomeDone {
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    }
+                } label: {
+                    Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
+                        .scaledFont(size: 18, weight: .medium)
+                        .foregroundStyle(task.completed ? task.status.tintColor : AppTheme.subtleText)
+                        .frame(width: 30, height: 30)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(task.completed ? "Mark as incomplete" : "Mark as complete")
 
-                if !task.taskDescription.isEmpty && task.taskDescription != task.title {
-                    Text(task.taskDescription)
-                        .font(.system(size: 12, weight: .regular))
-                        .foregroundStyle(AppTheme.mutedText)
-                        .lineLimit(1)
+                // Inner status icon removed — TaskStatus.todo's symbol is `circle`,
+                // which collided with the checkbox column to render as a double-circle.
+                // The trailing Status pill already shows the same icon + label, so the
+                // duplicate was pure noise.
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        if task.priority != .none {
+                            Circle()
+                                .fill(priorityColor(task.priority))
+                                .frame(width: 5, height: 5)
+                        }
+                        Text(task.title)
+                            .scaledFont(size: 15, weight: .medium)
+                            .tracking(-0.15)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                    }
+
+                    if !task.taskDescription.isEmpty && task.taskDescription != task.title {
+                        Text(task.taskDescription)
+                            .scaledFont(size: 12, weight: .regular)
+                            .foregroundStyle(AppTheme.mutedText)
+                            .lineLimit(1)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                statusPill(task.status)
+                    .frame(width: 84, alignment: .leading)
+
+                Group {
+                    if let dueDate = task.dueDate {
+                        Text(TaskDateFormatter.dueFormatter.string(from: dueDate))
+                            .foregroundStyle(dueDateColor(dueDate))
+                    } else {
+                        Text("—")
+                            .foregroundStyle(AppTheme.mutedText.opacity(0.4))
+                    }
+                }
+                .scaledFont(size: 12, weight: .medium)
+                .frame(width: 72, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            statusPill(task.status)
-                .frame(width: 84, alignment: .leading)
-
-            Group {
-                if let dueDate = task.dueDate {
-                    Text(TaskDateFormatter.dueFormatter.string(from: dueDate))
-                        .foregroundStyle(dueDateColor(dueDate))
-                } else {
-                    Text("—")
-                        .foregroundStyle(AppTheme.mutedText.opacity(0.4))
-                }
-            }
-            .font(.system(size: 12, weight: .medium))
-            .frame(width: 72, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
-        .contentShape(Rectangle())
-        .onTapGesture { selectedTask = task }
+        .buttonStyle(.plain)
         .contextMenu {
             Button {
                 selectedTask = task
@@ -323,9 +329,9 @@ struct TaskTableView: View {
     private func statusPill(_ status: TaskStatus) -> some View {
         HStack(spacing: 3) {
             Image(systemName: status.systemImage)
-                .font(.system(size: 9, weight: .bold))
+                .scaledFont(size: 11, weight: .bold, relativeTo: .caption2)
             Text(status.title)
-                .font(.system(size: 11, weight: .semibold))
+                .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                 .tracking(-0.1)
         }
         .foregroundStyle(status.tintColor)
@@ -391,13 +397,13 @@ struct TaskTableView: View {
         VStack(spacing: 12) {
             Spacer()
             Image(systemName: searchText.isEmpty ? "tablecells" : "magnifyingglass")
-                .font(.system(size: 28, weight: .medium))
+                .scaledFont(size: 28, weight: .medium)
                 .foregroundStyle(AppTheme.mutedText)
                 .appIconButton(size: 44)
             Text(searchText.isEmpty ? "No visible tasks." : "No matching tasks.")
-                .font(.system(size: 18, weight: .semibold))
+                .scaledFont(size: 18, weight: .semibold)
             Text(searchText.isEmpty ? "Table view focuses on active work. Completed tasks stay in List." : "Try a different search term.")
-                .font(.system(size: 13, weight: .medium))
+                .scaledFont(size: 13, weight: .medium)
                 .foregroundStyle(AppTheme.mutedText)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)

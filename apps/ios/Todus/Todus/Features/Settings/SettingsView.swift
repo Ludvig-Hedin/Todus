@@ -6,6 +6,15 @@ struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppServices.self) private var services
     @State private var showsLogoutConfirmation = false
+    /// Unsynced-task count captured when Log out is tapped — sign-out wipes
+    /// local data, so the confirm warns before deleting tasks that never
+    /// reached the server (TD-03).
+    @State private var logoutUnsyncedCount = 0
+    /// Same warning for the guest-mode "Sign in to your account" button, which
+    /// also runs `signOut()` — guest tasks are all `.localOnly`, so without a
+    /// confirm they'd be silently wiped (TD-03 follow-up).
+    @State private var showsGuestSignInConfirmation = false
+    @State private var guestUnsyncedCount = 0
     @State private var showsDeleteConfirmation = false
     @State private var showsDeleteAlert = false
     @State private var deleteConfirmText = ""
@@ -34,7 +43,31 @@ struct SettingsView: View {
     @State private var remindersPermissionError: String?
     @State private var activeSessions: [ActiveSessionRecord] = []
     @State private var isLoadingSessions = false
+    /// Snapshot of the shared AI profile fields taken after the initial server
+    /// load, so swipe-dismiss can detect edits and save them (the sheet is
+    /// drag-dismissable, and `loadSharedAIProfile` would otherwise overwrite
+    /// unsaved edits with the stale server copy on next open) (TD-10).
+    @State private var aiProfileSnapshot: AIProfileSnapshot?
+    /// Set by the Done button so `onDisappear` doesn't save a second time.
+    @State private var didSaveAIProfileOnDone = false
     // revokingSessionIDs and isRevokingAllSessions live in SessionsSettingsView now
+
+    /// Equatable bundle of the fields `saveSharedAIProfile` pushes to the server.
+    private struct AIProfileSnapshot: Equatable {
+        let contextAboutYou: String
+        let customInstructions: String
+        let location: String
+        let automationPolicy: AssistantAutomationPolicy
+    }
+
+    private var currentAIProfileSnapshot: AIProfileSnapshot {
+        AIProfileSnapshot(
+            contextAboutYou: services.contextAboutYou,
+            customInstructions: services.customInstructions,
+            location: services.location,
+            automationPolicy: services.assistantAutomationPolicy
+        )
+    }
 
     // AI permission toggles bind directly to the live AIChatService (see
     // aiPermissionsSection) so a change takes effect on the running session's
@@ -96,6 +129,7 @@ struct SettingsView: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Done") {
+                            didSaveAIProfileOnDone = true
                             dismiss()
                             Task { await services.saveSharedAIProfile() }
                         }
@@ -109,6 +143,19 @@ struct SettingsView: View {
             // Refresh profile data (name, avatar) when settings opens
             await services.authService.fetchUserProfile()
             await services.loadSharedAIProfile()
+            // Baseline for the dismiss-save comparison — taken after the server
+            // load so a hydration diff doesn't read as a user edit.
+            aiProfileSnapshot = currentAIProfileSnapshot
+        }
+        .onDisappear {
+            // Swipe-dismiss path: the sheet is drag-dismissable, so persist edited
+            // AI-profile fields here too — otherwise the next loadSharedAIProfile
+            // reverts them to the server copy. Done already saved via the flag.
+            guard !didSaveAIProfileOnDone,
+                  let snapshot = aiProfileSnapshot,
+                  snapshot != currentAIProfileSnapshot
+            else { return }
+            Task { await services.saveSharedAIProfile() }
         }
         .task {
             await services.emailService.checkConnection()
@@ -144,7 +191,31 @@ struct SettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("You can sign back in anytime.")
+            // Sign-out wipes local data — warn when tasks captured offline
+            // would be deleted before they ever reached the server (TD-03).
+            if logoutUnsyncedCount > 0 {
+                Text(logoutUnsyncedCount == 1
+                    ? "1 task hasn't synced yet and will be deleted."
+                    : "\(logoutUnsyncedCount) tasks haven't synced yet and will be deleted.")
+            } else {
+                Text("You can sign back in anytime.")
+            }
+        }
+        // Guest → sign-in also wipes local data; warn before deleting tasks
+        // that were captured as a guest and exist only on this device.
+        .confirmationDialog(
+            "Sign in to your account?",
+            isPresented: $showsGuestSignInConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Continue and delete", role: .destructive) {
+                performGuestSignIn()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(guestUnsyncedCount == 1
+                ? "1 task created as a guest hasn't synced and will be deleted."
+                : "\(guestUnsyncedCount) tasks created as a guest haven't synced and will be deleted.")
         }
         // Delete account — first confirmation step
         .confirmationDialog(
@@ -327,9 +398,14 @@ struct SettingsView: View {
             // Sign in button — only when not authenticated
             if !services.authService.isAuthenticated {
                 Button {
-                    services.authService.hasSeenOnboarding = false
-                    services.signOut()
-                    dismiss()
+                    // signOut() wipes local data — guest tasks are all
+                    // `.localOnly`, so confirm before deleting them.
+                    guestUnsyncedCount = services.unsyncedTaskCount()
+                    if guestUnsyncedCount > 0 {
+                        showsGuestSignInConfirmation = true
+                    } else {
+                        performGuestSignIn()
+                    }
                 } label: {
                     Label("Sign in to your account", systemImage: "person.crop.circle.badge.plus")
                         .foregroundStyle(.primary)
@@ -341,6 +417,7 @@ struct SettingsView: View {
             // the user's profile.
             if services.authService.isAuthenticated {
                 Button(role: .destructive) {
+                    logoutUnsyncedCount = services.unsyncedTaskCount()
                     showsLogoutConfirmation = true
                 } label: {
                     Label("Log out", systemImage: "rectangle.portrait.and.arrow.right")
@@ -1179,6 +1256,14 @@ struct SettingsView: View {
         } catch {
             AppLogger.shared.log("Load sessions failed: \(error.localizedDescription)")
         }
+    }
+
+    /// Guest → auth screen: resets onboarding and signs out (which wipes local
+    /// guest data — callers confirm first when unsynced tasks exist).
+    private func performGuestSignIn() {
+        services.authService.hasSeenOnboarding = false
+        services.signOut()
+        dismiss()
     }
 
     private func performLogout() {

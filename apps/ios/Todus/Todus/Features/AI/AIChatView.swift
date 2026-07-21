@@ -501,16 +501,17 @@ struct AIChatView: View {
                 showsHistory = true
             } label: {
                 Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
-                    .font(.system(size: 15, weight: .semibold))
+                    .scaledFont(size: 15, weight: .semibold)
                     .foregroundStyle(.primary)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Chat history")
         }
 
         // Chat title (or app name when empty) — fills available space, truncates with ellipsis
         ToolbarItem(placement: .principal) {
             Text(chatService.chatTitle ?? "AI Assistant")
-                .font(.system(size: 15, weight: .semibold))
+                .scaledFont(size: 15, weight: .semibold)
                 .tracking(-0.2)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -524,10 +525,11 @@ struct AIChatView: View {
                 }
             } label: {
                 Image(systemName: "square.and.pencil")
-                    .font(.system(size: 15, weight: .semibold))
+                    .scaledFont(size: 15, weight: .semibold)
                     .foregroundStyle(.primary)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("New chat")
         }
 
         // Options menu — conversation actions
@@ -578,9 +580,10 @@ struct AIChatView: View {
                     }
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 15, weight: .semibold))
+                    .scaledFont(size: 15, weight: .semibold)
                     .foregroundStyle(.primary)
             }
+            .accessibilityLabel("Conversation options")
         }
     }
 
@@ -592,21 +595,21 @@ struct AIChatView: View {
             Spacer()
 
             Image(systemName: "wifi.exclamationmark")
-                .font(.system(size: 48, weight: .light))
+                .scaledFont(size: 48, weight: .light)
                 .foregroundStyle(AppTheme.subtleText)
 
             VStack(spacing: 8) {
                 Text("Can't reach the assistant")
-                    .font(.system(size: 20, weight: .bold))
+                    .scaledFont(size: 20, weight: .bold)
 
                 Text(error)
-                    .font(.system(size: 14))
+                    .scaledFont(size: 14)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
 
                 Text("Check your connection and sign-in state, then try again.")
-                    .font(.system(size: 15))
+                    .scaledFont(size: 15)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
@@ -617,9 +620,9 @@ struct AIChatView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 14, weight: .semibold))
+                        .scaledFont(size: 14, weight: .semibold)
                     Text("Retry")
-                        .font(.system(size: 15, weight: .semibold))
+                        .scaledFont(size: 15, weight: .semibold)
                 }
                 .padding(.horizontal, 24)
                 .padding(.vertical, 12)
@@ -653,7 +656,7 @@ struct AIChatView: View {
 
                     HStack(spacing: 8) {
                         Text("How can I help you today?")
-                            .font(.system(size: 20, weight: .semibold))
+                            .scaledFont(size: 20, weight: .semibold)
                             .tracking(-0.3)
                         Spacer(minLength: 0)
                         // Always-visible shuffle button — taps reshuffle the
@@ -665,7 +668,7 @@ struct AIChatView: View {
                             UISelectionFeedbackGenerator().selectionChanged()
                         } label: {
                             Image(systemName: "shuffle")
-                                .font(.system(size: 13, weight: .semibold))
+                                .scaledFont(size: 13, weight: .semibold)
                                 .foregroundStyle(AppTheme.mutedText)
                                 .frame(width: 28, height: 28)
                                 .contentShape(Rectangle())
@@ -708,7 +711,7 @@ struct AIChatView: View {
                                 withAnimation(.snappy(duration: 0.2)) { suggestionsExpanded = false }
                             } label: {
                                 Label("Show less", systemImage: "chevron.up")
-                                    .font(.system(size: 12, weight: .medium))
+                                    .scaledFont(size: 12, weight: .medium)
                                     .foregroundStyle(AppTheme.mutedText)
                             }
                             .buttonStyle(.plain)
@@ -720,7 +723,7 @@ struct AIChatView: View {
                                 withAnimation(.snappy(duration: 0.15)) { suggestionSeed += 1 }
                             } label: {
                                 Label("Refresh", systemImage: "arrow.clockwise")
-                                    .font(.system(size: 12, weight: .medium))
+                                    .scaledFont(size: 12, weight: .medium)
                                     .foregroundStyle(AppTheme.mutedText)
                             }
                             .buttonStyle(.plain)
@@ -733,7 +736,7 @@ struct AIChatView: View {
                             withAnimation(.snappy(duration: 0.2)) { suggestionsExpanded = true }
                         } label: {
                             Text("Show more")
-                                .font(.system(size: 12, weight: .medium))
+                                .scaledFont(size: 12, weight: .medium)
                                 .foregroundStyle(AppTheme.mutedText)
                         }
                         .buttonStyle(.plain)
@@ -747,9 +750,9 @@ struct AIChatView: View {
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "bookmark")
-                                .font(.system(size: 12, weight: .medium))
+                                .scaledFont(size: 12, weight: .medium)
                             Text("Prompt library")
-                                .font(.system(size: 12, weight: .medium))
+                                .scaledFont(size: 12, weight: .medium)
                         }
                         .foregroundStyle(AppTheme.mutedText)
                     }
@@ -966,9 +969,9 @@ struct AIChatView: View {
     private func statusPill(icon: String, label: String, dim: Bool = false) -> some View {
         HStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 10, weight: .semibold))
+                .scaledFont(size: 10, weight: .semibold, relativeTo: .caption2)
             Text(label)
-                .font(.system(size: 11, weight: .medium))
+                .scaledFont(size: 11, weight: .medium, relativeTo: .caption2)
                 .lineLimit(1)
         }
         .foregroundStyle(dim ? AppTheme.subtleText : AppTheme.mutedText)
@@ -997,7 +1000,7 @@ struct AIChatView: View {
     private var connectServicesPrompt: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Connect a service to get started")
-                .font(.system(size: 13, weight: .medium))
+                .scaledFont(size: 13, weight: .medium)
                 .foregroundStyle(AppTheme.mutedText)
             HStack(spacing: 8) {
                 if !calendarConnected && (currentTab == .calendar || currentTab == .home) {
@@ -1005,7 +1008,7 @@ struct AIChatView: View {
                         Task { _ = await services.calendarService.requestAccess() }
                     } label: {
                         Label("Connect Calendar", systemImage: "calendar")
-                            .font(.system(size: 12, weight: .medium))
+                            .scaledFont(size: 12, weight: .medium)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
                             .background(Color.primary.opacity(0.1), in: Capsule())
@@ -1019,7 +1022,7 @@ struct AIChatView: View {
                         dismiss()
                     } label: {
                         Label("Connect Email", systemImage: "envelope")
-                            .font(.system(size: 12, weight: .medium))
+                            .scaledFont(size: 12, weight: .medium)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
                             .background(Color.orange.opacity(0.1), in: Capsule())
@@ -1038,11 +1041,11 @@ struct AIChatView: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: icon)
-                    .font(.system(size: 14, weight: .medium))
+                    .scaledFont(size: 14, weight: .medium)
                     .foregroundStyle(AppTheme.mutedText)
                     .frame(width: 20)
                 Text(text)
-                    .font(.system(size: 15, weight: .medium))
+                    .scaledFont(size: 15, weight: .medium)
                     .foregroundStyle(.primary)
                 Spacer()
             }
@@ -1256,15 +1259,15 @@ struct AIChatView: View {
         Button(action: { if isTappable { action() } }) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 13, weight: .semibold))
+                    .scaledFont(size: 13, weight: .semibold)
                 Text(text)
-                    .font(.system(size: 13, weight: .medium))
+                    .scaledFont(size: 13, weight: .medium)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
                 if isTappable {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .semibold))
+                        .scaledFont(size: 12, weight: .semibold)
                 }
             }
             .foregroundStyle(color)
@@ -1307,7 +1310,7 @@ struct AIChatView: View {
             AnimatedSparkleIcon(size: 14)
 
             Text(thinkingCopy)
-                .font(.system(size: 14, weight: .medium))
+                .scaledFont(size: 14, weight: .medium)
                 .foregroundStyle(AppTheme.mutedText)
                 .id(thinkingCopy)  // force re-render so transition fires
                 .transition(.opacity)
@@ -1329,7 +1332,7 @@ struct AIChatView: View {
                 isShowingAttachmentSheet = true
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 17, weight: .medium))
+                    .scaledFont(size: 17, weight: .medium)
                     .foregroundStyle(AppTheme.mutedText)
                     .frame(width: chatInputControlSize, height: chatInputControlSize)
             }
@@ -1405,18 +1408,19 @@ struct AIChatView: View {
                         if isEditingMessage {
                             HStack(spacing: 6) {
                                 Image(systemName: "pencil")
-                                    .font(.system(size: 12, weight: .semibold))
+                                    .scaledFont(size: 12, weight: .semibold)
                                 Text("Editing")
-                                    .font(.system(size: 13, weight: .semibold))
+                                    .scaledFont(size: 13, weight: .semibold)
                                 Button {
                                     withAnimation(.snappy(duration: 0.15)) {
                                         cancelEdit()
                                     }
                                 } label: {
                                     Image(systemName: "xmark")
-                                        .font(.system(size: 10, weight: .bold))
+                                        .scaledFont(size: 10, weight: .bold, relativeTo: .caption2)
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityLabel("Cancel editing")
                             }
                             .foregroundStyle(.white)
                             .padding(.horizontal, 12)
@@ -1431,9 +1435,9 @@ struct AIChatView: View {
                         if pageContextAttached {
                             HStack(spacing: 6) {
                                 Image(systemName: contextPillIcon)
-                                    .font(.system(size: 13, weight: .semibold))
+                                    .scaledFont(size: 13, weight: .semibold)
                                 Text(contextPillTitle)
-                                    .font(.system(size: 13, weight: .medium))
+                                    .scaledFont(size: 13, weight: .medium)
                                     .lineLimit(1)
                                     .truncationMode(.tail)
                                     .frame(maxWidth: 220)
@@ -1443,9 +1447,10 @@ struct AIChatView: View {
                                     }
                                 } label: {
                                     Image(systemName: "xmark")
-                                        .font(.system(size: 10, weight: .bold))
+                                        .scaledFont(size: 10, weight: .bold, relativeTo: .caption2)
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityLabel("Remove page context")
                             }
                             .foregroundStyle(.primary)
                             .padding(.horizontal, 12)
@@ -1513,7 +1518,7 @@ struct AIChatView: View {
                     showsConfig = true
                 } label: {
                     Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 15, weight: .medium))
+                        .scaledFont(size: 15, weight: .medium)
                         .foregroundStyle(AppTheme.mutedText)
                 }
                 .buttonStyle(.plain)
@@ -1529,10 +1534,11 @@ struct AIChatView: View {
                         Image(systemName: showsFullScreenInput
                               ? "arrow.down.right.and.arrow.up.left"
                               : "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 13, weight: .medium))
+                            .scaledFont(size: 13, weight: .medium)
                             .foregroundStyle(AppTheme.mutedText)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(showsFullScreenInput ? "Exit full screen input" : "Expand input")
                     .frame(width: 30, height: 30)
                     .contentShape(Rectangle())
                     .transition(.scale.combined(with: .opacity))
@@ -1541,7 +1547,7 @@ struct AIChatView: View {
                 // Live voice chat button — opens full-screen voice modal
                 Button { requestStartVoiceChat() } label: {
                     Image(systemName: "waveform")
-                        .font(.system(size: 15, weight: .medium))
+                        .scaledFont(size: 15, weight: .medium)
                         .foregroundStyle(voiceButtonGradient)
                 }
                 .buttonStyle(.plain)
@@ -1562,18 +1568,19 @@ struct AIChatView: View {
                 if chatService.isStreaming {
                     Button { chatService.cancelStream() } label: {
                         Image(systemName: "stop.fill")
-                            .font(.system(size: 13, weight: .bold))
+                            .scaledFont(size: 13, weight: .bold)
                             .foregroundStyle(.white)
                             .frame(width: 30, height: 30)
                             .background(Color.accentColor, in: Circle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("ai.chat.stopButton")
+                    .accessibilityLabel("Stop response")
                     .transition(.scale.combined(with: .opacity))
                 } else {
                     Button(action: requestSendMessage) {
                         Image(systemName: "arrow.up")
-                            .font(.system(size: 15, weight: .bold))
+                            .scaledFont(size: 15, weight: .bold)
                             .foregroundStyle(.white)
                             .frame(width: 30, height: 30)
                             .background(Color.accentColor, in: Circle())
@@ -1582,6 +1589,7 @@ struct AIChatView: View {
                     .disabled(isEmpty)
                     .opacity(isEmpty ? 0.4 : 1)
                     .accessibilityIdentifier("ai.chat.sendButton")
+                    .accessibilityLabel("Send message")
                     .transition(.scale.combined(with: .opacity))
                 }
             }
@@ -1625,19 +1633,20 @@ struct AIChatView: View {
                     }
                 } else {
                     Image(systemName: "doc")
-                        .font(.system(size: 11, weight: .semibold))
+                        .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                 }
                 Text(shortName)
-                    .font(.system(size: 12, weight: .medium))
+                    .scaledFont(size: 12, weight: .medium)
                     .lineLimit(1)
                 Button {
                     pendingAttachments.removeAll { $0 == filename }
                     AttachmentService.shared.delete(filename: filename)
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
+                        .scaledFont(size: 10, weight: .bold, relativeTo: .caption2)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Remove attachment")
             }
             .foregroundStyle(AppTheme.mutedText)
             .padding(.horizontal, 10)
@@ -1657,7 +1666,7 @@ struct AIChatView: View {
                         .frame(width: 56, height: 56)
                         .overlay(
                             Image(systemName: "doc")
-                                .font(.system(size: 18))
+                                .scaledFont(size: 18)
                                 .foregroundStyle(AppTheme.mutedText)
                         )
                 }
@@ -1666,12 +1675,13 @@ struct AIChatView: View {
                     AttachmentService.shared.delete(filename: filename)
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 16))
+                        .scaledFont(size: 16)
                         .foregroundStyle(.white)
                         .background(Color.black.opacity(0.5), in: Circle())
                 }
                 .buttonStyle(.plain)
                 .padding(4)
+                .accessibilityLabel("Remove attachment")
             }
         }
     }
@@ -2184,7 +2194,7 @@ private struct MessageBubble: View {
                             .fill(AppTheme.surfaceSecondary)
                             .overlay(
                                 Image(systemName: "photo")
-                                    .font(.system(size: 18))
+                                    .scaledFont(size: 18)
                                     .foregroundStyle(AppTheme.mutedText)
                             )
                     }
@@ -2194,12 +2204,12 @@ private struct MessageBubble: View {
                         .frame(width: 64, height: 64)
                         .overlay(
                             Image(systemName: "doc.fill")
-                                .font(.system(size: 22))
+                                .scaledFont(size: 22)
                                 .foregroundStyle(AppTheme.mutedText)
                         )
                 }
                 Text(label)
-                    .font(.system(size: 11, weight: .medium))
+                    .scaledFont(size: 11, weight: .medium, relativeTo: .caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -2215,9 +2225,9 @@ private struct MessageBubble: View {
             if let label = message.contextLabel {
                 HStack(spacing: 5) {
                     Image(systemName: message.contextIcon ?? "doc.fill")
-                        .font(.system(size: 11, weight: .semibold))
+                        .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                     Text(label)
-                        .font(.system(size: 12, weight: .medium))
+                        .scaledFont(size: 12, weight: .medium)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -2240,7 +2250,7 @@ private struct MessageBubble: View {
             }
             if !message.content.isEmpty {
                 Text(message.content)
-                    .font(.system(size: 16, weight: .medium))
+                    .scaledFont(size: 16, weight: .medium)
                     .tracking(-0.1)
                     .lineSpacing(3)
                     .foregroundStyle(.primary)
@@ -2316,11 +2326,11 @@ private struct MessageBubble: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .medium))
+                    .scaledFont(size: 12, weight: .medium)
                 Text("Connect \(service.capitalized)")
-                    .font(.system(size: 13, weight: .medium))
+                    .scaledFont(size: 13, weight: .medium)
                 Image(systemName: "arrow.right")
-                    .font(.system(size: 11, weight: .medium))
+                    .scaledFont(size: 11, weight: .medium, relativeTo: .caption2)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
@@ -2498,9 +2508,9 @@ private struct MessageBubble: View {
     private func mutationChip(_ mutation: AIChatTaskMutation) -> some View {
         HStack(spacing: 5) {
             Image(systemName: mutationIcon(mutation))
-                .font(.system(size: 10, weight: .semibold))
+                .scaledFont(size: 10, weight: .semibold, relativeTo: .caption2)
             Text(mutationLabel(mutation))
-                .font(.system(size: 11, weight: .semibold))
+                .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                 .tracking(-0.1)
         }
         .foregroundStyle(mutationColor(mutation))
@@ -2569,12 +2579,13 @@ private struct MessageBubble: View {
                 onRetry()
             } label: {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 14, weight: .medium))
+                    .scaledFont(size: 14, weight: .medium)
                     .foregroundStyle(AppTheme.mutedText)
                     .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Regenerate response")
             .disabled(!canRetry)
             .opacity(canRetry ? 1 : 0.45)
 
@@ -2588,7 +2599,7 @@ private struct MessageBubble: View {
                 }
             } label: {
                 Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
-                    .font(.system(size: 14, weight: .medium))
+                    .scaledFont(size: 14, weight: .medium)
                     .foregroundStyle(didCopy ? .green : AppTheme.mutedText)
                     .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
@@ -2596,6 +2607,7 @@ private struct MessageBubble: View {
             }
             .buttonStyle(.plain)
             .disabled(!canCopy)
+            .accessibilityLabel(didCopy ? "Copied" : "Copy message")
 
             // TODO(P4): Wire thumbs up/down to a chat-feedback endpoint. The
             // existing `assistant.recordFeedback` tRPC route is for the morning
@@ -2721,25 +2733,27 @@ private struct MessageBubble: View {
 /// Displays a spinning globe icon and the search query being executed.
 private struct SearchingIndicator: View {
     let queries: [String]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isRotating = false
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "globe")
-                .font(.system(size: 13, weight: .medium))
+                .scaledFont(size: 13, weight: .medium)
                 .foregroundStyle(AppTheme.mutedText)
                 .rotationEffect(.degrees(isRotating ? 360 : 0))
-                .animation(.linear(duration: 2).repeatForever(autoreverses: false), value: isRotating)
-                .onAppear { isRotating = true }
+                .animation(reduceMotion ? nil : .linear(duration: 2).repeatForever(autoreverses: false), value: isRotating)
+                // Reduce Motion: keep the globe static (TD-11).
+                .onAppear { if !reduceMotion { isRotating = true } }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Searching the web…")
-                    .font(.system(size: 13, weight: .medium))
+                    .scaledFont(size: 13, weight: .medium)
                     .foregroundStyle(AppTheme.mutedText)
 
                 if let query = queries.first {
                     Text(query)
-                        .font(.system(size: 12))
+                        .scaledFont(size: 12)
                         .foregroundStyle(AppTheme.subtleText)
                         .lineLimit(1)
                 }
@@ -2770,7 +2784,7 @@ private struct AnimatedSparkleIcon: View {
 
     var body: some View {
         Image(systemName: "sparkles")
-            .font(.system(size: size, weight: .semibold))
+            .scaledFont(size: size, weight: .semibold)
             .foregroundStyle(gradient)
     }
 }
@@ -2793,22 +2807,22 @@ private struct ReasoningBox: View {
                 HStack(spacing: 6) {
                     // Animated brain icon — pulses while streaming
                     Image(systemName: "brain")
-                        .font(.system(size: 12, weight: .medium))
+                        .scaledFont(size: 12, weight: .medium)
                         .symbolEffect(.pulse, isActive: isStreaming && durationMs == nil)
 
                     if let ms = durationMs {
                         let seconds = max(1, ms / 1000)
                         Text("Thought for \(seconds)s")
-                            .font(.system(size: 13, weight: .medium))
+                            .scaledFont(size: 13, weight: .medium)
                     } else {
                         Text("Thinking…")
-                            .font(.system(size: 13, weight: .medium))
+                            .scaledFont(size: 13, weight: .medium)
                     }
 
                     Spacer()
 
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
+                        .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                         .rotationEffect(.degrees(isExpanded ? 0 : -90))
                         .animation(.snappy(duration: 0.2), value: isExpanded)
                 }
@@ -2819,7 +2833,7 @@ private struct ReasoningBox: View {
             // Reasoning content — collapsible
             if isExpanded {
                 Text(content)
-                    .font(.system(size: 13))
+                    .scaledFont(size: 13)
                     .foregroundStyle(AppTheme.subtleText)
                     .lineSpacing(3)
                     .textSelection(.enabled)
@@ -2859,19 +2873,19 @@ private struct MiniTaskCard: View {
         Button { showDetail = true } label: {
             HStack(spacing: 12) {
                 Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 18))
+                    .scaledFont(size: 18)
                     .foregroundStyle(task.completed ? Color.primary : AppTheme.mutedText)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(task.title)
-                        .font(.system(size: 14, weight: .semibold))
+                        .scaledFont(size: 14, weight: .semibold)
                         .tracking(-0.1)
                         .foregroundStyle(.primary)
                         .lineLimit(2)
 
                     if let due = task.dueDate {
                         Text(due, format: .dateTime.month(.abbreviated).day().hour().minute())
-                            .font(.system(size: 11, weight: .medium))
+                            .scaledFont(size: 11, weight: .medium, relativeTo: .caption2)
                             .foregroundStyle(AppTheme.mutedText)
                     }
                 }
@@ -2879,7 +2893,7 @@ private struct MiniTaskCard: View {
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
+                    .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
                     .foregroundStyle(AppTheme.mutedText)
             }
             .padding(12)
@@ -2916,7 +2930,7 @@ private struct MiniEventCard: View {
 
                 VStack(alignment: .leading, spacing: compact ? 1 : 2) {
                     Text(title)
-                        .font(.system(size: compact ? 13 : 14, weight: .semibold))
+                        .scaledFont(size: compact ? 13 : 14, weight: .semibold)
                         .tracking(-0.1)
                         .foregroundStyle(.primary)
                         .lineLimit(compact ? 1 : 2)
@@ -2924,7 +2938,7 @@ private struct MiniEventCard: View {
 
                     if !subtitle.isEmpty {
                         Text(subtitle)
-                            .font(.system(size: compact ? 10 : 11, weight: .medium))
+                            .scaledFont(size: compact ? 10 : 11, weight: .medium)
                             .foregroundStyle(AppTheme.mutedText)
                             .lineLimit(1)
                     }
@@ -2932,7 +2946,7 @@ private struct MiniEventCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
+                    .scaledFont(size: 10, weight: .semibold, relativeTo: .caption2)
                     .foregroundStyle(AppTheme.mutedText)
             }
             .padding(compact ? 8 : 12)
@@ -2982,6 +2996,7 @@ private struct MiniEventCard: View {
 /// Replaces the previous blank gap so users see the response is forming even
 /// before the first token lands. (P3)
 private struct AssistantShimmerPlaceholder: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var phase: CGFloat = 0
 
     var body: some View {
@@ -2990,8 +3005,14 @@ private struct AssistantShimmerPlaceholder: View {
             shimmerBar(width: 220, height: 10)
         }
         .onAppear {
-            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
-                phase = 1
+            // Reduce Motion: show a static mid-opacity placeholder instead of
+            // pulsing (TD-11).
+            if reduceMotion {
+                phase = 0.5
+            } else {
+                withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
+                    phase = 1
+                }
             }
         }
     }
@@ -3016,6 +3037,7 @@ private struct AssistantShimmerPlaceholder: View {
 // MARK: - BlinkingCursor
 
 private struct BlinkingCursor: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var visible = false
 
     var body: some View {
@@ -3024,8 +3046,13 @@ private struct BlinkingCursor: View {
             .foregroundStyle(.primary.opacity(0.7))
             .opacity(visible ? 1 : 0)
             .onAppear {
-                withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
+                // Reduce Motion: solid (non-blinking) cursor (TD-11).
+                if reduceMotion {
                     visible = true
+                } else {
+                    withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
+                        visible = true
+                    }
                 }
             }
             .offset(x: 2)
@@ -3097,12 +3124,12 @@ struct ChatHistoryView: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 10, weight: .semibold))
+                    .scaledFont(size: 10, weight: .semibold, relativeTo: .caption2)
                 Text(title)
-                    .font(.system(size: 12, weight: .semibold))
+                    .scaledFont(size: 12, weight: .semibold)
                     .lineLimit(1)
                 Text("\(count)")
-                    .font(.system(size: 10, weight: .semibold))
+                    .scaledFont(size: 10, weight: .semibold, relativeTo: .caption2)
                     .opacity(0.7)
             }
             .foregroundStyle(folderFilter == filter ? AppTheme.accentBlue : AppTheme.mutedText)
@@ -3128,7 +3155,7 @@ struct ChatHistoryView: View {
             // Custom header — "Chats" title left, new-chat button right
             HStack(alignment: .center) {
                 Text("Chats")
-                    .font(.system(size: 28, weight: .bold))
+                    .scaledFont(size: 28, weight: .bold)
                     .tracking(-0.5)
 
                 Spacer()
@@ -3154,7 +3181,7 @@ struct ChatHistoryView: View {
                     }
                 } label: {
                     Image(systemName: "line.3.horizontal.decrease")
-                        .font(.system(size: 15, weight: .semibold))
+                        .scaledFont(size: 15, weight: .semibold)
                         .foregroundStyle(.primary)
                         .frame(width: 40, height: 40)
                         .background(AppTheme.surfacePrimary, in: Circle())
@@ -3168,12 +3195,13 @@ struct ChatHistoryView: View {
                     dismiss()
                 } label: {
                     Image(systemName: "square.and.pencil")
-                        .font(.system(size: 17, weight: .semibold))
+                        .scaledFont(size: 17, weight: .semibold)
                         .foregroundStyle(.primary)
                         .frame(width: 40, height: 40)
                         .background(AppTheme.surfacePrimary, in: Circle())
                         .overlay(Circle().stroke(AppTheme.cardBorder, lineWidth: 1))
                 }
+                .accessibilityLabel("New chat")
                 .buttonStyle(.plain)
             }
             .padding(.horizontal, 20)
@@ -3198,7 +3226,7 @@ struct ChatHistoryView: View {
                             HStack(alignment: .top, spacing: 10) {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(conv.title)
-                                        .font(.system(size: 15, weight: .semibold))
+                                        .scaledFont(size: 15, weight: .semibold)
                                         .tracking(-0.2)
                                         .foregroundStyle(.primary)
                                         .lineLimit(1)
@@ -3209,7 +3237,7 @@ struct ChatHistoryView: View {
                                             Label(folderName, systemImage: "folder")
                                         }
                                     }
-                                    .font(.system(size: 12, weight: .medium))
+                                    .scaledFont(size: 12, weight: .medium)
                                     .foregroundStyle(AppTheme.mutedText)
                                 }
                                 Spacer()
@@ -3227,10 +3255,11 @@ struct ChatHistoryView: View {
                                     }
                                 } label: {
                                     Image(systemName: "ellipsis")
-                                        .font(.system(size: 13, weight: .semibold))
+                                        .scaledFont(size: 13, weight: .semibold)
                                         .foregroundStyle(AppTheme.mutedText)
                                         .frame(width: 24, height: 24)
                                 }
+                                .accessibilityLabel("Conversation options")
                                 // .menuStyle(.borderlessButton) removed — macOS-only API
                             }
                         }
@@ -3263,9 +3292,9 @@ struct ChatHistoryView: View {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(AppTheme.mutedText)
-                    .font(.system(size: 15, weight: .medium))
+                    .scaledFont(size: 15, weight: .medium)
                 TextField("Search chats", text: $searchText)
-                    .font(.system(size: 15, weight: .medium))
+                    .scaledFont(size: 15, weight: .medium)
                     .textFieldStyle(.plain)
                 if !searchText.isEmpty {
                     Button { searchText = "" } label: {
@@ -3273,6 +3302,7 @@ struct ChatHistoryView: View {
                             .foregroundStyle(AppTheme.mutedText)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
                 }
             }
             .padding(.horizontal, 16)
@@ -3319,13 +3349,13 @@ struct ChatHistoryView: View {
         VStack(spacing: 12) {
             Spacer()
             Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 32, weight: .medium))
+                .scaledFont(size: 32, weight: .medium)
                 .foregroundStyle(AppTheme.mutedText)
             Text("No previous chats")
-                .font(.system(size: 18, weight: .semibold))
+                .scaledFont(size: 18, weight: .semibold)
                 .tracking(-0.3)
             Text("Your chat history will appear here.")
-                .font(.system(size: 14, weight: .medium))
+                .scaledFont(size: 14, weight: .medium)
                 .foregroundStyle(AppTheme.mutedText)
             Spacer()
         }
@@ -3405,16 +3435,16 @@ struct AIChatConfigSheet: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(model.name)
-                                        .font(.system(size: 15, weight: .medium))
+                                        .scaledFont(size: 15, weight: .medium)
                                         .foregroundStyle(.primary)
                                     Text(model.subtitle)
-                                        .font(.system(size: 12, weight: .regular))
+                                        .scaledFont(size: 12, weight: .regular)
                                         .foregroundStyle(AppTheme.mutedText)
                                 }
                                 Spacer()
                                 if chatService.selectedModel == model.id {
                                     Image(systemName: "checkmark")
-                                        .font(.system(size: 13, weight: .semibold))
+                                        .scaledFont(size: 13, weight: .semibold)
                                         .foregroundStyle(.primary)
                                 }
                             }
@@ -3435,7 +3465,7 @@ struct AIChatConfigSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
-                        .font(.system(size: 15, weight: .semibold))
+                        .scaledFont(size: 15, weight: .semibold)
                 }
             }
         }
@@ -3527,7 +3557,7 @@ private struct PromptLibrarySheet: View {
                                 withAnimation(.snappy(duration: 0.15)) { selectedCategory = cat }
                             } label: {
                                 Text(cat)
-                                    .font(.system(size: 13, weight: .medium))
+                                    .scaledFont(size: 13, weight: .medium)
                                     .foregroundStyle(selectedCategory == cat ? .primary : AppTheme.mutedText)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 6)
@@ -3556,7 +3586,7 @@ private struct PromptLibrarySheet: View {
                         } label: {
                             HStack(alignment: .top, spacing: 12) {
                                 Image(systemName: prompt.icon)
-                                    .font(.system(size: 15, weight: .medium))
+                                    .scaledFont(size: 15, weight: .medium)
                                     .foregroundStyle(AppTheme.mutedText)
                                     .frame(width: 22)
                                     .padding(.top, 1)
@@ -3564,12 +3594,12 @@ private struct PromptLibrarySheet: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     HStack {
                                         Text(prompt.title)
-                                            .font(.system(size: 15, weight: .semibold))
+                                            .scaledFont(size: 15, weight: .semibold)
                                             .foregroundStyle(.primary)
                                         Spacer()
                                         if !prompt.isPreset {
                                             Text("Saved")
-                                                .font(.system(size: 11, weight: .medium))
+                                                .scaledFont(size: 11, weight: .medium, relativeTo: .caption2)
                                                 .foregroundStyle(AppTheme.mutedText)
                                                 .padding(.horizontal, 7)
                                                 .padding(.vertical, 2)
@@ -3577,7 +3607,7 @@ private struct PromptLibrarySheet: View {
                                         }
                                     }
                                     Text(prompt.text)
-                                        .font(.system(size: 13))
+                                        .scaledFont(size: 13)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(2)
                                 }
@@ -3606,15 +3636,16 @@ private struct PromptLibrarySheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Done") { dismiss() }
-                        .font(.system(size: 15, weight: .semibold))
+                        .scaledFont(size: 15, weight: .semibold)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showSaveInput = true
                     } label: {
                         Image(systemName: "plus")
-                            .font(.system(size: 15, weight: .semibold))
+                            .scaledFont(size: 15, weight: .semibold)
                     }
+                    .accessibilityLabel("Save new prompt")
                 }
             }
             .alert("Save Prompt", isPresented: $showSaveInput) {
@@ -3651,7 +3682,7 @@ private struct ConversationDataSheet: View {
                 ForEach(stats, id: \.label) { stat in
                     HStack {
                         Text(stat.label)
-                            .font(.system(size: 15))
+                            .scaledFont(size: 15)
                             .foregroundStyle(.secondary)
                         Spacer()
                         Text(stat.value)
@@ -3667,7 +3698,7 @@ private struct ConversationDataSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
-                        .font(.system(size: 15, weight: .semibold))
+                        .scaledFont(size: 15, weight: .semibold)
                 }
             }
         }
@@ -3704,7 +3735,7 @@ private struct FullScreenComposeView: View {
         NavigationStack {
             ZStack(alignment: .bottomTrailing) {
                 TextEditor(text: $inputText)
-                    .font(.system(size: 16))
+                    .scaledFont(size: 16)
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
                     .scrollContentBackground(.hidden)
@@ -3715,12 +3746,13 @@ private struct FullScreenComposeView: View {
                 if !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Button(action: onSend) {
                         Image(systemName: "arrow.up")
-                            .font(.system(size: 16, weight: .bold))
+                            .scaledFont(size: 16, weight: .bold)
                             .foregroundStyle(.white)
                             .frame(width: 36, height: 36)
                     }
                     .buttonStyle(AppPrimaryButtonStyle())
                     .clipShape(Circle())
+                    .accessibilityLabel("Send message")
                     .padding(.trailing, 20)
                     .padding(.bottom, 20)
                     .transition(.scale.combined(with: .opacity))
@@ -3731,11 +3763,11 @@ private struct FullScreenComposeView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }
-                        .font(.system(size: 15))
+                        .scaledFont(size: 15)
                 }
                 ToolbarItem(placement: .principal) {
                     Text("Compose")
-                        .font(.system(size: 15, weight: .semibold))
+                        .scaledFont(size: 15, weight: .semibold)
                 }
             }
         }

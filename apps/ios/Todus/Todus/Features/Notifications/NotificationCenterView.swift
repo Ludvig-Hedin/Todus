@@ -274,6 +274,7 @@ struct NotificationCenterView: View {
 
 /// Simple shimmer animation modifier for loading placeholders.
 private struct ShimmerModifier: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var phase: CGFloat = 0
 
     func body(content: Content) -> some View {
@@ -290,12 +291,13 @@ private struct ShimmerModifier: ViewModifier {
                 )
                 .offset(x: phase)
                 .animation(
-                    .linear(duration: 1.5).repeatForever(autoreverses: false),
+                    reduceMotion ? nil : .linear(duration: 1.5).repeatForever(autoreverses: false),
                     value: phase
                 )
             )
             .clipped()
-            .onAppear { phase = 400 }
+            // Reduce Motion: static placeholder, no sweeping highlight (TD-11).
+            .onAppear { if !reduceMotion { phase = 400 } }
     }
 }
 

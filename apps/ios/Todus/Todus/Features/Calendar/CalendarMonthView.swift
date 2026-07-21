@@ -238,6 +238,12 @@ struct CalendarMonthView: View {
                 viewMode = .day
             }
         }
+        // The cell is activated by a bare tap gesture — surface it to VoiceOver
+        // as a button with a spoken date + event count (TD-12).
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("\(date.formatted(date: .complete, time: .omitted)), \(dayEvents.count == 1 ? "1 event" : "\(dayEvents.count) events")")
+        .accessibilityHint("Opens day view")
     }
 
     // MARK: - Event Title Pills (shown when rows are tall enough)

@@ -89,6 +89,10 @@ struct CreateSheet: View {
             progressiveBlurScrim
                 .ignoresSafeArea()
                 .onTapGesture { close() }
+                // Decorative dimming layer — hiding it keeps VoiceOver focus on
+                // the composer instead of an unlabeled full-screen tap target.
+                // VO users dismiss via the escape action below. (TD-12)
+                .accessibilityHidden(true)
 
             VStack(spacing: 8) {
                 // Slash menu floats above the input card
@@ -131,6 +135,11 @@ struct CreateSheet: View {
                         }
                 }
             )
+            // In-app overlay, not a system sheet — declare it modal so VoiceOver
+            // doesn't wander into the content underneath, and give VO users the
+            // standard two-finger-scrub escape to dismiss. (TD-12)
+            .accessibilityAddTraits(.isModal)
+            .accessibilityAction(.escape) { close() }
         }
         // Ignore both container and keyboard safe areas at the bottom so the
         // ZStack extends to the physical screen edge. The keyboard.height
@@ -146,6 +155,12 @@ struct CreateSheet: View {
         }
         .onAppear {
             selectedType = initialType
+            // Restore a draft abandoned by a scrim-tap dismissal — @State dies
+            // with the overlay, so the text is parked in a session-scoped store
+            // and cleared only when a create actually consumes it. (TD-04)
+            if text.isEmpty, !CreateSheetDraftStore.text.isEmpty {
+                text = CreateSheetDraftStore.text
+            }
             fromConnectionId = services.connectionsService.connections.first?.id
             // Auto-set start date for events if none selected. A calendar-grid
             // tap seeds the tapped slot's time via createSheetSeedDate — use it
@@ -388,9 +403,9 @@ struct CreateSheet: View {
             if selectedType == .auto, let detected = autoDetectedType {
                 HStack(spacing: 4) {
                     Image(systemName: detected.icon)
-                        .font(.system(size: 10, weight: .semibold))
+                        .scaledFont(size: 10, weight: .semibold, relativeTo: .caption2)
                     Text("Creates \(detected.title.lowercased())")
-                        .font(.system(size: 11, weight: .medium))
+                        .scaledFont(size: 11, weight: .medium, relativeTo: .caption2)
                 }
                 .foregroundStyle(AppTheme.mutedText)
                 .padding(.horizontal, 16)
@@ -405,7 +420,7 @@ struct CreateSheet: View {
                recipientText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text("Add a recipient to send")
-                    .font(.system(size: 11, weight: .medium))
+                    .scaledFont(size: 11, weight: .medium, relativeTo: .caption2)
                     .foregroundStyle(AppTheme.mutedText)
                     .padding(.horizontal, 16)
                     .padding(.top, 2)
@@ -438,11 +453,11 @@ struct CreateSheet: View {
             // To row with CC/BCC chevron
             HStack(spacing: 6) {
                 Text("To")
-                    .font(.system(size: 13, weight: .semibold))
+                    .scaledFont(size: 13, weight: .semibold)
                     .foregroundStyle(AppTheme.mutedText)
                     .frame(width: 52, alignment: .trailing)
                 TextField("", text: $recipientText, prompt: Text("Add recipients").foregroundStyle(AppTheme.mutedText))
-                    .font(.system(size: 14))
+                    .scaledFont(size: 14)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .keyboardType(.emailAddress)
@@ -450,7 +465,7 @@ struct CreateSheet: View {
                     withAnimation(.easeInOut(duration: 0.2)) { showEmailCcBcc.toggle() }
                 } label: {
                     Image(systemName: showEmailCcBcc ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 11, weight: .medium))
+                        .scaledFont(size: 11, weight: .medium, relativeTo: .caption2)
                         .foregroundStyle(AppTheme.mutedText)
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
@@ -465,11 +480,11 @@ struct CreateSheet: View {
                 Divider().opacity(0.25).padding(.horizontal, 14)
                 HStack(spacing: 6) {
                     Text("Cc")
-                        .font(.system(size: 13, weight: .semibold))
+                        .scaledFont(size: 13, weight: .semibold)
                         .foregroundStyle(AppTheme.mutedText)
                         .frame(width: 52, alignment: .trailing)
                     TextField("", text: $ccText, prompt: Text("Add Cc recipients").foregroundStyle(AppTheme.mutedText))
-                        .font(.system(size: 14))
+                        .scaledFont(size: 14)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                         .keyboardType(.emailAddress)
@@ -480,11 +495,11 @@ struct CreateSheet: View {
                 Divider().opacity(0.25).padding(.horizontal, 14)
                 HStack(spacing: 6) {
                     Text("Bcc")
-                        .font(.system(size: 13, weight: .semibold))
+                        .scaledFont(size: 13, weight: .semibold)
                         .foregroundStyle(AppTheme.mutedText)
                         .frame(width: 52, alignment: .trailing)
                     TextField("", text: $bccText, prompt: Text("Add Bcc recipients").foregroundStyle(AppTheme.mutedText))
-                        .font(.system(size: 14))
+                        .scaledFont(size: 14)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                         .keyboardType(.emailAddress)
@@ -497,11 +512,11 @@ struct CreateSheet: View {
 
             HStack(spacing: 6) {
                 Text("Subject")
-                    .font(.system(size: 13, weight: .semibold))
+                    .scaledFont(size: 13, weight: .semibold)
                     .foregroundStyle(AppTheme.mutedText)
                     .frame(width: 52, alignment: .trailing)
                 TextField("Subject", text: $subjectText)
-                    .font(.system(size: 14))
+                    .scaledFont(size: 14)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
@@ -524,7 +539,7 @@ struct CreateSheet: View {
         if connections.count > 1 {
             HStack(spacing: 6) {
                 Text("From")
-                    .font(.system(size: 13, weight: .semibold))
+                    .scaledFont(size: 13, weight: .semibold)
                     .foregroundStyle(AppTheme.mutedText)
                     .frame(width: 52, alignment: .trailing)
                 Menu {
@@ -544,10 +559,10 @@ struct CreateSheet: View {
                         Text(connections.first(where: { $0.id == fromConnectionId })?.email
                             ?? connections.first?.email
                             ?? "Loading…")
-                            .font(.system(size: 14))
+                            .scaledFont(size: 14)
                             .foregroundStyle(.primary)
                         Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 10, weight: .medium))
+                            .scaledFont(size: 10, weight: .medium, relativeTo: .caption2)
                             .foregroundStyle(AppTheme.mutedText)
                     }
                 }
@@ -584,7 +599,7 @@ struct CreateSheet: View {
     private func emailFormatButton(icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 14, weight: .medium))
+                .scaledFont(size: 14, weight: .medium)
                 .foregroundStyle(AppTheme.mutedText)
                 .frame(width: 32, height: 28)
                 .contentShape(Rectangle())
@@ -618,11 +633,11 @@ struct CreateSheet: View {
 
             HStack(spacing: 8) {
                 Image(systemName: "location")
-                    .font(.system(size: 13, weight: .medium))
+                    .scaledFont(size: 13, weight: .medium)
                     .foregroundStyle(AppTheme.mutedText)
                     .frame(width: 16)
                 TextField("Location (optional)", text: $locationText)
-                    .font(.system(size: 14))
+                    .scaledFont(size: 14)
                     .foregroundStyle(.primary)
             }
             .padding(.horizontal, 14)
@@ -640,7 +655,7 @@ struct CreateSheet: View {
                 withAnimation(.snappy(duration: 0.15)) { isPickingAttachment.toggle() }
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 14, weight: .semibold))
+                    .scaledFont(size: 14, weight: .semibold)
                     .foregroundStyle(isPickingAttachment ? AppTheme.accentBlue : AppTheme.mutedText)
                     .frame(width: 28, height: 28)
                     .background(
@@ -675,11 +690,11 @@ struct CreateSheet: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: selectedFolder == nil ? "sparkles" : "folder.fill")
-                            .font(.system(size: 13, weight: .semibold))
+                            .scaledFont(size: 13, weight: .semibold)
                         // Always label the collapsed control — a bare tray glyph
                         // gave no hint that AI auto-routing was active.
                         Text(selectedFolder?.name ?? "Auto")
-                            .font(.system(size: 12, weight: .semibold))
+                            .scaledFont(size: 12, weight: .semibold)
                             .lineLimit(1)
                     }
                     .foregroundStyle(selectedFolder == nil ? AppTheme.mutedText : .primary)
@@ -704,10 +719,10 @@ struct CreateSheet: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: selectedDate == nil ? "calendar" : "calendar.badge.clock")
-                            .font(.system(size: 13, weight: .semibold))
+                            .scaledFont(size: 13, weight: .semibold)
                         if let date = selectedDate {
                             Text(compactDateLabel(for: date))
-                                .font(.system(size: 12, weight: .semibold))
+                                .scaledFont(size: 12, weight: .semibold)
                                 .lineLimit(1)
                         }
                     }
@@ -733,14 +748,14 @@ struct CreateSheet: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: selectedEndDate == nil ? "flag" : "flag.fill")
-                            .font(.system(size: 13, weight: .semibold))
+                            .scaledFont(size: 13, weight: .semibold)
                         if let end = selectedEndDate {
                             Text(compactDateLabel(for: end))
-                                .font(.system(size: 12, weight: .semibold))
+                                .scaledFont(size: 12, weight: .semibold)
                                 .lineLimit(1)
                         } else {
                             Text("End")
-                                .font(.system(size: 12, weight: .semibold))
+                                .scaledFont(size: 12, weight: .semibold)
                         }
                     }
                     .foregroundStyle(selectedEndDate == nil ? AppTheme.mutedText : .primary)
@@ -771,7 +786,7 @@ struct CreateSheet: View {
                 || missingRecipient
             Button(action: handleCreate) {
                 Image(systemName: "arrow.up")
-                    .font(.system(size: 14, weight: .bold))
+                    .scaledFont(size: 14, weight: .bold)
                     .foregroundStyle(.white)
                     .frame(width: 28, height: 28)
             }
@@ -807,9 +822,9 @@ struct CreateSheet: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: type.icon)
-                    .font(.system(size: 13, weight: .semibold))
+                    .scaledFont(size: 13, weight: .semibold)
                 Text(type.title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .scaledFont(size: 13, weight: .semibold)
             }
             .foregroundStyle(isSelected ? AppTheme.accentBlue : AppTheme.mutedText)
             .padding(.horizontal, 12)
@@ -853,11 +868,11 @@ struct CreateSheet: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
+                    .scaledFont(size: 14, weight: .semibold)
                     .foregroundStyle(color)
                     .frame(width: 24)
                 Text(title)
-                    .font(.system(size: 14, weight: .medium))
+                    .scaledFont(size: 14, weight: .medium)
                     .foregroundStyle(.primary)
                 Spacer()
             }
@@ -904,11 +919,11 @@ struct CreateSheet: View {
     private func attachmentMenuRow(icon: String, label: String) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 14, weight: .medium))
+                .scaledFont(size: 14, weight: .medium)
                 .foregroundStyle(.primary)
                 .frame(width: 20)
             Text(label)
-                .font(.system(size: 14, weight: .medium))
+                .scaledFont(size: 14, weight: .medium)
                 .foregroundStyle(.primary)
             Spacer()
         }
@@ -933,7 +948,7 @@ struct CreateSheet: View {
                     .frame(width: 52, height: 52)
                     .overlay(
                         Image(systemName: "doc")
-                            .font(.system(size: 16))
+                            .scaledFont(size: 16)
                             .foregroundStyle(AppTheme.mutedText)
                     )
             }
@@ -941,7 +956,7 @@ struct CreateSheet: View {
                 pendingDeleteAttachment = filename
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 14))
+                    .scaledFont(size: 14)
                     .foregroundStyle(.white)
                     .background(Color.black.opacity(0.5), in: Circle())
             }
@@ -986,7 +1001,7 @@ struct CreateSheet: View {
                         }
                     } label: {
                         Label("Clear \(isEndDate ? "End Time" : "Date")", systemImage: "xmark.circle")
-                            .font(.system(size: 14, weight: .semibold))
+                            .scaledFont(size: 14, weight: .semibold)
                     }
                     .tint(.secondary)
                     .foregroundStyle(.secondary)
@@ -1249,6 +1264,11 @@ struct CreateSheet: View {
     // MARK: - Slash Command Handling
 
     private func handleTextChange(_ value: String) {
+        // Mirror the composer text into the session draft store so ANY dismissal
+        // path (scrim tap, external isPresented flip) retains it. `handleCreate`
+        // sets `text = ""` on submit, which flows through here and clears the
+        // draft — so a successful create never resurrects stale text. (TD-04)
+        CreateSheetDraftStore.text = value
         let trimmed = value.trimmingCharacters(in: .whitespaces)
         withAnimation(.snappy(duration: 0.15)) {
             showsSlashMenu = trimmed.hasSuffix("/") && !trimmed.isEmpty
@@ -1345,4 +1365,14 @@ struct CreateSheet: View {
             pendingAttachments.append(filename)
         }
     }
+}
+
+/// Session-scoped draft store for the create composer. CreateSheet is an
+/// overlay whose @State is destroyed on dismissal, so an accidental scrim tap
+/// used to discard typed text (TD-04). The current text is mirrored here on
+/// every change and restored on the next open; a successful create clears it
+/// (via `handleCreate`'s `text = ""` flowing through `handleTextChange`).
+@MainActor
+private enum CreateSheetDraftStore {
+    static var text = ""
 }

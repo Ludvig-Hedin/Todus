@@ -1818,6 +1818,23 @@ final class EmailService {
         }
     }
 
+    /// Inverse of `archiveThreads` — restores the given thread snapshots into the
+    /// local list and re-adds Gmail's INBOX label server-side. Used by the inbox
+    /// "Undo" toast after a swipe-archive. Rolls the local re-insert back if the
+    /// label mutation fails so the list never claims a restore that didn't happen.
+    @discardableResult
+    func unarchiveThreads(_ snapshots: [EmailThread]) async -> Bool {
+        guard !snapshots.isEmpty else { return true }
+        restoreThreadSnapshots(snapshots)
+        let ids = snapshots.map(\.id)
+        let success = await modifyLabels(threadIds: ids, add: ["INBOX"])
+        if !success {
+            threads.removeAll { ids.contains($0.id) }
+            errorMessage = "Could not undo archive. Please try again."
+        }
+        return success
+    }
+
     /// Deletes (moves to Trash) one or more threads. Returns whether the API call succeeded
     /// — callers like EmailThreadView use the result to decide whether to dismiss.
     @discardableResult

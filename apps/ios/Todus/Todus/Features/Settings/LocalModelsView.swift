@@ -66,6 +66,9 @@ struct LocalModelsView: View {
                 LocalModelRow(model: rec.model, reason: rec.reason)
                     .contentShape(Rectangle())
                     .onTapGesture { detailModel = rec.model }
+                    // Bare tap gesture — expose as a VoiceOver button (TD-12).
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityHint("Shows model details")
             }
         }
     }
@@ -80,6 +83,8 @@ struct LocalModelsView: View {
                         LocalModelRow(model: model, reason: nil)
                             .contentShape(Rectangle())
                             .onTapGesture { detailModel = model }
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityHint("Shows model details")
                     }
                 }
             }
@@ -94,6 +99,8 @@ struct LocalModelsView: View {
                     LocalModelRow(model: model, reason: nil)
                         .contentShape(Rectangle())
                         .onTapGesture { detailModel = model }
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityHint("Shows model details")
                 }
             }
         }

@@ -32,6 +32,10 @@ struct NotificationsOnboardingView: View {
                     .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(AppTheme.mutedText)
                     .multilineTextAlignment(.center)
+                    // Claim full vertical space — the Spacer-bounded layout can
+                    // otherwise compress multiline text into "…" mid-sentence
+                    // on shorter screens (TD-16).
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 32)
 
                 Spacer().frame(height: 28)
@@ -60,7 +64,7 @@ struct NotificationsOnboardingView: View {
                         .buttonStyle(AppPrimaryButtonStyle())
                     } else {
                         onboardingMessage(
-                            text: "We only ask once. You can turn each type on or off later in Settings.",
+                            text: "We only ask once — change each type later in Settings.",
                             tint: AppTheme.mutedText
                         )
 
@@ -129,7 +133,7 @@ struct NotificationsOnboardingView: View {
             notificationRow(
                 icon: "envelope.fill",
                 title: "New emails",
-                subtitle: "Incoming messages from your connected accounts"
+                subtitle: "Incoming messages from your accounts"
             )
             Divider().padding(.leading, 52)
             notificationRow(
@@ -171,6 +175,8 @@ struct NotificationsOnboardingView: View {
                 Text(subtitle)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
+                    // Wrap instead of truncating when height-compressed (TD-16).
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer()
@@ -184,6 +190,7 @@ struct NotificationsOnboardingView: View {
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(tint)
             .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity)

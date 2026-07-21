@@ -1071,20 +1071,20 @@ final class AIChatService {
                 guard (200..<300).contains(http.statusCode) else {
                     if http.statusCode == 401, allow401RefreshRetry, let auth = authService {
                         allow401RefreshRetry = false
+                        // Captured before the refresh attempt (which hard-signs-out
+                        // on confirmed expiry). Guests have no session to expire —
+                        // never raise the global banner for their 401s.
+                        let hadSession = auth.hasSessionToExpire
                         let refreshed = await auth.attemptSilentRefresh()
                         if refreshed {
                             continue requestLoop
                         }
-                        auth.isSessionExpired = true
-                        appendError(diagnosticAuthMessage(
-                            statusCode: http.statusCode,
-                            fallback: "Session expired. Please log out and back in."
-                        ), to: assistantMessageID)
+                        if hadSession {
+                            auth.isSessionExpired = true
+                        }
+                        appendError(Self.sessionRefreshErrorCopy, to: assistantMessageID)
                     } else if http.statusCode == 401 {
-                        appendError(diagnosticAuthMessage(
-                            statusCode: http.statusCode,
-                            fallback: "Session expired. Please log out and back in."
-                        ), to: assistantMessageID)
+                        appendError(Self.sessionRefreshErrorCopy, to: assistantMessageID)
                     } else {
                         switch http.statusCode {
                         case 402:
@@ -1579,9 +1579,11 @@ final class AIChatService {
         return "Server error (\(statusCode))."
     }
 
-    private func diagnosticAuthMessage(statusCode: Int, fallback: String) -> String {
-        return fallback + " (HTTP \(statusCode))."
-    }
+    /// Auth-failure copy shown in the chat thread. Human language, no HTTP
+    /// jargon, and never advises sign-out — sign-out wipes local data (TD-03),
+    /// so retry / in-place re-auth is the path we point at.
+    private static let sessionRefreshErrorCopy =
+        "Your session needs to be refreshed. Try again, or sign in again from Settings if this keeps happening."
 
     // MARK: - Custom Event Handling (Web Search + Reasoning)
 

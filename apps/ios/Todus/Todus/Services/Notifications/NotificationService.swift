@@ -74,8 +74,12 @@ final class NotificationService {
         let settings = await center.notificationSettings()
         switch settings.authorizationStatus {
         case .notDetermined:
-            let granted = await requestPermission()
-            guard granted else { return }
+            // Never burn the one-shot system permission dialog from this
+            // background scheduling path — the user may have just chosen
+            // "Skip, decide later" in onboarding seconds earlier. Granting
+            // stays an explicit user action (onboarding / notification
+            // settings); once granted, future captures schedule normally. (TD-05)
+            return
         case .authorized, .provisional, .ephemeral:
             break
         case .denied:

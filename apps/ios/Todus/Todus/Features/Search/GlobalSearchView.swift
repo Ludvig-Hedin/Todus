@@ -70,13 +70,17 @@ struct GlobalSearchView: View {
             }
     }
 
-    private var hasResults: Bool {
-        !taskResults.isEmpty || !emailResults.isEmpty || !calendarResults.isEmpty || !peopleResults.isEmpty
-    }
-
     // MARK: - Body
 
     var body: some View {
+        // Compute each result set once per body evaluation — the empty-check
+        // and `resultsList` previously each read the computed properties,
+        // re-running every filter twice per keystroke.
+        let tasks = taskResults
+        let emails = emailResults
+        let people = peopleResults
+        let hasResults = !tasks.isEmpty || !emails.isEmpty || !calendarResults.isEmpty || !people.isEmpty
+
         NavigationStack {
             VStack(spacing: 0) {
                 searchField
@@ -102,7 +106,7 @@ struct GlobalSearchView: View {
                         noResultsView
                     }
                 } else {
-                    resultsList
+                    resultsList(tasks: tasks, emails: emails, people: people)
                 }
             }
             .background(AppTheme.sheetBackground.ignoresSafeArea())
@@ -176,20 +180,20 @@ struct GlobalSearchView: View {
 
     // MARK: - Results List
 
-    private var resultsList: some View {
+    private func resultsList(tasks: [TaskRecord], emails: [EmailThread], people: [EmailSender]) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
-                if !taskResults.isEmpty {
-                    resultSection(title: "Tasks", icon: "checklist", total: taskResults.count, seeAllTab: .tasks) {
-                        ForEach(taskResults.prefix(5)) { task in
+                if !tasks.isEmpty {
+                    resultSection(title: "Tasks", icon: "checklist", total: tasks.count, seeAllTab: .tasks) {
+                        ForEach(tasks.prefix(5)) { task in
                             taskRow(task)
                         }
                     }
                 }
 
-                if !emailResults.isEmpty {
-                    resultSection(title: "Emails", icon: "envelope.fill", total: emailResults.count, seeAllTab: .email) {
-                        ForEach(emailResults.prefix(5)) { thread in
+                if !emails.isEmpty {
+                    resultSection(title: "Emails", icon: "envelope.fill", total: emails.count, seeAllTab: .email) {
+                        ForEach(emails.prefix(5)) { thread in
                             emailRow(thread)
                         }
                         if isEmailSearchPending {
@@ -212,9 +216,9 @@ struct GlobalSearchView: View {
                     }
                 }
 
-                if !peopleResults.isEmpty {
-                    resultSection(title: "People", icon: "person.2.fill", total: peopleResults.count, seeAllTab: nil) {
-                        ForEach(peopleResults.prefix(5), id: \.email) { sender in
+                if !people.isEmpty {
+                    resultSection(title: "People", icon: "person.2.fill", total: people.count, seeAllTab: nil) {
+                        ForEach(people.prefix(5), id: \.email) { sender in
                             personRow(sender)
                         }
                     }

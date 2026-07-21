@@ -203,8 +203,11 @@ enum AppTheme {
     static let divider = Color(uiColor: .separator).opacity(0.14)
 
     // Typography
-    static let subtleText = Color.secondary.opacity(0.85)
-    static let mutedText = Color.secondary.opacity(0.65)
+    // `.secondary` already renders at ~60% label alpha; stacking opacity on top pushed
+    // muted metadata below WCAG-viable contrast at 11–13pt (audit TD-14). Keep two
+    // de-emphasis levels but with a legible floor — weight/size carry the hierarchy.
+    static let subtleText = Color.secondary
+    static let mutedText = Color.secondary.opacity(0.85)
     static let danger = Color(red: 0.85, green: 0.24, blue: 0.22)
 
     /// Single source of truth for the "now" marker color on calendar grids. Centralised
@@ -285,6 +288,50 @@ enum AppTheme {
         static let base: Animation = .snappy(duration: 0.25)
         static let slow: Animation = .spring(response: 0.35, dampingFraction: 0.85)
         static let interactive: Animation = .easeOut(duration: 0.18)
+    }
+}
+
+/// Dynamic-Type-aware replacement for fixed `.font(.system(size:))` literals (audit TD-02).
+/// Reads the environment's type size so text tracks the user's setting live; `size` is the
+/// point size at the default (large) setting. Usage: `.scaledFont(size: 16, weight: .medium)`.
+/// Pass `relativeTo:` to scale small metadata against a caption curve instead of body.
+struct ScaledFontModifier: ViewModifier {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let size: CGFloat
+    let weight: Font.Weight
+    let textStyle: UIFont.TextStyle
+
+    func body(content: Content) -> some View {
+        let traits = UITraitCollection(preferredContentSizeCategory: dynamicTypeSize.uiContentSizeCategory)
+        let scaled = UIFontMetrics(forTextStyle: textStyle).scaledValue(for: size, compatibleWith: traits)
+        content.font(.system(size: scaled, weight: weight))
+    }
+}
+
+extension View {
+    func scaledFont(size: CGFloat, weight: Font.Weight = .regular, relativeTo textStyle: UIFont.TextStyle = .body) -> some View {
+        modifier(ScaledFontModifier(size: size, weight: weight, textStyle: textStyle))
+    }
+}
+
+extension DynamicTypeSize {
+    /// Bridge to UIKit's category so `UIFontMetrics` can scale legacy point sizes.
+    var uiContentSizeCategory: UIContentSizeCategory {
+        switch self {
+        case .xSmall: return .extraSmall
+        case .small: return .small
+        case .medium: return .medium
+        case .large: return .large
+        case .xLarge: return .extraLarge
+        case .xxLarge: return .extraExtraLarge
+        case .xxxLarge: return .extraExtraExtraLarge
+        case .accessibility1: return .accessibilityMedium
+        case .accessibility2: return .accessibilityLarge
+        case .accessibility3: return .accessibilityExtraLarge
+        case .accessibility4: return .accessibilityExtraExtraLarge
+        case .accessibility5: return .accessibilityExtraExtraExtraLarge
+        @unknown default: return .large
+        }
     }
 }
 
