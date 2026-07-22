@@ -813,6 +813,25 @@ export const task = createTable(
   ],
 );
 
+// Durable deletion evidence for offline/native clients. Task rows are still
+// hard-deleted so existing web queries keep their current behavior; native
+// reconciliation pages this journal explicitly instead of inferring deletion
+// from absence in a concurrently changing task list.
+export const taskDeletion = createTable(
+  'task_deletion',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    taskId: text('task_id').notNull(),
+    deletedAt: timestamp('deleted_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.taskId] }),
+    index('task_deletion_user_deleted_at_idx').on(t.userId, t.deletedAt),
+  ],
+);
+
 export const emailTemplate = createTable(
   'email_template',
   {

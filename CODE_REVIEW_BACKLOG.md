@@ -19,8 +19,10 @@ The iOS-focused follow-up closed the remaining safe, code-proven native findings
 - notification scheduling failures are observable, EventKit background saves are Swift 6-clean,
   speech completion callbacks are synchronized, and required tab rows cannot enter a confusing snap-back drag;
 - Docs, Meetings, and Settings now use real native More destinations instead of hidden tab content that could render blank.
+- cross-device task deletions now use explicit server tombstones, stale offline upserts cannot resurrect them,
+  and reminder/notification mirrors are cleaned only after the local deletion commits.
 
-Verified with 123 iOS unit tests, focused server pagination/scheduled-mail tests, file-scoped ESLint,
+Verified with 124 iOS unit tests, focused server pagination/scheduled-mail/task-sync tests, file-scoped ESLint,
 an iOS simulator build, and all 10 native UI tests on a dedicated simulator. Historical finding tables below
 are retained as audit evidence; their iOS rows are superseded by this resolution note.
 
@@ -1181,4 +1183,4 @@ Surfaced during the lag/freeze/crash bug-hunt; source-verified but deferred (low
 
 ### iOS task sync follow-up — 2026-07-22
 
-- **IOS-SYNC-1 (P1):** outbound create/update/delete is restored through authenticated `tasks.sync`, including durable delete retries and account-boundary invalidation. Paginated inbound `tasks.list` upserts now hydrate after folders, preserve pending local mutations, resolve by `updatedAt`, and invalidate interrupted pulls across account changes. Cross-device deletes still require a server deletion tombstone/cursor contract. Do not infer deletion from absence in the current offset list: concurrent inserts can shift pages and cause destructive false negatives.
+- **IOS-SYNC-1 (resolved 2026-07-23):** outbound create/update/delete uses authenticated `tasks.sync`, including durable delete retries and account-boundary invalidation. Paginated inbound `tasks.list` upserts hydrate after folders, preserve pending local mutations, resolve by `updatedAt`, and invalidate interrupted pulls across account changes. The server now journals explicit deletions in `task_deletion`; `tasks.deleted` pages that evidence to iOS, deletion wins over stale offline upserts, and the client removes only explicitly tombstoned synced rows plus their reminder/notification mirrors. No deletion is inferred from absence in offset pagination.

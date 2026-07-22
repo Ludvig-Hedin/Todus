@@ -132,11 +132,13 @@ Task capture now uses the authenticated Todus `tasks.sync` tRPC route instead of
 legacy Supabase client. Local captures are never deleted because a remote acknowledgement failed;
 auth, throttling, timeout, conflict, server, transport, and malformed-response failures preserve
 them for retry. Paginated inbound task upserts hydrate after folders without overwriting pending local
-edits, and durable task/folder journals plus in-flight pulls are invalidated across account changes.
+edits. Explicit paginated deletion tombstones remove tasks deleted on another device without treating
+list absence as proof, stale offline upserts cannot resurrect them, and durable task/folder journals
+plus in-flight pulls are invalidated across account changes.
 Scheduled-email consumers also stop retrying
 stale missing payloads after the retained send window, closing the cancelled-message retry loop.
 
-Verification: iOS `TodusTests` passed 123/123, focused server tests passed 9/9,
+Verification: iOS `TodusTests` passed 124/124, focused server tests passed 11/11,
 file-scoped server ESLint and formatting passed, the iOS Release simulator build succeeded,
 and all 10 seeded UI tests passed on a dedicated clean
 iPhone simulator. Real Gmail/Calendar account behavior still requires the existing physical-device

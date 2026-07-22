@@ -1,6 +1,6 @@
 # API
 
-> tRPC + HTTP surface of `apps/server`. Derived from `src/trpc/index.ts` and `src/main.ts`. Last verified: 2026-06-13.
+> tRPC + HTTP surface of `apps/server`. Derived from `src/trpc/index.ts` and `src/main.ts`. Last verified: 2026-07-23.
 
 ## How clients call it
 
@@ -55,6 +55,10 @@ All other files map 1:1 (`mail.ts`→`mail`, `docs.ts`→`docs`, …). `groups-c
 | `user` / `contact` / `logging` | Profile / contact form / client log ingestion |
 
 When adding a domain: create `src/trpc/routes/<name>.ts`, register it in `src/trpc/index.ts`, then call it from the client.
+
+Native task reconciliation uses `tasks.sync` for mutation batches, paginated `tasks.list` for live rows,
+and paginated `tasks.deleted` for explicit cross-device deletion evidence. Tombstones are durable and
+deletion wins over stale native upserts; clients must never infer deletion from absence in an offset page.
 
 ## Non-tRPC HTTP routes (`src/main.ts`)
 

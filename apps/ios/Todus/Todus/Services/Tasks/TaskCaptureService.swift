@@ -69,6 +69,13 @@ final class TaskCaptureService {
         isSyncingSharedFolders = false
     }
 
+    /// Removes mirrors owned by a task only after a remote tombstone has been
+    /// committed to the local SwiftData store.
+    func handleRemoteTaskDeletion(id: UUID, reminderIdentifier: String?) {
+        deleteReminder(identifier: reminderIdentifier)
+        notificationService?.cancelTaskReminder(taskID: id.uuidString)
+    }
+
     /// Captures one or more tasks from raw text, optionally with attachment filenames,
     /// a manually selected folder, and an override due date.
     /// Attachments are only applied to the first task when multi-line input is used,

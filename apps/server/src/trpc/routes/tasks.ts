@@ -1,4 +1,4 @@
-import { task, taskFolder, folderItem, aiConversation } from '../../db/schema';
+import { task, taskDeletion, taskFolder, folderItem, aiConversation } from '../../db/schema';
 import { eq, and, desc, asc, like, sql, inArray, isNotNull, lte } from 'drizzle-orm';
 import { resolveModelFromSettings } from '../../lib/ai-model-resolver';
 import { privateProcedure, router } from '../trpc';
@@ -6,6 +6,7 @@ import { getZeroDB } from '../../lib/server-utils';
 import { generateObject } from 'ai';
 import { createDb } from '../../db';
 import { env } from '../../env';
+import { collectDeletionWinsIDs } from './task-sync-policy';
 import { z } from 'zod';
 
 // Helper to get a direct Drizzle DB connection
@@ -75,6 +76,33 @@ export const tasksRouter = router({
       }
     }),
 
+  deleted: privateProcedure
+    .input(
+      z
+        .object({
+          limit: z.number().int().min(1).max(500).optional().default(200),
+          offset: z.number().int().min(0).optional().default(0),
+        })
+        .optional()
+        .default({}),
+    )
+    .query(async ({ ctx, input }) => {
+      const { db, conn } = getDb();
+      try {
+        const deletions = await db
+          .select({ taskId: taskDeletion.taskId, deletedAt: taskDeletion.deletedAt })
+          .from(taskDeletion)
+          .where(eq(taskDeletion.userId, ctx.sessionUser.id))
+          .orderBy(desc(taskDeletion.deletedAt), asc(taskDeletion.taskId))
+          .limit(input.limit)
+          .offset(input.offset);
+
+        return { deletions };
+      } finally {
+        await conn.end();
+      }
+    }),
+
   create: privateProcedure
     .input(
       z.object({
@@ -96,24 +124,30 @@ export const tasksRouter = router({
         const id = input.id ?? crypto.randomUUID();
         const now = new Date();
 
-        const [created] = await db
-          .insert(task)
-          .values({
-            id,
-            userId: ctx.sessionUser.id,
-            title: input.title,
-            description: input.description,
-            status: input.status,
-            priority: input.priority,
-            dueDate: input.dueDate ? new Date(input.dueDate) : null,
-            folderId: input.folderId ?? null,
-            reminderIdentifier: input.reminderIdentifier ?? null,
-            emailThreadId: input.emailThreadId ?? null,
-            eventId: input.eventId ?? null,
-            createdAt: now,
-            updatedAt: now,
-          })
-          .returning();
+        const created = await db.transaction(async (tx) => {
+          const [row] = await tx
+            .insert(task)
+            .values({
+              id,
+              userId: ctx.sessionUser.id,
+              title: input.title,
+              description: input.description,
+              status: input.status,
+              priority: input.priority,
+              dueDate: input.dueDate ? new Date(input.dueDate) : null,
+              folderId: input.folderId ?? null,
+              reminderIdentifier: input.reminderIdentifier ?? null,
+              emailThreadId: input.emailThreadId ?? null,
+              eventId: input.eventId ?? null,
+              createdAt: now,
+              updatedAt: now,
+            })
+            .returning();
+          await tx
+            .delete(taskDeletion)
+            .where(and(eq(taskDeletion.taskId, id), eq(taskDeletion.userId, ctx.sessionUser.id)));
+          return row;
+        });
 
         return { task: created };
       } finally {
@@ -175,7 +209,19 @@ export const tasksRouter = router({
   delete: privateProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const { db, conn } = getDb();
     try {
-      await db.delete(task).where(and(eq(task.id, input.id), eq(task.userId, ctx.sessionUser.id)));
+      const deletedAt = new Date();
+      await db.transaction(async (tx) => {
+        await tx
+          .delete(task)
+          .where(and(eq(task.id, input.id), eq(task.userId, ctx.sessionUser.id)));
+        await tx
+          .insert(taskDeletion)
+          .values({ taskId: input.id, userId: ctx.sessionUser.id, deletedAt })
+          .onConflictDoUpdate({
+            target: [taskDeletion.userId, taskDeletion.taskId],
+            set: { deletedAt },
+          });
+      });
 
       return { success: true };
     } finally {
@@ -213,50 +259,87 @@ export const tasksRouter = router({
       try {
         const syncedIds: string[] = [];
         const now = new Date();
+        await db.transaction(async (tx) => {
+          const upsertIDs = input.mutations
+            .filter((mutation) => mutation.type === 'upsert')
+            .map((mutation) => mutation.id);
+          const persistedDeletions =
+            upsertIDs.length > 0
+              ? await tx
+                  .select({ taskId: taskDeletion.taskId })
+                  .from(taskDeletion)
+                  .where(
+                    and(
+                      eq(taskDeletion.userId, ctx.sessionUser.id),
+                      inArray(taskDeletion.taskId, upsertIDs),
+                    ),
+                  )
+              : [];
+          const deletedIDs = collectDeletionWinsIDs(
+            input.mutations,
+            persistedDeletions.map((row) => row.taskId),
+          );
 
-        for (const mutation of input.mutations) {
-          if (mutation.type === 'delete') {
-            await db
-              .delete(task)
-              .where(and(eq(task.id, mutation.id), eq(task.userId, ctx.sessionUser.id)));
-            syncedIds.push(mutation.id);
-          } else if (mutation.type === 'upsert' && mutation.payload) {
-            await db
-              .insert(task)
-              .values({
-                id: mutation.id,
-                userId: ctx.sessionUser.id,
-                title: mutation.payload.title ?? 'Untitled',
-                description: mutation.payload.description ?? '',
-                status: mutation.payload.status ?? 'todo',
-                priority: mutation.payload.priority ?? 'none',
-                dueDate: mutation.payload.dueDate ? new Date(mutation.payload.dueDate) : null,
-                folderId: mutation.payload.folderId ?? null,
-                reminderIdentifier: mutation.payload.reminderIdentifier ?? null,
-                emailThreadId: mutation.payload.emailThreadId ?? null,
-                eventId: mutation.payload.eventId ?? null,
-                createdAt: now,
-                updatedAt: now,
-              })
-              .onConflictDoUpdate({
-                target: task.id,
-                set: {
-                  title: sql`EXCLUDED.title`,
-                  description: sql`EXCLUDED.description`,
-                  status: sql`EXCLUDED.status`,
-                  priority: sql`EXCLUDED.priority`,
-                  dueDate: sql`EXCLUDED.due_date`,
-                  folderId: sql`EXCLUDED.folder_id`,
-                  reminderIdentifier: sql`EXCLUDED.reminder_identifier`,
-                  emailThreadId: sql`EXCLUDED.email_thread_id`,
-                  eventId: sql`EXCLUDED.event_id`,
+          for (const mutation of input.mutations) {
+            if (mutation.type === 'delete') {
+              await tx
+                .delete(task)
+                .where(and(eq(task.id, mutation.id), eq(task.userId, ctx.sessionUser.id)));
+              await tx
+                .insert(taskDeletion)
+                .values({ taskId: mutation.id, userId: ctx.sessionUser.id, deletedAt: now })
+                .onConflictDoUpdate({
+                  target: [taskDeletion.userId, taskDeletion.taskId],
+                  set: { deletedAt: now },
+                });
+              deletedIDs.add(mutation.id);
+              syncedIds.push(mutation.id);
+            } else if (mutation.type === 'upsert' && mutation.payload) {
+              // A stale offline client must not resurrect a task explicitly
+              // deleted on another device. UUIDs are never reused by native
+              // task creation; the direct `tasks.create` route is the explicit
+              // recreate path and clears its matching tombstone transactionally.
+              if (deletedIDs.has(mutation.id)) {
+                syncedIds.push(mutation.id);
+                continue;
+              }
+              await tx
+                .insert(task)
+                .values({
+                  id: mutation.id,
+                  userId: ctx.sessionUser.id,
+                  title: mutation.payload.title ?? 'Untitled',
+                  description: mutation.payload.description ?? '',
+                  status: mutation.payload.status ?? 'todo',
+                  priority: mutation.payload.priority ?? 'none',
+                  dueDate: mutation.payload.dueDate ? new Date(mutation.payload.dueDate) : null,
+                  folderId: mutation.payload.folderId ?? null,
+                  reminderIdentifier: mutation.payload.reminderIdentifier ?? null,
+                  emailThreadId: mutation.payload.emailThreadId ?? null,
+                  eventId: mutation.payload.eventId ?? null,
+                  createdAt: now,
                   updatedAt: now,
-                },
-                setWhere: eq(task.userId, ctx.sessionUser.id),
-              });
-            syncedIds.push(mutation.id);
+                })
+                .onConflictDoUpdate({
+                  target: task.id,
+                  set: {
+                    title: sql`EXCLUDED.title`,
+                    description: sql`EXCLUDED.description`,
+                    status: sql`EXCLUDED.status`,
+                    priority: sql`EXCLUDED.priority`,
+                    dueDate: sql`EXCLUDED.due_date`,
+                    folderId: sql`EXCLUDED.folder_id`,
+                    reminderIdentifier: sql`EXCLUDED.reminder_identifier`,
+                    emailThreadId: sql`EXCLUDED.email_thread_id`,
+                    eventId: sql`EXCLUDED.event_id`,
+                    updatedAt: now,
+                  },
+                  setWhere: eq(task.userId, ctx.sessionUser.id),
+                });
+              syncedIds.push(mutation.id);
+            }
           }
-        }
+        });
 
         return { syncedIds };
       } finally {

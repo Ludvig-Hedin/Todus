@@ -77,6 +77,24 @@ final class TaskCaptureServiceTests: XCTestCase {
         ])
     }
 
+    private func emptyTaskListResponseBody() throws -> Data {
+        try JSONSerialization.data(withJSONObject: [
+            "result": ["data": ["json": ["tasks": []]]]
+        ])
+    }
+
+    private func taskDeletionResponseBody(id: UUID? = nil) throws -> Data {
+        let deletions: [[String: Any]] = id.map {
+            [[
+                "taskId": $0.uuidString.lowercased(),
+                "deletedAt": "2025-01-04T12:00:00.000Z"
+            ]]
+        } ?? []
+        return try JSONSerialization.data(withJSONObject: [
+            "result": ["data": ["json": ["deletions": deletions]]]
+        ])
+    }
+
     @MainActor
     private func makeSyncService(
         configuration: AppConfiguration,
@@ -296,9 +314,9 @@ final class TaskCaptureServiceTests: XCTestCase {
         URLProtocol.registerClass(SyncURLProtocolStub.self)
         defer { URLProtocol.unregisterClass(SyncURLProtocolStub.self) }
         let remoteID = UUID()
-        SyncURLProtocolStub.outcome = .response(
-            status: 200,
-            body: try taskListResponseBody(id: remoteID)
+        SyncURLProtocolStub.outcome = .taskReconcile(
+            tasks: try taskListResponseBody(id: remoteID),
+            deletions: try taskDeletionResponseBody()
         )
 
         let ctx = try makeSyncContext()
@@ -323,9 +341,9 @@ final class TaskCaptureServiceTests: XCTestCase {
         URLProtocol.registerClass(SyncURLProtocolStub.self)
         defer { URLProtocol.unregisterClass(SyncURLProtocolStub.self) }
         let taskID = UUID()
-        SyncURLProtocolStub.outcome = .response(
-            status: 200,
-            body: try taskListResponseBody(id: taskID, title: "Stale remote")
+        SyncURLProtocolStub.outcome = .taskReconcile(
+            tasks: try taskListResponseBody(id: taskID, title: "Stale remote"),
+            deletions: try taskDeletionResponseBody(id: taskID)
         )
 
         let ctx = try makeSyncContext()
@@ -345,6 +363,40 @@ final class TaskCaptureServiceTests: XCTestCase {
 
         XCTAssertEqual(local.title, "Local edit")
         XCTAssertEqual(local.syncState, .localOnly)
+    }
+
+    @MainActor
+    func testRemoteTaskDeletionRemovesSyncedTaskAndCleansMirrors() async throws {
+        URLProtocol.registerClass(SyncURLProtocolStub.self)
+        defer { URLProtocol.unregisterClass(SyncURLProtocolStub.self) }
+        let taskID = UUID()
+        SyncURLProtocolStub.outcome = .taskReconcile(
+            tasks: try emptyTaskListResponseBody(),
+            deletions: try taskDeletionResponseBody(id: taskID)
+        )
+
+        let ctx = try makeSyncContext()
+        let local = TaskRecord(
+            id: taskID,
+            rawInput: "Delete elsewhere",
+            title: "Delete elsewhere",
+            reminderIdentifier: "reminder-123",
+            parseState: .parsed,
+            syncState: .synced
+        )
+        ctx.insert(local)
+        try ctx.save()
+        let sync = makeSyncService(configuration: makeSyncConfig(supabaseURL: nil))
+        var cleanedMirror: (UUID, String?)?
+        sync.onRemoteTaskDeleted = { id, reminderIdentifier in
+            cleanedMirror = (id, reminderIdentifier)
+        }
+
+        await sync.reconcileRemoteTasks(in: ctx)
+
+        XCTAssertTrue(try ctx.fetch(FetchDescriptor<TaskRecord>()).isEmpty)
+        XCTAssertEqual(cleanedMirror?.0, taskID)
+        XCTAssertEqual(cleanedMirror?.1, "reminder-123")
     }
 
     func testEdgeClientPreservesHTTPStatusAndBody() async throws {
@@ -394,6 +446,7 @@ final class SyncURLProtocolStub: URLProtocol, @unchecked Sendable {
         case urlError(URLError.Code)
         case status(Int)
         case response(status: Int, body: Data)
+        case taskReconcile(tasks: Data, deletions: Data)
         case taskSyncSuccess
     }
     nonisolated(unsafe) static var outcome: Outcome = .status(200)
@@ -418,6 +471,15 @@ final class SyncURLProtocolStub: URLProtocol, @unchecked Sendable {
         case .response(let code, let body):
             let resp = HTTPURLResponse(
                 url: request.url!, statusCode: code, httpVersion: "HTTP/1.1", headerFields: nil
+            )!
+            client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: body)
+            client?.urlProtocolDidFinishLoading(self)
+        case .taskReconcile(let tasks, let deletions):
+            let body = request.url?.path.contains("tasks.deleted") == true ? deletions : tasks
+            let resp = HTTPURLResponse(
+                url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "application/json"]
             )!
             client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: body)

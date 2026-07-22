@@ -620,6 +620,12 @@ final class AppServices {
         )
         self.captureService = captureService
         captureService.notificationService = self.notificationService
+        syncService.onRemoteTaskDeleted = { [weak captureService] id, reminderIdentifier in
+            captureService?.handleRemoteTaskDeletion(
+                id: id,
+                reminderIdentifier: reminderIdentifier
+            )
+        }
         self.aiChatService = AIChatService(
             configuration: configuration,
             captureService: captureService,

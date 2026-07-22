@@ -49,7 +49,7 @@
   - Replaces SupabaseSyncService
   - [x] create, update, delete, sync use authenticated `tasks.sync`
   - [x] hydrate paginated `tasks.list` upserts after folders without overwriting pending local edits
-  - [ ] add server deletion tombstones/cursor so cross-device deletes reconcile without unsafe absence-based deletion
+  - [x] reconcile explicit paginated server deletion tombstones without unsafe absence-based deletion
 - [x] **IOS-022** — Rewire TaskCaptureService to use the unified tRPC task sync transport
 - [x] **IOS-023** — Rewire AIChatService to use new backend endpoint
 - [x] **IOS-024** — Add AI chat message retry + stable copy action row

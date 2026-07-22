@@ -83,6 +83,20 @@ final class SupabaseSyncService: SyncService {
         let tasks: [RemoteTask]
     }
 
+    private struct TaskDeletionListInput: Encodable {
+        let limit: Int
+        let offset: Int
+    }
+
+    private struct TaskDeletionListResponse: Decodable {
+        let deletions: [RemoteTaskDeletion]
+    }
+
+    private struct RemoteTaskDeletion: Decodable {
+        let taskId: String
+        let deletedAt: Date
+    }
+
     private struct RemoteTask: Decodable {
         let id: String
         let title: String
@@ -101,6 +115,9 @@ final class SupabaseSyncService: SyncService {
     private let apiClient: TodosAPIClient?
     private let defaults: UserDefaults
     private let pendingDeleteRetriesKey: String
+    /// AppServices wires this after reminder and notification dependencies exist.
+    /// Called only after the local SwiftData deletion has saved successfully.
+    var onRemoteTaskDeleted: ((UUID, String?) -> Void)?
     private var queue: [PendingBatch] = []
     private var isProcessing = false
     /// Generation currently pulling remote tasks. A new account may start its
@@ -198,11 +215,9 @@ final class SupabaseSyncService: SyncService {
         await enqueue(mutations, in: context)
     }
 
-    /// Hydrates tasks created or changed on another client. Local pending work
-    /// always wins until it is acknowledged; remote absence is not treated as a
-    /// deletion because the current offset API has no stable snapshot/tombstones.
-    /// This makes sign-out/sign-in recovery and cross-device upserts safe without
-    /// risking data loss during concurrent pagination.
+    /// Hydrates tasks changed on another client and applies explicit deletion
+    /// tombstones. Local pending work is never deleted by reconciliation; once
+    /// the server acknowledges it, a matching tombstone can safely remove it.
     func reconcileRemoteTasks(in context: ModelContext) async {
         let generation = queueGeneration
         guard remoteReconcileGeneration != generation, let apiClient else { return }
@@ -216,6 +231,7 @@ final class SupabaseSyncService: SyncService {
         let pageSize = 200
         let maxPages = 100
         var remoteByID: [UUID: RemoteTask] = [:]
+        var deletionByID: [UUID: RemoteTaskDeletion] = [:]
 
         do {
             for page in 0..<maxPages {
@@ -238,11 +254,35 @@ final class SupabaseSyncService: SyncService {
                 }
             }
 
+            for page in 0..<maxPages {
+                let response: TaskDeletionListResponse = try await apiClient.trpcQuery(
+                    "tasks.deleted",
+                    input: TaskDeletionListInput(limit: pageSize, offset: page * pageSize)
+                )
+                guard generation == queueGeneration else { return }
+
+                for deletion in response.deletions {
+                    guard let id = UUID(uuidString: deletion.taskId) else { continue }
+                    if let existing = deletionByID[id], existing.deletedAt >= deletion.deletedAt {
+                        continue
+                    }
+                    deletionByID[id] = deletion
+                }
+                if response.deletions.count < pageSize { break }
+                if page == maxPages - 1 {
+                    AppLogger.shared.log("[TaskSync] tasks.deleted stopped at \(maxPages * pageSize) rows")
+                }
+            }
+
             guard generation == queueGeneration else { return }
-            applyRemoteTasks(Array(remoteByID.values), in: context)
+            applyRemoteState(
+                tasks: Array(remoteByID.values),
+                deletions: Array(deletionByID.values),
+                in: context
+            )
         } catch {
             // Offline/auth/server errors leave the complete local cache untouched.
-            AppLogger.shared.log("[TaskSync] tasks.list failed: \(error.localizedDescription)")
+            AppLogger.shared.log("[TaskSync] remote reconciliation failed: \(error.localizedDescription)")
         }
     }
 
@@ -340,14 +380,21 @@ final class SupabaseSyncService: SyncService {
         }
     }
 
-    private func applyRemoteTasks(_ remoteTasks: [RemoteTask], in context: ModelContext) {
+    private func applyRemoteState(
+        tasks remoteTasks: [RemoteTask],
+        deletions remoteDeletions: [RemoteTaskDeletion],
+        in context: ModelContext
+    ) {
         let localTasks = (try? context.fetch(FetchDescriptor<TaskRecord>())) ?? []
         var localByID = Dictionary(uniqueKeysWithValues: localTasks.map { ($0.id, $0) })
         let folders = (try? context.fetch(FetchDescriptor<FolderRecord>())) ?? []
         let foldersByID = Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0) })
+        let deletedIDs = Set(remoteDeletions.compactMap { UUID(uuidString: $0.taskId) })
+        var deletedLocalTasks: [(id: UUID, reminderIdentifier: String?)] = []
 
         for remote in remoteTasks {
             guard let id = UUID(uuidString: remote.id),
+                  !deletedIDs.contains(id),
                   let status = TaskStatus(rawValue: remote.status),
                   let priority = AppTaskPriority(rawValue: remote.priority) else { continue }
             let folder = remote.folderId.flatMap(UUID.init(uuidString:)).flatMap { foldersByID[$0] }
@@ -394,8 +441,18 @@ final class SupabaseSyncService: SyncService {
             }
         }
 
+        for id in deletedIDs {
+            guard let local = localByID[id], local.syncState == .synced else { continue }
+            deletedLocalTasks.append((id: id, reminderIdentifier: local.reminderIdentifier))
+            context.delete(local)
+            localByID.removeValue(forKey: id)
+        }
+
         do {
             try context.save()
+            for deletion in deletedLocalTasks {
+                onRemoteTaskDeleted?(deletion.id, deletion.reminderIdentifier)
+            }
         } catch {
             context.rollback()
             AppLogger.shared.log("[TaskSync] failed to save reconciled tasks: \(error)")
