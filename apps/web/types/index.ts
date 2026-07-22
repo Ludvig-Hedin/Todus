@@ -122,12 +122,10 @@ export type ThreadProps = {
     labelIds?: string[];
     snippet?: string | null;
     hasDraft?: boolean;
+    connectionColor?: string | null;
+    connectionEmail?: string | null;
   };
-  onClick?: (message: {
-    id: string;
-    threadId?: string;
-    unread?: boolean;
-  }) => () => void;
+  onClick?: (message: { id: string; threadId?: string; unread?: boolean }) => () => void;
   isKeyboardFocused?: boolean;
 };
 

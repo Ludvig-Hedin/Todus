@@ -363,6 +363,11 @@ struct MacRootView: View {
     @State private var composeEmailSeedTo: String = ""
     @State private var composeEmailSeedSubject: String = ""
     @State private var hasBootstrappedAuthState = false
+    /// Prevents the authenticated shell from rendering until its local SwiftData cache has
+    /// been verified for the current account.
+    @State private var hasPreparedLocalDataScope = false
+    @State private var localDataScopeError: String?
+    @State private var localDataScopeRetry = 0
     @State private var hasAppliedStartupSelection = false
     /// Gates the `fetchUserProfile` + `loadSharedAIProfile` task so it runs once per
     /// authenticated session instead of every `isAuthenticated` flip. Without this,
@@ -387,6 +392,9 @@ struct MacRootView: View {
             } else if services.authService.showsOnboarding {
                 // Not authenticated → show sign-in screen
                 MacAuthView()
+                    .transition(.opacity)
+            } else if services.authService.isAuthenticated && !hasPreparedLocalDataScope {
+                restoringSessionView
                     .transition(.opacity)
             } else if !services.hasConfiguredGmailPrompt {
                 MacGmailOnboardingView()
@@ -502,15 +510,32 @@ struct MacRootView: View {
             guard hasBootstrappedAuthState, services.authService.isAuthenticated else { return }
             _ = await services.authService.attemptSilentRefresh()
         }
-        .task(id: services.authService.isAuthenticated) {
+        .task(id: "\(services.authService.isAuthenticated)-\(localDataScopeRetry)") {
             // Fetch user profile (name, avatar, email) ONCE per authenticated session.
             // The `didFetchProfileForSession` gate prevents transient auth-state flips
             // (e.g. background token refresh) from re-firing the fetch and clobbering
             // unsaved Settings edits via `loadSharedAIProfile`. Reset on sign-out so
             // a subsequent sign-in still triggers a refresh.
-            guard services.authService.isAuthenticated else { return }
+            guard services.authService.isAuthenticated else {
+                hasPreparedLocalDataScope = false
+                localDataScopeError = nil
+                didFetchProfileForSession = false
+                return
+            }
             guard !didFetchProfileForSession else { return }
+            localDataScopeError = nil
             await services.authService.fetchUserProfile()
+            guard services.authService.isAuthenticated else { return }
+            hasPreparedLocalDataScope = await services.activateLocalDataScope(
+                for: services.authService.userID
+            )
+            guard hasPreparedLocalDataScope else {
+                localDataScopeError = "Your local workspace could not be opened. Check your connection and try again."
+                return
+            }
+            services.flushPendingSync()
+            services.drainWidgetTaskCompletions()
+            services.reconcileTaskReminders()
             await services.loadSharedAIProfile()
             didFetchProfileForSession = true
         }
@@ -541,12 +566,23 @@ struct MacRootView: View {
                     .foregroundStyle(.primary.opacity(0.8))
                     .frame(width: 44, height: 44)
 
-                ProgressView()
-                    .controlSize(.small)
+                if localDataScopeError == nil {
+                    ProgressView()
+                        .controlSize(.small)
+                }
 
-                Text("Checking your session…")
+                Text(localDataScopeError ?? "Checking your session…")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 360)
+
+                if localDataScopeError != nil {
+                    Button("Try Again") {
+                        localDataScopeRetry += 1
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
             }
         }
     }

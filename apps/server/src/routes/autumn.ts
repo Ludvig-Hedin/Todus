@@ -1,14 +1,21 @@
-import { Autumn, fetchPricingTable } from 'autumn-js';
+import {
+  Autumn,
+  fetchPricingTable,
+  type AttachParams,
+  type CancelParams,
+  type CheckParams,
+  type TrackParams,
+} from 'autumn-js';
 import type { HonoContext } from '../ctx';
 import { env } from '../env';
 import { Hono } from 'hono';
 
-const sanitizeCustomerBody = (body: any) => {
-  let bodyCopy = { ...body };
+const sanitizeCustomerBody = <T extends object>(body: T): Omit<T, 'id' | 'name' | 'email'> => {
+  const bodyCopy = { ...body } as T & Record<string, unknown>;
   delete bodyCopy.id;
   delete bodyCopy.name;
   delete bodyCopy.email;
-  return bodyCopy;
+  return bodyCopy as Omit<T, 'id' | 'name' | 'email'>;
 };
 
 type AutumnContext = {
@@ -44,7 +51,11 @@ export const autumnApi = new Hono<AutumnContext>()
   .post('/customers', async (c) => {
     const { autumn, customerData } = c.var;
     const body = await c.req.json();
-    if (!customerData) return c.json({ error: 'No customer ID found' }, 401);
+    // Autumn's React provider probes this endpoint when it mounts, including on
+    // public pages. An anonymous visitor has no billing customer, which is a
+    // valid empty state rather than an auth failure. Mutating billing endpoints
+    // below remain protected and continue to return 401 without a session.
+    if (!customerData) return c.json(null);
 
     return c.json(
       await autumn!.customers
@@ -58,7 +69,7 @@ export const autumnApi = new Hono<AutumnContext>()
   })
   .post('/attach', async (c) => {
     const { autumn, customerData } = c.var;
-    const body = await c.req.json();
+    const body = await c.req.json<Omit<AttachParams, 'customer_id' | 'customer_data'>>();
     const sanitizedBody = sanitizeCustomerBody(body);
     if (!customerData) return c.json({ error: 'No customer ID found' }, 401);
 
@@ -74,7 +85,7 @@ export const autumnApi = new Hono<AutumnContext>()
   })
   .post('/cancel', async (c) => {
     const { autumn, customerData } = c.var;
-    const body = await c.req.json();
+    const body = await c.req.json<Omit<CancelParams, 'customer_id'>>();
     const sanitizedBody = sanitizeCustomerBody(body);
     if (!customerData) return c.json({ error: 'No customer ID found' }, 401);
 
@@ -89,7 +100,7 @@ export const autumnApi = new Hono<AutumnContext>()
   })
   .post('/check', async (c) => {
     const { autumn, customerData } = c.var;
-    const body = await c.req.json();
+    const body = await c.req.json<Omit<CheckParams, 'customer_id' | 'customer_data'>>();
     const sanitizedBody = sanitizeCustomerBody(body);
     if (!customerData) return c.json({ error: 'No customer ID found' }, 401);
 
@@ -105,7 +116,7 @@ export const autumnApi = new Hono<AutumnContext>()
   })
   .post('/track', async (c) => {
     const { autumn, customerData } = c.var;
-    const body = await c.req.json();
+    const body = await c.req.json<Omit<TrackParams, 'customer_id' | 'customer_data'>>();
     const sanitizedBody = sanitizeCustomerBody(body);
     if (!customerData) return c.json({ error: 'No customer ID found' }, 401);
 

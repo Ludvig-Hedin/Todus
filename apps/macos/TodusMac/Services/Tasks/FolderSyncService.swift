@@ -8,9 +8,15 @@ final class FolderSyncService {
 
     // MARK: - Mutation types
 
-    enum Mutation {
+    enum Mutation: Codable {
         case upsert(id: String, name: String, color: String?, icon: String?, position: Int)
         case delete(id: String)
+
+        var folderID: String {
+            switch self {
+            case .upsert(let id, _, _, _, _), .delete(let id): id
+            }
+        }
     }
 
     // MARK: - Wire types
@@ -36,9 +42,17 @@ final class FolderSyncService {
 
     // MARK: - State
 
-    private var queue: [Mutation] = []
-    private var isProcessing = false
+    private var queue: [Mutation] = [] {
+        didSet { persistQueue() }
+    }
+    private var inFlightIDs: Set<String> = []
+    private var inFlightBatch: [Mutation] = []
+    private var processingGeneration: Int?
     private let apiClient: TodosAPIClient
+    private var activeQueueKey: String?
+    private var scopeGeneration = 0
+    private var isChangingScope = false
+    private static let legacyQueueKey = "TodusMac.folderMutationQueue"
 
     // MARK: - Init
 
@@ -50,27 +64,79 @@ final class FolderSyncService {
 
     /// Append a mutation to the queue and immediately attempt to flush.
     func enqueue(_ mutation: Mutation) async {
+        guard activeQueueKey != nil else { return }
         queue.append(mutation)
         await processQueue()
     }
 
     /// Re-attempt any pending mutations — call this on network reconnect.
     func retryPending() async {
+        guard activeQueueKey != nil else { return }
         await processQueue()
     }
 
-    /// Discards any queued mutations that have not yet been sent.
-    /// Call on sign-out to prevent a reconnect from replaying the previous user's edits.
+    /// Discards the active account's queued mutations. Account switching uses
+    /// `deactivateScope()` so normal sign-out never destroys pending work.
     func clearQueue() {
+        scopeGeneration += 1
+        inFlightBatch.removeAll()
         queue.removeAll()
+    }
+
+    /// Switches to an account-owned journal. The legacy unscoped journal stays
+    /// quarantined because automatically assigning it could cross an account boundary.
+    func activateScope(_ scopeID: String) {
+        let nextKey = "\(Self.legacyQueueKey).\(scopeID)"
+        guard activeQueueKey != nextKey else { return }
+
+        scopeGeneration += 1
+        persistQueue()
+        isChangingScope = true
+        inFlightBatch.removeAll()
+        inFlightIDs.removeAll()
+        queue.removeAll()
+        activeQueueKey = nextKey
+
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: nextKey),
+           let restored = try? JSONDecoder().decode([Mutation].self, from: data) {
+            queue = restored
+        }
+        isChangingScope = false
+        persistQueue()
+    }
+
+    func deactivateScope() {
+        scopeGeneration += 1
+        persistQueue()
+        isChangingScope = true
+        inFlightBatch.removeAll()
+        inFlightIDs.removeAll()
+        queue.removeAll()
+        activeQueueKey = nil
+        isChangingScope = false
+        processingGeneration = nil
+    }
+
+    /// Prevent server refreshes from reverting a local mutation while it is
+    /// queued or awaiting acknowledgement.
+    func hasPending(id: String) -> Bool {
+        inFlightIDs.contains(id) || queue.contains { $0.folderID == id }
     }
 
     // MARK: - Private
 
     private func processQueue() async {
-        guard !isProcessing, !queue.isEmpty else { return }
-        isProcessing = true
-        defer { isProcessing = false }
+        let processGeneration = scopeGeneration
+        guard activeQueueKey != nil,
+              processingGeneration != processGeneration,
+              !queue.isEmpty else { return }
+        processingGeneration = processGeneration
+        defer {
+            if processingGeneration == processGeneration {
+                processingGeneration = nil
+            }
+        }
 
         // Drain. A mutation enqueued while a batch is in flight would otherwise
         // sit until the next reconnect, so a user editing folders rapidly on a
@@ -78,7 +144,10 @@ final class FolderSyncService {
         // event. Mirrors the iOS FolderSyncService loop.
         while !queue.isEmpty {
             let batch = queue
+            let batchGeneration = scopeGeneration
+            inFlightBatch = batch
             queue.removeAll()
+            inFlightIDs = Set(batch.map(\.folderID))
 
             let payloads = batch.map { mutation -> FolderMutationPayload in
                 switch mutation {
@@ -108,6 +177,7 @@ final class FolderSyncService {
                     "folders.sync",
                     input: FolderSyncRequest(mutations: payloads)
                 )
+                guard batchGeneration == scopeGeneration, activeQueueKey != nil else { return }
 
                 // Mirror TaskSyncService: the server only confirms what it actually
                 // accepted via `syncedIds`. Anything the server *didn't* echo back
@@ -121,13 +191,18 @@ final class FolderSyncService {
                     AppLogger.shared.log(
                         "[FolderSyncService] server did not confirm \(unsynced.count) of \(batch.count) folder mutation(s); requeuing"
                     )
+                    inFlightBatch.removeAll()
                     queue.insert(contentsOf: unsynced, at: 0)
                     // Stop draining so we don't immediately hot-loop on the same
                     // batch; the next enqueue() or retryPending() will pick it up.
                     break
                 }
+                inFlightBatch.removeAll()
+                persistQueue()
             } catch {
+                guard batchGeneration == scopeGeneration, activeQueueKey != nil else { return }
                 // Network / server error — requeue the batch so retryPending() can replay it.
+                inFlightBatch.removeAll()
                 queue.insert(contentsOf: batch, at: 0)
                 AppLogger.shared.log(
                     "[FolderSyncService] sync failed; requeued \(batch.count) mutation(s): \(error.localizedDescription)"
@@ -135,6 +210,18 @@ final class FolderSyncService {
                 // Stop draining on failure to avoid a hot retry loop against a down server.
                 break
             }
+        }
+
+        inFlightIDs.removeAll()
+    }
+
+    private func persistQueue() {
+        guard !isChangingScope, let activeQueueKey else { return }
+        let pending = inFlightBatch + queue
+        if pending.isEmpty {
+            UserDefaults.standard.removeObject(forKey: activeQueueKey)
+        } else if let data = try? JSONEncoder().encode(pending) {
+            UserDefaults.standard.set(data, forKey: activeQueueKey)
         }
     }
 }

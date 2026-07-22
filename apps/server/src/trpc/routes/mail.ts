@@ -14,9 +14,11 @@ import {
   type IGetThreadsResponse,
   type ThreadSummary,
 } from '../../lib/driver/types';
-import { updateWritingStyleMatrix } from '../../services/writing-style-service';
-import type { DeleteAllSpamResponse, IEmailSendBatch } from '../../types';
 import { activeDriverProcedure, multiConnectionProcedure, router, privateProcedure } from '../trpc';
+import type { DeleteAllSpamResponse, IEmailSendBatch, IOutgoingMessage } from '../../types';
+import { updateWritingStyleMatrix } from '../../services/writing-style-service';
+import { getScheduledEmailStateTtlSeconds } from '../../lib/scheduled-email';
+import { EProviders, type ISubscribeBatch } from '../../types';
 import { processEmailHtml } from '../../lib/email-processor';
 import { defaultPageSize, FOLDERS } from '../../lib/utils';
 import { toAttachmentFiles } from '../../lib/attachments';
@@ -25,7 +27,6 @@ import { getContext } from 'hono/context-storage';
 import { type HonoContext } from '../../ctx';
 import { TRPCError } from '@trpc/server';
 import { env } from '../../env';
-import { EProviders, type ISubscribeBatch } from '../../types';
 import { z } from 'zod';
 
 const senderSchema = z.object({
@@ -400,14 +401,9 @@ export const mailRouter = router({
             // the user's next list call without any client-side change.
             const REWATCH_STALE_MS = 24 * 60 * 60 * 1000;
             const watchProbablyExpired = isEmpty || newestAgeMs > REWATCH_STALE_MS;
-            if (
-              watchProbablyExpired &&
-              activeConnection.providerId === EProviders.google
-            ) {
+            if (watchProbablyExpired && activeConnection.providerId === EProviders.google) {
               try {
-                await env.gmail_sub_age.delete(
-                  `${activeConnection.id}__${EProviders.google}`,
-                );
+                await env.gmail_sub_age.delete(`${activeConnection.id}__${EProviders.google}`);
                 await env.subscribe_queue.send({
                   connectionId: activeConnection.id,
                   providerId: EProviders.google,
@@ -489,9 +485,7 @@ export const mailRouter = router({
         : connections;
 
       // Only include connections that have valid tokens
-      const validConnections = targetConnections.filter(
-        (c) => c.accessToken && c.refreshToken,
-      );
+      const validConnections = targetConnections.filter((c) => c.accessToken && c.refreshToken);
 
       // Per-connection limit: distribute maxResults evenly, minimum 5 per connection
       const perConnectionLimit =
@@ -539,13 +533,26 @@ export const mailRouter = router({
       );
 
       // Merge results, tracking errors per connection
-      const allThreads: Array<ThreadSummary & { connectionId: string; connectionEmail: string; connectionColor: string | null }> = [];
+      const allThreads: Array<
+        ThreadSummary & {
+          connectionId: string;
+          connectionEmail: string;
+          connectionColor: string | null;
+        }
+      > = [];
       const nextCursors: Record<string, string> = {};
       const errors: Array<{ connectionId: string; connectionEmail: string; error: string }> = [];
 
       for (const result of results) {
         if (result.status === 'fulfilled') {
-          const { connectionId, connectionEmail, connectionColor, threads, nextPageToken, exhausted } = result.value;
+          const {
+            connectionId,
+            connectionEmail,
+            connectionColor,
+            threads,
+            nextPageToken,
+            exhausted,
+          } = result.value;
           for (const thread of threads) {
             allThreads.push({ ...thread, connectionId, connectionEmail, connectionColor });
           }
@@ -882,9 +889,7 @@ export const mailRouter = router({
 
       // Idempotency gate: if this clientSendId already completed a send for
       // this connection, treat the retry as a success without re-sending.
-      const dedupeKey = clientSendId
-        ? `send-dedupe:${activeConnection.id}:${clientSendId}`
-        : null;
+      const dedupeKey = clientSendId ? `send-dedupe:${activeConnection.id}:${clientSendId}` : null;
       if (dedupeKey) {
         const already = await env.pending_emails_status.get(dedupeKey);
         if (already) {
@@ -932,6 +937,13 @@ export const mailRouter = router({
         const rawDelaySeconds = Math.floor((targetTime - Date.now()) / 1000);
         const maxQueueDelay = 43200; // 12 hours
         const isLongTerm = rawDelaySeconds > maxQueueDelay;
+        const stateTtlSeconds = getScheduledEmailStateTtlSeconds(rawDelaySeconds);
+        if (stateTtlSeconds === null) {
+          return { success: false, error: 'Emails can be scheduled up to 364 days ahead' } as const;
+        }
+        // Payload, cancellation status, and the idempotency marker must all
+        // outlive the requested send time. A fixed 24h TTL silently dropped
+        // emails scheduled two or more days ahead.
 
         const {
           pending_emails_status: statusKV,
@@ -942,7 +954,7 @@ export const mailRouter = router({
 
         try {
           await statusKV.put(messageId, 'pending', {
-            expirationTtl: 60 * 60 * 24,
+            expirationTtl: stateTtlSeconds,
           });
         } catch (error) {
           console.error(`Failed to write pending status to KV for message ${messageId}`, error);
@@ -958,7 +970,7 @@ export const mailRouter = router({
 
         try {
           await payloadKV.put(messageId, JSON.stringify(mailPayload), {
-            expirationTtl: 60 * 60 * 24,
+            expirationTtl: stateTtlSeconds,
           });
         } catch (error) {
           console.error(`Failed to write email payload to KV for message ${messageId}`, error);
@@ -1005,7 +1017,7 @@ export const mailRouter = router({
         if (dedupeKey) {
           ctx.c.executionCtx.waitUntil(
             env.pending_emails_status.put(dedupeKey, 'scheduled', {
-              expirationTtl: 60 * 60 * 24,
+              expirationTtl: stateTtlSeconds,
             }),
           );
         }
@@ -1019,10 +1031,8 @@ export const mailRouter = router({
 
       const mailWithAttachments = {
         ...mail,
-        attachments: attachments?.map((att: any) =>
-          typeof att?.arrayBuffer === 'function' ? att : toAttachmentFiles([att])[0],
-        ),
-      } as typeof mail & { attachments: any[] };
+        attachments: toAttachmentFiles(attachments),
+      } as unknown as IOutgoingMessage;
 
       if (draftId) {
         await agent.stub.sendDraft(draftId, mailWithAttachments);
@@ -1062,14 +1072,24 @@ export const mailRouter = router({
       } = env;
 
       const scheduledData = await scheduledKV.get(messageId);
+      // Short-term queue entries do not have a scheduledKV row, so keep their
+      // cancellation marker for the maximum 12h queue delay plus retry
+      // retention. Long-term entries use their exact remaining delay.
+      let cancellationDelaySeconds = 12 * 60 * 60;
       if (scheduledData) {
         try {
-          const { connectionId } = JSON.parse(scheduledData);
+          const { connectionId, sendAt } = JSON.parse(scheduledData) as {
+            connectionId: string;
+            sendAt?: number;
+          };
           if (connectionId !== activeConnection.id) {
             return {
               success: false,
               error: "Unauthorized: Cannot cancel another user's scheduled email",
             } as const;
+          }
+          if (typeof sendAt === 'number') {
+            cancellationDelaySeconds = Math.max(0, (sendAt - Date.now()) / 1000);
           }
         } catch (error) {
           console.error('Failed to parse scheduled data for ownership verification:', error);
@@ -1093,8 +1113,10 @@ export const mailRouter = router({
         }
       }
 
+      const cancellationTtl =
+        getScheduledEmailStateTtlSeconds(cancellationDelaySeconds) ?? 24 * 60 * 60;
       await statusKV.put(messageId, 'cancelled', {
-        expirationTtl: 60 * 60,
+        expirationTtl: cancellationTtl,
       });
 
       await payloadKV.delete(messageId);

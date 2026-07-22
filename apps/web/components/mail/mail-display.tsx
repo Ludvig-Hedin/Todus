@@ -41,11 +41,13 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { EmailVerificationBadge } from './email-verification-badge';
 import type { Sender, ParsedMessage, Attachment } from '@/types';
 import { useActiveConnection } from '@/hooks/use-connections';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useAttachments } from '@/hooks/use-attachments';
+import { useAISidebar } from '@/hooks/use-ai-sidebar';
 import { useTRPC } from '@/providers/query-provider';
 import { useThreadLabels } from '@/hooks/use-labels';
-import { useMutation, useQuery } from '@tanstack/react-query';
 import { Markdown } from '@react-email/components';
+import { useSettings } from '@/hooks/use-settings';
 import { TextShimmer } from '../ui/text-shimmer';
 import { useThread } from '@/hooks/use-threads';
 import { BimiAvatar } from '../ui/bimi-avatar';
@@ -60,8 +62,6 @@ import { Button } from '../ui/button';
 import { useQueryState } from 'nuqs';
 import { Badge } from '../ui/badge';
 import { format } from 'date-fns';
-import { useAISidebar } from '@/components/ui/ai-sidebar';
-import { useSettings } from '@/hooks/use-settings';
 import posthog from 'posthog-js';
 import { toast } from 'sonner';
 
@@ -410,17 +410,25 @@ const MailAssistantCard = ({
         toast.error('Failed to copy thread summary');
       }
     },
-    [assistantQuery.data?.summary, subject],
+    [assistantQuery.data?.summary, subject, threadId],
   );
 
   const assistant = assistantQuery.data;
   if (assistantPolicy?.assistantThreadActionsVisible === false) return null;
   if (assistantQuery.isLoading || !assistant) return null;
 
-  const draftPreparedAction = assistant.preparedActions.find((action) => action.type === 'draft_reply');
-  const taskPreparedAction = assistant.preparedActions.find((action) => action.type === 'create_task');
-  const eventPreparedAction = assistant.preparedActions.find((action) => action.type === 'create_event');
-  const researchPreparedAction = assistant.preparedActions.find((action) => action.type === 'research');
+  const draftPreparedAction = assistant.preparedActions.find(
+    (action) => action.type === 'draft_reply',
+  );
+  const taskPreparedAction = assistant.preparedActions.find(
+    (action) => action.type === 'create_task',
+  );
+  const eventPreparedAction = assistant.preparedActions.find(
+    (action) => action.type === 'create_event',
+  );
+  const researchPreparedAction = assistant.preparedActions.find(
+    (action) => action.type === 'research',
+  );
 
   const intentBadges = [
     assistant.replyNeeded ? 'Needs reply' : null,
@@ -491,25 +499,25 @@ const MailAssistantCard = ({
 
   return (
     <div
-      className="mt-3 flex max-w-4xl flex-col gap-3.5 rounded-[20px] border border-border/60 bg-background/95 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.05)] backdrop-blur-sm dark:bg-[#121212]"
+      className="border-border/60 bg-background/95 mt-3 flex max-w-4xl flex-col gap-3.5 rounded-[20px] border p-4 shadow-[0_1px_2px_rgba(0,0,0,0.05)] backdrop-blur-sm dark:bg-[#121212]"
       onClick={(e) => e.stopPropagation()}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            <span className="text-muted-foreground text-[10px] font-semibold uppercase tracking-[0.12em]">
               Assistant
             </span>
             <Badge
               variant="outline"
-              className="rounded-full border-border/60 bg-muted/25 px-2.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+              className="border-border/60 bg-muted/25 text-muted-foreground rounded-full px-2.5 py-0.5 text-[10px] font-medium"
             >
               {Math.round(assistant.confidence * 100)}% confidence
             </Badge>
             <Badge
               variant="outline"
               className={cn(
-                'rounded-full border-border/60 bg-muted/20 px-2.5 py-0.5 text-[10px] font-medium',
+                'border-border/60 bg-muted/20 rounded-full px-2.5 py-0.5 text-[10px] font-medium',
                 assistant.riskLevel === 'high'
                   ? 'text-rose-500 dark:text-rose-400'
                   : assistant.riskLevel === 'medium'
@@ -521,7 +529,7 @@ const MailAssistantCard = ({
             </Badge>
             <Badge
               variant="outline"
-              className="rounded-full border-border/60 bg-muted/20 px-2.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+              className="border-border/60 bg-muted/20 text-muted-foreground rounded-full px-2.5 py-0.5 text-[10px] font-medium"
             >
               {assistant.recommendation.label}
             </Badge>
@@ -531,7 +539,7 @@ const MailAssistantCard = ({
               <Badge
                 key={badge}
                 variant="outline"
-                className="rounded-full border-border/50 bg-muted/20 px-2.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                className="border-border/50 bg-muted/20 text-muted-foreground rounded-full px-2.5 py-0.5 text-[10px] font-medium"
               >
                 {badge}
               </Badge>
@@ -544,7 +552,7 @@ const MailAssistantCard = ({
             type="button"
             size="xs"
             variant="secondary"
-            className="h-7 gap-1.5 rounded-full border border-border/50 bg-muted/25 px-2.5 text-[10px] font-medium text-muted-foreground hover:bg-muted/40"
+            className="border-border/50 bg-muted/25 text-muted-foreground hover:bg-muted/40 h-7 gap-1.5 rounded-full border px-2.5 text-[10px] font-medium"
             onClick={async (e) => {
               e.stopPropagation();
               try {
@@ -562,7 +570,7 @@ const MailAssistantCard = ({
             type="button"
             size="xs"
             variant="secondary"
-            className="h-7 gap-1.5 rounded-full border border-border/50 bg-muted/25 px-2.5 text-[10px] font-medium text-muted-foreground hover:bg-muted/40"
+            className="border-border/50 bg-muted/25 text-muted-foreground hover:bg-muted/40 h-7 gap-1.5 rounded-full border px-2.5 text-[10px] font-medium"
             onClick={handleCopySummary}
           >
             <CopyIcon className="h-3.5 w-3.5" />
@@ -575,7 +583,7 @@ const MailAssistantCard = ({
         <Button
           type="button"
           size="sm"
-          className="h-8 rounded-full bg-foreground px-3 text-[11px] font-medium text-background hover:bg-foreground/90"
+          className="bg-foreground text-background hover:bg-foreground/90 h-8 rounded-full px-3 text-[11px] font-medium"
           onClick={() =>
             void (async () => {
               for (const suggestion of assistant.suggestedTasks) {
@@ -592,9 +600,13 @@ const MailAssistantCard = ({
           type="button"
           size="sm"
           variant="secondary"
-          className="h-8 rounded-full border border-border/60 bg-muted/20 px-3 text-[11px] font-medium text-foreground hover:bg-muted/35"
+          className="border-border/60 bg-muted/20 text-foreground hover:bg-muted/35 h-8 rounded-full border px-3 text-[11px] font-medium"
           onClick={handleCreateEvent}
-          disabled={!assistant.suggestedEvent?.startAt || !assistant.suggestedEvent.endAt || isApplyingPreparedAction}
+          disabled={
+            !assistant.suggestedEvent?.startAt ||
+            !assistant.suggestedEvent.endAt ||
+            isApplyingPreparedAction
+          }
         >
           <CalendarClock className="mr-1 h-3.5 w-3.5" />
           Create event
@@ -603,9 +615,12 @@ const MailAssistantCard = ({
           type="button"
           size="sm"
           variant="secondary"
-          className="h-8 rounded-full border border-border/60 bg-muted/20 px-3 text-[11px] font-medium text-foreground hover:bg-muted/35"
+          className="border-border/60 bg-muted/20 text-foreground hover:bg-muted/35 h-8 rounded-full border px-3 text-[11px] font-medium"
           onClick={handleGenerateDraft}
-          disabled={(!assistant.replyNeeded && !draftPreparedAction && !assistant.existingDraft) || isGeneratingDraft}
+          disabled={
+            (!assistant.replyNeeded && !draftPreparedAction && !assistant.existingDraft) ||
+            isGeneratingDraft
+          }
         >
           {isGeneratingDraft ? (
             <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
@@ -618,7 +633,7 @@ const MailAssistantCard = ({
           type="button"
           size="sm"
           variant="secondary"
-          className="h-8 rounded-full border border-border/60 bg-muted/20 px-3 text-[11px] font-medium text-foreground hover:bg-muted/35"
+          className="border-border/60 bg-muted/20 text-foreground hover:bg-muted/35 h-8 rounded-full border px-3 text-[11px] font-medium"
           onClick={onAskAI}
         >
           <Lightning className="mr-1 h-3.5 w-3.5 fill-current" />
@@ -628,7 +643,7 @@ const MailAssistantCard = ({
           type="button"
           size="sm"
           variant="secondary"
-          className="h-8 rounded-full border border-border/60 bg-muted/20 px-3 text-[11px] font-medium text-foreground hover:bg-muted/35"
+          className="border-border/60 bg-muted/20 text-foreground hover:bg-muted/35 h-8 rounded-full border px-3 text-[11px] font-medium"
           onClick={() =>
             onResearch(
               assistant.researchQueries[0] ||
@@ -642,29 +657,29 @@ const MailAssistantCard = ({
         </Button>
       </div>
 
-      <div className="rounded-[18px] border border-border/50 bg-muted/20 p-3 dark:bg-[#171717]">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+      <div className="border-border/50 bg-muted/20 rounded-[18px] border p-3 dark:bg-[#171717]">
+        <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-[0.12em]">
           Summary
         </p>
-        <div className="mt-2 text-[13px] leading-6 text-foreground">
+        <div className="text-foreground mt-2 text-[13px] leading-6">
           <Markdown markdownContainerStyles={{ fontSize: 15 }}>{assistant.summary}</Markdown>
         </div>
-        <p className="mt-2 text-[12px] leading-5 text-muted-foreground">{assistant.reason}</p>
+        <p className="text-muted-foreground mt-2 text-[12px] leading-5">{assistant.reason}</p>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
         {assistant.people.length > 0 && (
           <div className="space-y-2">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-[0.12em]">
               People context
             </p>
             <div className="flex flex-col gap-2">
               {assistant.people.slice(0, 2).map((person) => (
                 <div
                   key={person.email}
-                  className="rounded-[18px] border border-border/50 bg-muted/20 px-3 py-3 dark:bg-[#171717]"
+                  className="border-border/50 bg-muted/20 rounded-[18px] border px-3 py-3 dark:bg-[#171717]"
                 >
-                  <p className="text-[13px] font-medium tracking-[-0.01em] text-foreground">
+                  <p className="text-foreground text-[13px] font-medium tracking-[-0.01em]">
                     {person.displayName}
                   </p>
                   <p className="text-muted-foreground mt-1 text-[12px] leading-5">
@@ -678,16 +693,16 @@ const MailAssistantCard = ({
 
         {(assistant.relatedTasks.length > 0 || assistant.relatedMeetings.length > 0) && (
           <div className="space-y-2">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-[0.12em]">
               Linked context
             </p>
             <div className="flex flex-col gap-2">
               {assistant.relatedTasks.slice(0, 2).map((task) => (
                 <div
                   key={task.id}
-                  className="rounded-[18px] border border-border/50 bg-muted/20 px-3 py-3 dark:bg-[#171717]"
+                  className="border-border/50 bg-muted/20 rounded-[18px] border px-3 py-3 dark:bg-[#171717]"
                 >
-                  <p className="text-[13px] font-medium tracking-[-0.01em] text-foreground">
+                  <p className="text-foreground text-[13px] font-medium tracking-[-0.01em]">
                     {task.title}
                   </p>
                   <p className="text-muted-foreground mt-1 text-[12px] leading-5">
@@ -699,9 +714,9 @@ const MailAssistantCard = ({
               {assistant.relatedMeetings.slice(0, 2).map((meeting) => (
                 <div
                   key={meeting.id}
-                  className="rounded-[18px] border border-border/50 bg-muted/20 px-3 py-3 dark:bg-[#171717]"
+                  className="border-border/50 bg-muted/20 rounded-[18px] border px-3 py-3 dark:bg-[#171717]"
                 >
-                  <p className="text-[13px] font-medium tracking-[-0.01em] text-foreground">
+                  <p className="text-foreground text-[13px] font-medium tracking-[-0.01em]">
                     {meeting.title}
                   </p>
                   <p className="text-muted-foreground mt-1 text-[12px] leading-5">
@@ -716,16 +731,16 @@ const MailAssistantCard = ({
 
       {assistant.actionItems.length > 0 && (
         <div className="space-y-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-[0.12em]">
             Detected actions
           </p>
           <div className="flex flex-col gap-2">
             {assistant.actionItems.map((item) => (
               <div
                 key={item}
-                className="flex items-start gap-2 rounded-2xl border border-border/50 bg-muted/20 px-3 py-2.5 text-[13px] text-foreground dark:bg-[#171717]"
+                className="border-border/50 bg-muted/20 text-foreground flex items-start gap-2 rounded-2xl border px-3 py-2.5 text-[13px] dark:bg-[#171717]"
               >
-                <ListTodo className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                <ListTodo className="text-muted-foreground mt-0.5 h-4 w-4 shrink-0" />
                 <span>{item}</span>
               </div>
             ))}
@@ -735,19 +750,21 @@ const MailAssistantCard = ({
 
       {assistantPolicy?.suggestTasksFromEmail !== false && assistant.suggestedTasks.length > 0 && (
         <div className="space-y-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-[0.12em]">
             Suggested tasks
           </p>
           <div className="flex flex-col gap-2">
             {assistant.suggestedTasks.map((task) => (
               <div
                 key={task.title}
-                className="flex flex-wrap items-start justify-between gap-3 rounded-[18px] border border-border/50 bg-muted/20 px-3 py-3 dark:bg-[#171717]"
+                className="border-border/50 bg-muted/20 flex flex-wrap items-start justify-between gap-3 rounded-[18px] border px-3 py-3 dark:bg-[#171717]"
               >
                 <div className="space-y-1">
-                  <p className="text-[13px] font-medium tracking-[-0.01em] text-foreground">{task.title}</p>
+                  <p className="text-foreground text-[13px] font-medium tracking-[-0.01em]">
+                    {task.title}
+                  </p>
                   {task.description && (
-                    <p className="text-[12px] leading-5 text-muted-foreground">
+                    <p className="text-muted-foreground text-[12px] leading-5">
                       {task.description}
                     </p>
                   )}
@@ -756,7 +773,7 @@ const MailAssistantCard = ({
                   type="button"
                   size="xs"
                   variant="secondary"
-                  className="h-7 rounded-full border border-border/60 bg-background/80 px-2.5 text-[10px] font-medium text-foreground hover:bg-muted/25 dark:bg-[#141414]"
+                  className="border-border/60 bg-background/80 text-foreground hover:bg-muted/25 h-7 rounded-full border px-2.5 text-[10px] font-medium dark:bg-[#141414]"
                   onClick={() => void handleCreateTask(task)}
                   disabled={isApplyingPreparedAction}
                 >
@@ -770,15 +787,15 @@ const MailAssistantCard = ({
 
       {assistantPolicy?.suggestEventsFromEmail !== false && assistant.suggestedEvent && (
         <div className="space-y-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-[0.12em]">
             Suggested event
           </p>
-          <div className="flex flex-wrap items-start justify-between gap-3 rounded-[18px] border border-border/50 bg-muted/20 px-3 py-3 dark:bg-[#171717]">
+          <div className="border-border/50 bg-muted/20 flex flex-wrap items-start justify-between gap-3 rounded-[18px] border px-3 py-3 dark:bg-[#171717]">
             <div className="space-y-1">
-              <p className="text-[13px] font-medium tracking-[-0.01em] text-foreground">
+              <p className="text-foreground text-[13px] font-medium tracking-[-0.01em]">
                 {assistant.suggestedEvent.title}
               </p>
-              <p className="text-[12px] leading-5 text-muted-foreground">
+              <p className="text-muted-foreground text-[12px] leading-5">
                 {assistant.suggestedEvent.startAt
                   ? `${format(new Date(assistant.suggestedEvent.startAt), 'PPp')} · ${format(new Date(assistant.suggestedEvent.endAt || assistant.suggestedEvent.startAt), 'p')}`
                   : 'Needs a quick review before creating the calendar event.'}
@@ -788,9 +805,13 @@ const MailAssistantCard = ({
               type="button"
               size="xs"
               variant="secondary"
-              className="h-7 rounded-full border border-border/60 bg-background/80 px-2.5 text-[10px] font-medium text-foreground hover:bg-muted/25 dark:bg-[#141414]"
+              className="border-border/60 bg-background/80 text-foreground hover:bg-muted/25 h-7 rounded-full border px-2.5 text-[10px] font-medium dark:bg-[#141414]"
               onClick={handleCreateEvent}
-              disabled={!assistant.suggestedEvent.startAt || !assistant.suggestedEvent.endAt || isApplyingPreparedAction}
+              disabled={
+                !assistant.suggestedEvent.startAt ||
+                !assistant.suggestedEvent.endAt ||
+                isApplyingPreparedAction
+              }
             >
               Create event
             </Button>
@@ -799,20 +820,21 @@ const MailAssistantCard = ({
       )}
 
       {(assistant.replyNeeded || assistant.existingDraft || draftPreparedAction) && (
-        <div className="flex flex-wrap items-start justify-between gap-3 rounded-[18px] border border-border/50 bg-muted/20 px-3 py-3 dark:bg-[#171717]">
+        <div className="border-border/50 bg-muted/20 flex flex-wrap items-start justify-between gap-3 rounded-[18px] border px-3 py-3 dark:bg-[#171717]">
           <div className="space-y-1">
-            <p className="text-[13px] font-medium tracking-[-0.01em] text-foreground">
+            <p className="text-foreground text-[13px] font-medium tracking-[-0.01em]">
               {assistant.existingDraft ? 'Draft already attached' : 'Assistant can draft the reply'}
             </p>
-            <p className="text-[12px] leading-5 text-muted-foreground">
-              Drafts use the thread, people context, related tasks, and meeting history before suggesting a reply.
+            <p className="text-muted-foreground text-[12px] leading-5">
+              Drafts use the thread, people context, related tasks, and meeting history before
+              suggesting a reply.
             </p>
           </div>
           <Button
             type="button"
             size="xs"
             variant="secondary"
-            className="h-7 rounded-full border border-border/60 bg-background/80 px-2.5 text-[10px] font-medium text-foreground hover:bg-muted/25 dark:bg-[#141414]"
+            className="border-border/60 bg-background/80 text-foreground hover:bg-muted/25 h-7 rounded-full border px-2.5 text-[10px] font-medium dark:bg-[#141414]"
             onClick={handleGenerateDraft}
             disabled={isGeneratingDraft}
           >
@@ -823,14 +845,14 @@ const MailAssistantCard = ({
 
       {assistant.changedSinceLastOpen.length > 0 && (
         <div className="space-y-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-[0.12em]">
             Changed since last open
           </p>
           <div className="flex flex-col gap-2">
             {assistant.changedSinceLastOpen.map((item) => (
               <div
                 key={item}
-                className="rounded-[18px] border border-border/50 bg-muted/20 px-3 py-2.5 text-[12px] leading-5 text-muted-foreground dark:bg-[#171717]"
+                className="border-border/50 bg-muted/20 text-muted-foreground rounded-[18px] border px-3 py-2.5 text-[12px] leading-5 dark:bg-[#171717]"
               >
                 {item}
               </div>
@@ -1029,13 +1051,13 @@ const MoreAboutPerson = ({
       query: `In 50 words or less: What is the background of ${person.name} & ${person.email}, of ${person.email.split('@')[1]}.
       This could be a phishing email address, indicate if the domain is suspicious, example: x.io is not a valid domain for x.com | example: x.com is a valid domain for x.com | example: paypalcom.com is not a valid domain for paypal.com`,
     });
-  }, [person.name]);
+  }, [doSearch, person.email, person.name]);
 
   useEffect(() => {
     if (open) {
       handleSearch();
     }
-  }, [open]);
+  }, [handleSearch, open]);
 
   const findSource = useCallback(
     (id: string) => {
@@ -1057,7 +1079,7 @@ const MoreAboutPerson = ({
         return source ? `SOURCE HERE` : match;
       });
     },
-    [data],
+    [data, findSource],
   );
 
   return (
@@ -1224,7 +1246,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
         }
       }
     }
-  }, [demo, emailData.id, isLastEmail, activeReplyId]);
+  }, [activeReplyId, demo, emailData.id, index, isLastEmail, totalEmails]);
 
   //   const listUnsubscribeAction = useMemo(
   //     () =>
@@ -1718,7 +1740,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
         </PopoverContent>
       </Popover>
     ),
-    [],
+    [handleCopySenderEmail],
   );
 
   const people = useMemo(() => {
@@ -1736,7 +1758,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
         p.name !== 'No Sender Name' &&
         p === allPeople.find((other) => other?.email === p?.email),
     );
-  }, [emailData, activeConnection]);
+  }, [activeConnection, emailData, folder]);
 
   return (
     <div
@@ -2264,7 +2286,9 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                           toast.error('Failed to create task');
                         });
                     }}
-                    icon={<ListTodo className="text-muted-foreground dark:text-[#9B9B9B] h-3.5 w-3.5" />}
+                    icon={
+                      <ListTodo className="text-muted-foreground h-3.5 w-3.5 dark:text-[#9B9B9B]" />
+                    }
                     text="Task"
                   />
                   <ActionButton
@@ -2293,7 +2317,9 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                           toast.error('Failed to create calendar event');
                         });
                     }}
-                    icon={<CalendarClock className="text-muted-foreground dark:text-[#9B9B9B] h-3.5 w-3.5" />}
+                    icon={
+                      <CalendarClock className="text-muted-foreground h-3.5 w-3.5 dark:text-[#9B9B9B]" />
+                    }
                     text="Event"
                   />
                   <ActionButton
@@ -2312,7 +2338,9 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                           `${emailData.sender?.name || emailData.sender?.email || 'sender'} ${emailData.subject || ''}`,
                       );
                     }}
-                    icon={<Search className="text-muted-foreground dark:text-[#9B9B9B] h-3.5 w-3.5" />}
+                    icon={
+                      <Search className="text-muted-foreground h-3.5 w-3.5 dark:text-[#9B9B9B]" />
+                    }
                     text="Research"
                   />
                 </div>

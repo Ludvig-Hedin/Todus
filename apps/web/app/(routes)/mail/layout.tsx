@@ -1,11 +1,14 @@
-import { OnboardingWrapper } from '@/components/onboarding';
-import { ConnectionWrapper } from '@/components/connection/connection-wrapper';
 import { SubscriptionSuccessWatcher } from '@/components/subscription-success-watcher';
+import { ConnectionWrapper } from '@/components/connection/connection-wrapper';
 import { useActiveConnection } from '@/hooks/use-connections';
-import { AppSidebar } from '@/components/ui/app-sidebar';
-import AISidebar from '@/components/ui/ai-sidebar';
+import { OnboardingWrapper } from '@/components/onboarding';
 import AIToggleButton from '@/components/ai-toggle-button';
+import { AppSidebar } from '@/components/ui/app-sidebar';
+import { useAISidebar } from '@/hooks/use-ai-sidebar';
 import { Outlet, useLocation } from 'react-router';
+import { lazy, Suspense } from 'react';
+
+const AISidebar = lazy(() => import('@/components/ui/ai-sidebar'));
 
 // AISidebar opens a WebSocket to the ZeroAgent Durable Object inside its
 // body via `useAgent`. Mounting it with no active connection still opens a
@@ -14,7 +17,8 @@ import { Outlet, useLocation } from 'react-router';
 // hooks never run until there's a real account to chat about.
 function AISidebarGate() {
   const { data: activeConnection } = useActiveConnection();
-  if (!activeConnection?.id) return null;
+  const { open } = useAISidebar();
+  if (!activeConnection?.id || !open) return null;
   return <AISidebar />;
 }
 
@@ -40,7 +44,11 @@ export default function MailLayout() {
       <OnboardingWrapper />
       <ConnectionWrapper />
       {/* AI chat persists across all mail pages — gated above on activeConnection */}
-      {!isOnChatPage && <AISidebarGate />}
+      {!isOnChatPage && (
+        <Suspense fallback={null}>
+          <AISidebarGate />
+        </Suspense>
+      )}
       {!isOnChatPage && <AIToggleButton />}
       {/* Detects `?success=true` after Stripe Checkout and refreshes plan cache */}
       <SubscriptionSuccessWatcher />

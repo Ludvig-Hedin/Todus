@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 import Observation
 import SwiftData
@@ -122,6 +123,9 @@ final class MacAppServices {
     let folderSyncService: FolderSyncService
     /// Retained here so `setupNetworkSync()` can reach `mainContext` on reconnect.
     var modelContainer: ModelContainer?
+    private var accountModelContainers: [String: ModelContainer] = [:]
+    private var activeLocalDataScopeID: String?
+    var hasActiveLocalDataScope: Bool { activeLocalDataScopeID != nil }
     private let defaults = UserDefaults.standard
     let remindersSyncService = AppleRemindersSyncService()
     let remindersSyncState = RemindersSyncState()
@@ -590,6 +594,9 @@ final class MacAppServices {
 
         for remote in remoteFolders {
             let normalizedID = remote.id.lowercased()
+            // A server-wins refresh must not resurrect a pending delete or
+            // overwrite an in-flight local create/rename.
+            if folderSyncService.hasPending(id: remote.id) { continue }
             guard let uuid = UUID(uuidString: remote.id) else { continue }
             if let local = foldersByID[normalizedID] {
                 local.name = remote.name
@@ -880,6 +887,90 @@ final class MacAppServices {
         }
     }
 
+    /// Opens an account-specific SwiftData store before the authenticated shell can render.
+    /// The legacy unscoped store is intentionally left untouched and quarantined: assigning
+    /// unknown rows to the first account could expose or upload another user's data.
+    @discardableResult
+    func activateLocalDataScope(for accountID: String?) async -> Bool {
+        guard let owner = accountID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !owner.isEmpty,
+              authService.isAuthenticated,
+              authService.userID?.trimmingCharacters(in: .whitespacesAndNewlines) == owner else {
+            return false
+        }
+
+        let digest = SHA256.hash(data: Data(owner.utf8))
+        let scopeID = digest.map { String(format: "%02x", $0) }.joined()
+        if activeLocalDataScopeID == scopeID, modelContainer != nil { return true }
+
+        let container: ModelContainer
+        if let cached = accountModelContainers[scopeID] {
+            container = cached
+        } else {
+            let result: Result<ModelContainer, Error> = await Task.detached(priority: .userInitiated) {
+                do {
+                    let schema = Schema([
+                        TaskRecord.self,
+                        FolderRecord.self,
+                        FolderItemRecord.self,
+                        DraftRecord.self,
+                    ])
+                    let fileManager = FileManager.default
+                    let appSupport = fileManager.urls(
+                        for: .applicationSupportDirectory,
+                        in: .userDomainMask
+                    ).first ?? fileManager.temporaryDirectory
+                    let accountDirectory = appSupport
+                        .appendingPathComponent("TodusMac", isDirectory: true)
+                        .appendingPathComponent("Accounts", isDirectory: true)
+                    try fileManager.createDirectory(
+                        at: accountDirectory,
+                        withIntermediateDirectories: true
+                    )
+                    let storeURL = accountDirectory.appendingPathComponent("\(scopeID).store")
+                    let configuration = ModelConfiguration(url: storeURL, allowsSave: true)
+                    return .success(
+                        try ModelContainer(for: schema, configurations: configuration)
+                    )
+                } catch {
+                    return .failure(error)
+                }
+            }.value
+
+            switch result {
+            case .success(let created):
+                container = created
+                accountModelContainers[scopeID] = created
+            case .failure(let error):
+                AppLogger.shared.log(
+                    "[MacAppServices] Failed to open account-scoped local store: \(error)"
+                )
+                return false
+            }
+        }
+
+        // Store creation may outlive the SwiftUI task that requested it. Recheck
+        // the live auth identity before installing the container or queue scope.
+        guard !Task.isCancelled,
+              authService.isAuthenticated,
+              authService.userID?.trimmingCharacters(in: .whitespacesAndNewlines) == owner else {
+            return false
+        }
+
+        taskSyncService.activateScope(scopeID)
+        folderSyncService.activateScope(scopeID)
+        activeLocalDataScopeID = scopeID
+        modelContainer = container
+        AppLogger.shared.log("[MacAppServices] Activated account-scoped local data store")
+        return true
+    }
+
+    private func deactivateLocalDataScope() {
+        activeLocalDataScopeID = nil
+        taskSyncService.deactivateScope()
+        folderSyncService.deactivateScope()
+    }
+
     /// Flushes any pending/failed task, folder, and draft mutations to the
     /// backend. Previously this only ran on network reconnect — so a task
     /// created or edited during a normal, already-online session was marked
@@ -887,6 +978,7 @@ final class MacAppServices {
     /// "changes sync when reconnected" banner was a false promise). Now also
     /// called on app launch and when the app returns to the foreground.
     func flushPendingSync() {
+        guard activeLocalDataScopeID != nil else { return }
         guard let context = modelContainer?.mainContext else { return }
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -901,6 +993,7 @@ final class MacAppServices {
     /// AppIntent can't touch SwiftData directly, so this is where the tap takes
     /// effect. Called on launch + foreground.
     func drainWidgetTaskCompletions() {
+        guard activeLocalDataScopeID != nil else { return }
         guard let context = modelContainer?.mainContext else { return }
         let ids = WidgetSnapshotStore.shared.consumePendingCompletions()
         guard !ids.isEmpty else { return }
@@ -928,6 +1021,7 @@ final class MacAppServices {
     /// Reminders" setting (`taskRemindersEnabled`, default on). Requests notification
     /// authorization on first run when reminders are enabled but permission is undetermined.
     func reconcileTaskReminders() {
+        guard activeLocalDataScopeID != nil else { return }
         guard let context = modelContainer?.mainContext else { return }
         // Default true mirrors the Settings toggle (`@AppStorage("taskRemindersEnabled") = true`).
         let enabled = defaults.object(forKey: "taskRemindersEnabled") as? Bool ?? true
@@ -970,10 +1064,10 @@ final class MacAppServices {
 
     /// Per-user teardown shared by manual and automatic sign-out. Idempotent.
     private func performSignOutCleanup() {
-        // Clear in-memory sync queues so a reconnect after re-login does not
-        // replay the previous user's offline mutations under the new session.
-        taskSyncService.clearQueue()
-        folderSyncService.clearQueue()
+        // Pause the account-scoped journals without deleting pending edits or
+        // tombstones. An in-flight completion from the old scope is rejected by
+        // the queue generation guard.
+        deactivateLocalDataScope()
         emailService.resetForSignOut()
         aiChatService.resetForSignOut()
         // Tear down voice triggers so the new user's hotkey/wake start fresh.

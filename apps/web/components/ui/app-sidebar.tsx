@@ -7,6 +7,7 @@ import {
 } from '@/components/ui/dialog';
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader } from '@/components/ui/sidebar';
 import { navigationConfig, bottomNavItems } from '@/config/navigation';
+import { useAIFullScreen } from '@/hooks/use-ai-sidebar';
 import { useSidebar } from '@/components/ui/sidebar';
 import { CreateEmail } from '../create/create-email';
 // import { useMutation } from '@tanstack/react-query';
@@ -16,7 +17,6 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import React, { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useSession } from '@/lib/auth-client';
-import { useAIFullScreen } from './ai-sidebar';
 import { useStats } from '@/hooks/use-stats';
 import { useLocation } from 'react-router';
 // import { useTRPC } from '@/providers/query-provider';
@@ -208,7 +208,7 @@ function ComposeButton() {
       <DialogTrigger asChild>
         <button
           type="button"
-          className="bg-mainBlue hover:bg-mainBlue/90 relative mb-1 inline-flex h-8 w-full cursor-pointer items-center justify-center gap-1 self-stretch overflow-hidden rounded-full transition-all duration-(--motion-duration-fast) ease-(--motion-easing-standard) dark:border-none"
+          className="bg-mainBlue hover:bg-mainBlue/90 duration-(--motion-duration-fast) ease-(--motion-easing-standard) relative mb-1 inline-flex h-8 w-full cursor-pointer items-center justify-center gap-1 self-stretch overflow-hidden rounded-full transition-all dark:border-none"
         >
           {state === 'collapsed' && !isMobile ? (
             <PencilCompose className="mt-0.5 fill-white text-black" />

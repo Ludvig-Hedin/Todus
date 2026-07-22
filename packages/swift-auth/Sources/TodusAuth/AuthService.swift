@@ -113,6 +113,12 @@ public final class AuthService: NSObject {
         didSet { persistStringToKeychain(key: Keys.userEmail, value: userEmail) }
     }
 
+    /// Stable backend user identifier from a verified profile. Native clients use
+    /// this, never mutable profile fields, to bind account-owned local storage.
+    public private(set) var userID: String? {
+        didSet { persistStringToKeychain(key: Keys.userID, value: userID) }
+    }
+
     /// User's display name from Google / Better Auth profile.
     /// Stored property so SwiftUI observation triggers re-renders when updated.
     public var userName: String? {
@@ -138,6 +144,7 @@ public final class AuthService: NSObject {
         static let bearerToken = "com.todus.auth.bearerToken"
         static let refreshToken = "com.todus.auth.refreshToken"
         static let currentSessionId = "com.todus.auth.currentSessionId"
+        static let userID = "com.todus.auth.userID"
         static let userEmail = "com.todus.auth.userEmail"
         static let userName = "com.todus.auth.userName"
         static let userImage = "com.todus.auth.userImage"
@@ -240,6 +247,7 @@ public final class AuthService: NSObject {
         self.transport = transport
         // Initialize stored properties from persisted state before super.init()
         self.hasSeenOnboarding = UserDefaults.standard.bool(forKey: Keys.hasSeenOnboarding)
+        self.userID = nil
         self.userEmail = nil
         self.userName = nil
         self.userImage = nil
@@ -1333,6 +1341,7 @@ public final class AuthService: NSObject {
     public func _uiTesting_seedAuthenticatedSession(bearer: String, email: String) {
         isUITestingSession = true
         bearerToken = bearer
+        userID = "ui-test:\(email.lowercased())"
         userEmail = email
         authState = .authenticated
     }
@@ -1344,6 +1353,7 @@ public final class AuthService: NSObject {
         KeychainHelper.delete(key: Keys.bearerToken)
         KeychainHelper.delete(key: Keys.refreshToken)
         KeychainHelper.delete(key: Keys.currentSessionId)
+        KeychainHelper.delete(key: Keys.userID)
         KeychainHelper.delete(key: Keys.userEmail)
         KeychainHelper.delete(key: Keys.userName)
         KeychainHelper.delete(key: Keys.userImage)
@@ -1351,6 +1361,7 @@ public final class AuthService: NSObject {
         bearerToken = nil
         refreshToken = nil
         currentSessionId = nil
+        userID = nil
         userEmail = nil
         userName = nil
         userImage = nil
@@ -1475,9 +1486,13 @@ public final class AuthService: NSObject {
         } else {
             currentSessionId = nil
         }
-        if let email {
-            self.userEmail = email
-        }
+        // A callback can belong to a different account and some providers omit
+        // email from the callback. Never retain the previous account's profile
+        // while the new token is being verified.
+        userID = nil
+        self.userEmail = email
+        userName = nil
+        userImage = nil
         isCompletingAuthentication = true
         isLoading = true
 
@@ -1579,20 +1594,24 @@ public final class AuthService: NSObject {
     private func restoreCachedProfileMetadata() async {
         let snapshot = await Task.detached(priority: .utility) {
             (
+                KeychainHelper.read(key: Keys.userID),
                 KeychainHelper.read(key: Keys.userEmail),
                 KeychainHelper.read(key: Keys.userName),
                 KeychainHelper.read(key: Keys.userImage)
             )
         }.value
 
+        if userID == nil {
+            userID = snapshot.0
+        }
         if userEmail == nil {
-            userEmail = snapshot.0
+            userEmail = snapshot.1
         }
         if userName == nil {
-            userName = snapshot.1
+            userName = snapshot.2
         }
         if userImage == nil {
-            userImage = snapshot.2
+            userImage = snapshot.3
         }
     }
 
@@ -1603,6 +1622,7 @@ public final class AuthService: NSObject {
     }
 
     private struct VerifiedProfile {
+        let id: String?
         let email: String?
         let name: String?
         let image: String?
@@ -1677,6 +1697,7 @@ public final class AuthService: NSObject {
 
             return .verified(
                 VerifiedProfile(
+                    id: user["id"] as? String,
                     email: (user["email"] as? String) ?? self.userEmail,
                     name: user["name"] as? String,
                     image: user["image"] as? String
@@ -1689,6 +1710,9 @@ public final class AuthService: NSObject {
     }
 
     private func applyVerifiedProfile(_ profile: VerifiedProfile, fallbackEmail: String?) {
+        if let id = profile.id, !id.isEmpty {
+            userID = id
+        }
         if let email = profile.email ?? fallbackEmail, !email.isEmpty {
             userEmail = email
             debugAuthLog("fetchUserProfile: set userEmail=\(email)")

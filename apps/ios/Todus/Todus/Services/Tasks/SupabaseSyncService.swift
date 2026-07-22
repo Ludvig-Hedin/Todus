@@ -203,10 +203,19 @@ final class SupabaseSyncService: SyncService {
                     // No usable Supabase endpoint — same as the no-remote-backend
                     // path; the task has nowhere to sync, so keep it, don't delete.
                     keepLocal = true
+                case BackendClientError.httpError(let statusCode, _):
+                    // Only the backend's explicit validation status is a
+                    // semantic rejection. Auth/config/conflict failures can be
+                    // repaired and must not delete the user's captured task.
+                    keepLocal = statusCode != 422
+                case BackendClientError.invalidResponse:
+                    // A non-HTTP response or response-shape drift says nothing
+                    // about whether the server rejected the task. Preserve it.
+                    keepLocal = true
                 default:
-                    // Server reached and rejected (non-2xx / bad payload) — the
-                    // case the rollback was designed for.
-                    keepLocal = false
+                    // Decoding and other unknown failures are retryable by
+                    // default. Data loss is worse than retaining a local task.
+                    keepLocal = true
                 }
                 markTasks(
                     taskIDs: batch.taskIDs,

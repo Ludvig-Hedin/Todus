@@ -66,12 +66,14 @@ export const makeQueryClient = (connectionId: string | null) =>
       mutations: {
         onError: (err) => console.error(err.message),
         networkMode: 'offlineFirst', // pause mutations when offline, auto-retry on reconnect
-        retry: 1,
+        // Mutations are not generally idempotent. Retrying after a committed
+        // response is lost can duplicate sends, tasks, events, and drafts.
+        retry: false,
       },
     },
   });
 
-let browserQueryClient = {
+const browserQueryClient = {
   queryClient: null,
   activeConnectionId: null,
 } as {

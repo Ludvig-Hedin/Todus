@@ -6,14 +6,6 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import {
-  Archive2,
-  ExclamationCircle,
-  Mail,
-  Star2,
-  Trash,
-  PencilCompose,
-} from '../icons/icons';
-import {
   memo,
   useCallback,
   useEffect,
@@ -22,21 +14,20 @@ import {
   type ComponentProps,
   useState,
 } from 'react';
+import { Archive2, ExclamationCircle, Mail, Star2, Trash, PencilCompose } from '../icons/icons';
+import { BackgroundRefreshIndicator } from '@/components/ui/background-refresh-indicator';
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useActiveConnection, useConnections } from '@/hooks/use-connections';
 import { Check, Star, ChevronRight, ChevronLeft, Users } from 'lucide-react';
-import type { MailSelectMode, ThreadProps } from '@/types';
 // ParsedDraft import removed — Draft row reads from `$raw` shape served by
 // listDrafts (parsed message, not ParsedDraft). See `DraftRowSummary` below.
 import { ThreadContextMenu } from '@/components/context/thread-context';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { useMail, type Config } from '@/components/mail/use-mail';
-import { authClient } from '@/lib/auth-client';
-import { useActiveConnection, useConnections } from '@/hooks/use-connections';
-import { toast } from 'sonner';
 import { type ThreadDestination } from '@/lib/thread-actions';
-import { useThreads } from '@/hooks/use-threads';
+import type { MailSelectMode, ThreadProps } from '@/types';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { EmptyStateIcon } from '../icons/empty-state-svg';
 import { highlightText } from '@/lib/email-utils.client';
@@ -45,11 +36,12 @@ import { useTRPC } from '@/providers/query-provider';
 import { useThreadLabels } from '@/hooks/use-labels';
 import { useSettings } from '@/hooks/use-settings';
 import { useKeyState } from '@/hooks/use-hot-key';
+import { useThreads } from '@/hooks/use-threads';
 import { VList, type VListHandle } from 'virtua';
+import { authClient } from '@/lib/auth-client';
 import { BimiAvatar } from '../ui/bimi-avatar';
 import { RenderLabels } from './render-labels';
 import { Badge } from '@/components/ui/badge';
-import { BackgroundRefreshIndicator } from '@/components/ui/background-refresh-indicator';
 // useDraft removed — Draft row now reads from `message.$raw` populated by listThreads.
 import { Skeleton } from '../ui/skeleton';
 import { m } from '@/paraglide/messages';
@@ -58,6 +50,7 @@ import { Button } from '../ui/button';
 import { Avatar } from '../ui/avatar';
 import { useQueryState } from 'nuqs';
 import { useAtom } from 'jotai';
+import { toast } from 'sonner';
 
 // Short debounce so prefetch fires on intentional hovers but skips fly-bys.
 // Lowered from 120ms — at 120 the prefetch rarely won the race against a click.
@@ -76,15 +69,18 @@ const Thread = memo(
     const [threadId] = useQueryState('threadId');
     const queryClient = useQueryClient();
     const trpc = useTRPC();
-    const [id, setThreadId] = useQueryState('threadId');
+    const [, setThreadId] = useQueryState('threadId');
     const [focusedIndex, setFocusedIndex] = useAtom(focusedIndexAtom);
     const hoverPrefetchTimeout = useRef<number | null>(null);
 
     const idToUse = message.id;
     const latestSender = message.latestSender ?? null;
-    const cleanName = latestSender?.name ? latestSender.name.trim().replace(/^['"]|['"]$/g, '') : '';
+    const cleanName = latestSender?.name
+      ? latestSender.name.trim().replace(/^['"]|['"]$/g, '')
+      : '';
     const senderEmail = latestSender?.email ?? '';
-    const senderDisplayName = cleanNameDisplay(latestSender?.name) || senderEmail || 'Unknown sender';
+    const senderDisplayName =
+      cleanNameDisplay(latestSender?.name) || senderEmail || 'Unknown sender';
     const subject = message.latestSubject ?? '';
     const receivedOn = message.latestReceivedOn ?? '';
     const snippet = message.snippet ?? '';
@@ -92,53 +88,52 @@ const Thread = memo(
 
     const optimisticState = useOptimisticThreadState(idToUse ?? '');
 
-    const { displayStarred, displayImportant, displayUnread, optimisticLabelIds } =
-      useMemo(() => {
-        const displayStarred =
-          optimisticState.optimisticStarred !== null
-            ? optimisticState.optimisticStarred
-            : (message.isStarred ?? false);
+    const { displayStarred, displayImportant, displayUnread, optimisticLabelIds } = useMemo(() => {
+      const displayStarred =
+        optimisticState.optimisticStarred !== null
+          ? optimisticState.optimisticStarred
+          : (message.isStarred ?? false);
 
-        const displayImportant =
-          optimisticState.optimisticImportant !== null
-            ? optimisticState.optimisticImportant
-            : (message.isImportant ?? false);
+      const displayImportant =
+        optimisticState.optimisticImportant !== null
+          ? optimisticState.optimisticImportant
+          : (message.isImportant ?? false);
 
-        const displayUnread =
-          optimisticState.optimisticRead !== null
-            ? !optimisticState.optimisticRead
-            : (message.hasUnread ?? false);
+      const displayUnread =
+        optimisticState.optimisticRead !== null
+          ? !optimisticState.optimisticRead
+          : (message.hasUnread ?? false);
 
-        let labelIds = [...(message.labelIds ?? [])];
+      let labelIds = [...(message.labelIds ?? [])];
 
-        if (optimisticState.optimisticLabels) {
-          labelIds = labelIds.filter(
-            (labelId) => !optimisticState.optimisticLabels.removedLabelIds.includes(labelId),
-          );
+      if (optimisticState.optimisticLabels) {
+        labelIds = labelIds.filter(
+          (labelId) => !optimisticState.optimisticLabels.removedLabelIds.includes(labelId),
+        );
 
-          optimisticState.optimisticLabels.addedLabelIds.forEach((labelId) => {
-            if (!labelIds.includes(labelId)) {
-              labelIds.push(labelId);
-            }
-          });
-        }
+        optimisticState.optimisticLabels.addedLabelIds.forEach((labelId) => {
+          if (!labelIds.includes(labelId)) {
+            labelIds.push(labelId);
+          }
+        });
+      }
 
-        return {
-          displayStarred,
-          displayImportant,
-          displayUnread,
-          optimisticLabelIds: labelIds,
-        };
-      }, [
-        message.hasUnread,
-        message.isImportant,
-        message.isStarred,
-        message.labelIds,
-        optimisticState.optimisticStarred,
-        optimisticState.optimisticImportant,
-        optimisticState.optimisticRead,
-        optimisticState.optimisticLabels,
-      ]);
+      return {
+        displayStarred,
+        displayImportant,
+        displayUnread,
+        optimisticLabelIds: labelIds,
+      };
+    }, [
+      message.hasUnread,
+      message.isImportant,
+      message.isStarred,
+      message.labelIds,
+      optimisticState.optimisticStarred,
+      optimisticState.optimisticImportant,
+      optimisticState.optimisticRead,
+      optimisticState.optimisticLabels,
+    ]);
 
     const { optimisticToggleStar, optimisticToggleImportant, optimisticMoveThreadsTo } =
       useOptimisticActions();
@@ -183,7 +178,7 @@ const Thread = memo(
           setThreadId(null);
         }
       },
-      [threads, id, focusedIndex],
+      [threads, focusedIndex, setFocusedIndex, setThreadId],
     );
 
     const moveThreadTo = useCallback(
@@ -230,7 +225,7 @@ const Thread = memo(
       [queryClient, trpc],
     );
 
-    const content = useMemo(() => {
+    const content = (() => {
       if (!idToUse) return null;
 
       return (
@@ -380,40 +375,38 @@ const Thread = memo(
                       <Check className="h-4 w-4 text-white" />
                     </div>
                   </Avatar>
+                ) : senderEmail ? (
+                  <BimiAvatar
+                    email={senderEmail}
+                    name={cleanName || senderEmail}
+                    className={cn(
+                      'h-8 w-8 rounded-full',
+                      displayUnread && !isMailSelected && !isFolderSent ? '' : 'border',
+                    )}
+                  />
                 ) : (
-                  senderEmail ? (
-                    <BimiAvatar
-                      email={senderEmail}
-                      name={cleanName || senderEmail}
-                      className={cn(
-                        'h-8 w-8 rounded-full',
-                        displayUnread && !isMailSelected && !isFolderSent ? '' : 'border',
-                      )}
-                    />
-                  ) : (
-                    <Avatar
-                      className={cn(
-                        'h-8 w-8 rounded-full border',
-                        displayUnread && !isMailSelected && !isFolderSent ? '' : 'border',
-                      )}
-                    >
-                      <div className="bg-secondary flex h-full w-full items-center justify-center rounded-full p-2">
-                        <Mail className="h-4 w-4" />
-                      </div>
-                    </Avatar>
-                  )
+                  <Avatar
+                    className={cn(
+                      'h-8 w-8 rounded-full border',
+                      displayUnread && !isMailSelected && !isFolderSent ? '' : 'border',
+                    )}
+                  >
+                    <div className="bg-secondary flex h-full w-full items-center justify-center rounded-full p-2">
+                      <Mail className="h-4 w-4" />
+                    </div>
+                  </Avatar>
                 )}
                 {/* Connection color dot — shown in unified multi-account view */}
-                {'connectionColor' in message && (message as any).connectionColor && (
+                {message.connectionColor && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span
-                        className="absolute -bottom-0.5 -left-0.5 size-2.5 rounded-full border border-background"
-                        style={{ backgroundColor: (message as any).connectionColor }}
+                        className="border-background absolute -bottom-0.5 -left-0.5 size-2.5 rounded-full border"
+                        style={{ backgroundColor: message.connectionColor }}
                       />
                     </TooltipTrigger>
                     <TooltipContent side="bottom" className="text-xs">
-                      {(message as any).connectionEmail}
+                      {message.connectionEmail}
                     </TooltipContent>
                   </Tooltip>
                 )}
@@ -440,10 +433,7 @@ const Thread = memo(
                         ) : (
                           <div className="flex items-center gap-1">
                             <span className={cn('line-clamp-1 overflow-hidden text-sm')}>
-                              {highlightText(
-                                senderDisplayName,
-                                searchValue.highlight,
-                              )}
+                              {highlightText(senderDisplayName, searchValue.highlight)}
                             </span>
                           </div>
                         )}{' '}
@@ -532,29 +522,7 @@ const Thread = memo(
           </div>
         </div>
       );
-    }, [
-      idToUse,
-      latestSender,
-      senderEmail,
-      senderDisplayName,
-      subject,
-      receivedOn,
-      snippet,
-      hasDraft,
-      prefetchThread,
-      optimisticState,
-      folder,
-      isFolderBin,
-      isFolderSent,
-      isFolderSpam,
-      isFolderInbox,
-      onClick,
-      searchValue,
-      displayUnread,
-      isMailSelected,
-      isMailBulkSelected,
-      threadLabels,
-    ]);
+    })();
 
     return senderDisplayName ? (
       !optimisticState.shouldHide && idToUse ? (
@@ -572,7 +540,7 @@ const Thread = memo(
   },
   (prev, next) => {
     const isSameMessage =
-      prev.message.id === next.message.id &&
+      prev.message === next.message &&
       prev.isKeyboardFocused === next.isKeyboardFocused &&
       prev.index === next.index &&
       Object.is(prev.onClick, next.onClick);
@@ -593,64 +561,140 @@ type DraftRowSummary = {
   receivedOn?: string;
 };
 
-const Draft = memo(({ message, index }: { message: { id: string; $raw?: unknown }; index: number }) => {
-  // Render directly from the parsed draft already attached to the listThreads
-  // page payload via `$raw`. Previously this component called
-  // `useDraft(message.id)` per row, which fanned out into N tRPC requests on
-  // every drafts-folder mount (and broke batching because httpBatchLink had
-  // maxItems: 1). Now we use the pre-parsed message the server already
-  // hydrated as part of `listDrafts` — zero extra requests per row.
-  const draft = message.$raw as DraftRowSummary | undefined;
-  const recipient =
-    draft?.to?.[0]?.email || draft?.to?.[0]?.name || 'No Recipient';
-  const receivedOnTime = draft?.receivedOn ? Date.parse(draft.receivedOn) : Number.NaN;
-  const [, setComposeOpen] = useQueryState('isComposeOpen');
-  const [, setDraftId] = useQueryState('draftId');
-  const { optimisticDeleteDraft } = useOptimisticActions();
-  const optimisticState = useOptimisticThreadState(message.id);
+const Draft = memo(
+  ({ message, index }: { message: { id: string; $raw?: unknown }; index: number }) => {
+    // Render directly from the parsed draft already attached to the listThreads
+    // page payload via `$raw`. Previously this component called
+    // `useDraft(message.id)` per row, which fanned out into N tRPC requests on
+    // every drafts-folder mount (and broke batching because httpBatchLink had
+    // maxItems: 1). Now we use the pre-parsed message the server already
+    // hydrated as part of `listDrafts` — zero extra requests per row.
+    const draft = message.$raw as DraftRowSummary | undefined;
+    const recipient = draft?.to?.[0]?.email || draft?.to?.[0]?.name || 'No Recipient';
+    const receivedOnTime = draft?.receivedOn ? Date.parse(draft.receivedOn) : Number.NaN;
+    const [, setComposeOpen] = useQueryState('isComposeOpen');
+    const [, setDraftId] = useQueryState('draftId');
+    const { optimisticDeleteDraft } = useOptimisticActions();
+    const optimisticState = useOptimisticThreadState(message.id);
 
-  const handleMailClick = useCallback(() => {
-    setComposeOpen('true');
-    setDraftId(message.id);
-    return;
-  }, [message.id]);
+    const handleMailClick = useCallback(() => {
+      setComposeOpen('true');
+      setDraftId(message.id);
+      return;
+    }, [message.id, setComposeOpen, setDraftId]);
 
-  const handleDeleteDraft = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      optimisticDeleteDraft(message.id);
-    },
-    [message.id, optimisticDeleteDraft],
-  );
+    const handleDeleteDraft = useCallback(
+      (e: React.MouseEvent) => {
+        e.stopPropagation();
+        optimisticDeleteDraft(message.id);
+      },
+      [message.id, optimisticDeleteDraft],
+    );
 
-  if (optimisticState.shouldHide) {
-    return null;
-  }
+    if (optimisticState.shouldHide) {
+      return null;
+    }
 
-  if (!draft) {
+    if (!draft) {
+      return (
+        <div className="select-none py-1">
+          <div
+            key={message.id}
+            className={cn(
+              'group relative mx-[8px] flex cursor-pointer flex-col items-start overflow-clip rounded-[10px] border-transparent py-3 text-left text-sm',
+            )}
+          >
+            <div
+              className={cn(
+                'bg-primary absolute inset-y-0 left-0 w-1 -translate-x-2 transition-transform ease-out',
+              )}
+            />
+            <div className="flex w-full items-center justify-between gap-4 px-4">
+              <div className="flex w-full justify-between">
+                <div className="w-full">
+                  <div className="flex w-full flex-row items-center justify-between">
+                    <div className="flex flex-row items-center gap-[4px]">
+                      <Skeleton className="bg-muted h-4 w-32 rounded" />
+                    </div>
+                  </div>
+                  <div className="flex justify-between">
+                    <Skeleton className="bg-muted mt-1 h-4 w-48 rounded" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
-      <div className="select-none py-1">
+      <div className="select-none py-1" onClick={handleMailClick}>
         <div
           key={message.id}
           className={cn(
-            'group relative mx-[8px] flex cursor-pointer flex-col items-start overflow-clip rounded-[10px] border-transparent py-3 text-left text-sm',
+            'hover:bg-offsetLight dark:hover:bg-primary/5 group relative mx-[8px] flex cursor-pointer flex-col items-start overflow-visible rounded-[10px] border-transparent py-3 text-left text-sm hover:opacity-100',
           )}
         >
           <div
             className={cn(
-              'bg-primary absolute inset-y-0 left-0 w-1 -translate-x-2 transition-transform ease-out',
+              'shadow-xs bg-popover absolute right-2 z-20 flex -translate-y-1/2 items-center gap-1 rounded-xl border p-1 opacity-0 focus-within:opacity-100 group-hover:opacity-100',
+              index === 0 ? 'top-4' : 'top-[-1px]',
             )}
-          />
+            aria-busy={optimisticState.isRemoving}
+          >
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 hover:bg-[#FDE4E9] dark:hover:bg-[#411D23] [&_svg]:size-3.5"
+                  aria-label="Delete draft"
+                  disabled={optimisticState.isRemoving}
+                  onClick={handleDeleteDraft}
+                >
+                  <Trash className="fill-[#F43F5E]" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side={index === 0 ? 'bottom' : 'top'} className="mb-1">
+                {m['common.actions.bin']()}
+              </TooltipContent>
+            </Tooltip>
+          </div>
           <div className="flex w-full items-center justify-between gap-4 px-4">
             <div className="flex w-full justify-between">
               <div className="w-full">
                 <div className="flex w-full flex-row items-center justify-between">
                   <div className="flex flex-row items-center gap-[4px]">
-                    <Skeleton className="bg-muted h-4 w-32 rounded" />
+                    <span
+                      className={cn(
+                        'font-medium',
+                        'text-md flex items-baseline gap-1 group-hover:opacity-100',
+                      )}
+                    >
+                      <span className={cn('max-w-[25ch] truncate text-sm')}>
+                        {cleanNameDisplay(recipient)}
+                      </span>
+                    </span>
                   </div>
+                  {Number.isFinite(receivedOnTime) && (
+                    <p
+                      className={cn(
+                        'text-muted-foreground text-nowrap text-[11px] font-normal opacity-70 transition-opacity group-hover:opacity-100',
+                      )}
+                    >
+                      {formatDate(receivedOnTime)}
+                    </p>
+                  )}
                 </div>
                 <div className="flex justify-between">
-                  <Skeleton className="bg-muted mt-1 h-4 w-48 rounded" />
+                  <p
+                    className={cn(
+                      'text-muted-foreground mt-1 line-clamp-1 max-w-[50ch] text-[13px] md:max-w-[30ch]',
+                    )}
+                  >
+                    {draft?.subject}
+                  </p>
                 </div>
               </div>
             </div>
@@ -658,83 +702,8 @@ const Draft = memo(({ message, index }: { message: { id: string; $raw?: unknown 
         </div>
       </div>
     );
-  }
-
-  return (
-    <div className="select-none py-1" onClick={handleMailClick}>
-      <div
-        key={message.id}
-        className={cn(
-          'hover:bg-offsetLight dark:hover:bg-primary/5 group relative mx-[8px] flex cursor-pointer flex-col items-start overflow-visible rounded-[10px] border-transparent py-3 text-left text-sm hover:opacity-100',
-        )}
-      >
-        <div
-          className={cn(
-            'shadow-xs bg-popover absolute right-2 z-20 flex -translate-y-1/2 items-center gap-1 rounded-xl border p-1 opacity-0 focus-within:opacity-100 group-hover:opacity-100',
-            index === 0 ? 'top-4' : 'top-[-1px]',
-          )}
-          aria-busy={optimisticState.isRemoving}
-        >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 hover:bg-[#FDE4E9] dark:hover:bg-[#411D23] [&_svg]:size-3.5"
-                aria-label="Delete draft"
-                disabled={optimisticState.isRemoving}
-                onClick={handleDeleteDraft}
-              >
-                <Trash className="fill-[#F43F5E]" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side={index === 0 ? 'bottom' : 'top'} className="mb-1">
-              {m['common.actions.bin']()}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-        <div className="flex w-full items-center justify-between gap-4 px-4">
-          <div className="flex w-full justify-between">
-            <div className="w-full">
-              <div className="flex w-full flex-row items-center justify-between">
-                <div className="flex flex-row items-center gap-[4px]">
-                  <span
-                    className={cn(
-                      'font-medium',
-                      'text-md flex items-baseline gap-1 group-hover:opacity-100',
-                    )}
-                  >
-                    <span className={cn('max-w-[25ch] truncate text-sm')}>
-                      {cleanNameDisplay(recipient)}
-                    </span>
-                  </span>
-                </div>
-                {Number.isFinite(receivedOnTime) && (
-                  <p
-                    className={cn(
-                      'text-muted-foreground text-nowrap text-[11px] font-normal opacity-70 transition-opacity group-hover:opacity-100',
-                    )}
-                  >
-                    {formatDate(receivedOnTime)}
-                  </p>
-                )}
-              </div>
-              <div className="flex justify-between">
-                <p
-                  className={cn(
-                    'text-muted-foreground mt-1 line-clamp-1 max-w-[50ch] text-[13px] md:max-w-[30ch]',
-                  )}
-                >
-                  {draft?.subject}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-});
+  },
+);
 
 Draft.displayName = 'Draft';
 
@@ -1029,8 +998,12 @@ export const MailList = memo(
       };
     }, []);
 
-    const [{ refetch, isLoading, isFetching, isFetchingNextPage, hasNextPage }, items, , loadMore] =
-      useThreads();
+    const [
+      { refetch, isLoading, isFetching, isFetchingNextPage, hasNextPage, isError, error },
+      items,
+      ,
+      loadMore,
+    ] = useThreads();
     const trpc = useTRPC();
     // True while PersistQueryClientProvider is restoring the IDB cache — during this window
     // the query is paused (isFetching=false, isLoading=false) but items is still empty,
@@ -1078,28 +1051,20 @@ export const MailList = memo(
         isKeyPressed('Shift') || isKeyPressed('ShiftLeft') || isKeyPressed('ShiftRight');
       const isCtrlPressed = isKeyPressed('Control') || isKeyPressed('Meta');
 
-      if (isShiftPressed && !isCtrlPressed) {
-        return 'range';
-      }
-      if (isCtrlPressed) {
-        return 'mass';
-      }
       if (isAltPressed && isShiftPressed) {
-        console.log('Select All Below mode activated'); // Debug log
         return 'selectAllBelow';
       }
+      if (isShiftPressed && !isCtrlPressed) return 'range';
+      if (isCtrlPressed) return 'mass';
       return 'single';
     }, [isKeyPressed]);
 
-    const [, setActiveReplyId] = useQueryState('activeReplyId');
     const [, setMail] = useMail();
 
     const handleSelectMail = useCallback(
       (message: { id: string; threadId?: string }) => {
         const itemId = message.threadId ?? message.id;
         const currentMode = getSelectMode();
-        console.log('Selection mode:', currentMode, 'for item:', itemId);
-
         setMail((prevMail) => {
           const mail = prevMail;
           const clickedIndex = itemsRef.current.findIndex((item) => item.id === itemId);
@@ -1110,38 +1075,25 @@ export const MailList = memo(
               const newSelected = mail.bulkSelected.includes(itemId)
                 ? mail.bulkSelected.filter((id) => id !== itemId)
                 : [...mail.bulkSelected, itemId];
-              console.log('Mass selection mode - selected items:', newSelected.length);
               return { ...mail, bulkSelected: newSelected };
             }
             case 'selectAllBelow': {
               const clickedIndex = itemsRef.current.findIndex((item) => item.id === itemId);
-              console.log(
-                'SelectAllBelow - clicked index:',
-                clickedIndex,
-                'total items:',
-                itemsRef.current.length,
-              );
-
               if (clickedIndex !== -1) {
                 const itemsBelow = itemsRef.current.slice(clickedIndex);
                 const idsBelow = itemsBelow.map((item) => item.id);
-                console.log('Selecting all items below - count:', idsBelow.length);
                 return { ...mail, bulkSelected: idsBelow };
               }
-              console.log('Item not found in list, selecting just this item');
               return { ...mail, bulkSelected: [itemId] };
             }
             case 'range': {
-              console.log('Range selection mode');
               if (!anchorThreadId) {
                 return { ...mail, bulkSelected: [itemId] };
               }
               // Translate the stored anchor THREAD ID to its current index in
               // the live list — protects against the anchor pointing at a
               // thread that has since been archived or moved.
-              const anchorIndex = itemsRef.current.findIndex(
-                (item) => item.id === anchorThreadId,
-              );
+              const anchorIndex = itemsRef.current.findIndex((item) => item.id === anchorThreadId);
               if (anchorIndex === -1) {
                 return { ...mail, bulkSelected: [itemId] };
               }
@@ -1153,7 +1105,6 @@ export const MailList = memo(
               return { ...mail, bulkSelected: newSelected };
             }
             default: {
-              console.log('Single selection mode');
               return { ...mail, bulkSelected: [itemId] };
             }
           }
@@ -1169,8 +1120,6 @@ export const MailList = memo(
       (message: { id: string; threadId?: string; unread?: boolean }) => async () => {
         const mode = getSelectMode();
         const autoRead = settingsData?.settings?.autoRead ?? true;
-        console.log('Mail click with mode:', mode);
-
         if (mode !== 'single') {
           const messageThreadId = message.threadId ?? message.id;
           const clickedIndex = itemsRef.current.findIndex((item) => item.id === messageThreadId);
@@ -1200,7 +1149,6 @@ export const MailList = memo(
         setThreadId,
         setDraftId,
         settingsData,
-        setActiveReplyId,
       ],
     );
 
@@ -1208,10 +1156,9 @@ export const MailList = memo(
 
     useEffect(() => {
       if (isFiltering && !isLoading) {
-        setSearchValue({
-          ...searchValue,
-          isLoading: false,
-        });
+        setSearchValue((current) =>
+          current.isLoading ? { ...current, isLoading: false } : current,
+        );
       }
     }, [isLoading, isFiltering, setSearchValue]);
 
@@ -1255,16 +1202,13 @@ export const MailList = memo(
         );
       },
       [
-        folder,
+        Comp,
         filteredItems,
         focusedIndex,
         keyboardActive,
         isFetchingMail,
         isFetchingNextPage,
         handleMailClick,
-        isLoading,
-        isFetching,
-        hasNextPage,
       ],
     );
 
@@ -1413,6 +1357,23 @@ export const MailList = memo(
                         }}
                       >
                         {hasNoConnections ? 'Connect Gmail' : 'Reconnect Gmail'}
+                      </Button>
+                    </div>
+                  </div>
+                ) : isError ? (
+                  <div className="flex w-full items-center justify-center px-6">
+                    <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+                      <ExclamationCircle className="text-destructive h-10 w-10" />
+                      <div>
+                        <p className="text-base font-medium">Could not load your mail</p>
+                        <p className="text-muted-foreground mt-1 text-[13px]">
+                          {error instanceof Error
+                            ? error.message
+                            : 'Check your connection and try again.'}
+                        </p>
+                      </div>
+                      <Button size="sm" onClick={() => void refetch()}>
+                        Try again
                       </Button>
                     </div>
                   </div>

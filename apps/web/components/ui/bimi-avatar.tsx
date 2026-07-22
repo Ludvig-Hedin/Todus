@@ -1,39 +1,174 @@
+import {
+  siAirtable,
+  siAnthropic,
+  siApple,
+  siAsana,
+  siAtlassian,
+  siBox,
+  siCloudflare,
+  siDigitalocean,
+  siDiscord,
+  siDropbox,
+  siFacebook,
+  siFigma,
+  siGithub,
+  siGoogle,
+  siHbo,
+  siHubspot,
+  siInstagram,
+  siIntercom,
+  siKit,
+  siKlarna,
+  siLinear,
+  siMailchimp,
+  siMailgun,
+  siMeta,
+  siMistralai,
+  siNetflix,
+  siNetlify,
+  siNotion,
+  siPaypal,
+  siPerplexity,
+  siRailway,
+  siReddit,
+  siRender,
+  siResend,
+  siSentry,
+  siShopify,
+  siSpotify,
+  siSquarespace,
+  siStripe,
+  siSubstack,
+  siSupabase,
+  siTelegram,
+  siTiktok,
+  siTwitch,
+  siTypeform,
+  siVercel,
+  siWebflow,
+  siWhatsapp,
+  siWix,
+  siX,
+  siYoutube,
+  siZendesk,
+  type SimpleIcon,
+} from 'simple-icons';
+import { getSenderIconSpec, type SenderIconSpec } from '@/lib/sender-icon-registry';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from './avatar';
+import { useSettings } from '@/hooks/use-settings';
 import { useQuery } from '@tanstack/react-query';
 import DOMPurify from 'dompurify';
-import * as SimpleIcons from 'simple-icons';
-import { getSenderIconSpec, type SenderIconSpec } from '@/lib/sender-icon-registry';
-import { useSettings } from '@/hooks/use-settings';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_FAVICON_URLS = 8;
+
+// Import only the icons we render. A namespace import pulled the entire simple-icons
+// catalog into the inbox bundle (about 5 MB minified) before the first mail rendered.
+const SIMPLE_ICONS: Record<string, SimpleIcon> = {
+  airtable: siAirtable,
+  anthropic: siAnthropic,
+  apple: siApple,
+  asana: siAsana,
+  atlassian: siAtlassian,
+  box: siBox,
+  cloudflare: siCloudflare,
+  digitalocean: siDigitalocean,
+  discord: siDiscord,
+  dropbox: siDropbox,
+  facebook: siFacebook,
+  figma: siFigma,
+  github: siGithub,
+  google: siGoogle,
+  hbo: siHbo,
+  hubspot: siHubspot,
+  instagram: siInstagram,
+  intercom: siIntercom,
+  kit: siKit,
+  klarna: siKlarna,
+  linear: siLinear,
+  mailchimp: siMailchimp,
+  mailgun: siMailgun,
+  meta: siMeta,
+  mistralai: siMistralai,
+  netflix: siNetflix,
+  netlify: siNetlify,
+  notion: siNotion,
+  paypal: siPaypal,
+  perplexity: siPerplexity,
+  railway: siRailway,
+  reddit: siReddit,
+  render: siRender,
+  resend: siResend,
+  sentry: siSentry,
+  shopify: siShopify,
+  spotify: siSpotify,
+  squarespace: siSquarespace,
+  stripe: siStripe,
+  substack: siSubstack,
+  supabase: siSupabase,
+  telegram: siTelegram,
+  tiktok: siTiktok,
+  twitch: siTwitch,
+  typeform: siTypeform,
+  vercel: siVercel,
+  webflow: siWebflow,
+  whatsapp: siWhatsapp,
+  wix: siWix,
+  x: siX,
+  youtube: siYoutube,
+  zendesk: siZendesk,
+};
 
 // Domains of free personal email providers. Brand-favicon lookup is skipped for these —
 // the result would be the provider's own logo (Gmail's G etc.), not the sender's avatar.
 // The backend's Gravatar URL in fallbackUrls covers personal addresses instead.
 const FREE_EMAIL_PROVIDERS = new Set([
-  'gmail.com', 'googlemail.com',
-  'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
-  'yahoo.com', 'yahoo.co.uk', 'yahoo.fr', 'yahoo.de', 'yahoo.co.jp', 'yahoo.com.br',
-  'icloud.com', 'me.com', 'mac.com',
-  'protonmail.com', 'proton.me', 'protonmail.ch',
-  'zohomail.com', 'zoho.com',
-  'yandex.com', 'yandex.ru',
-  'mail.ru', 'bk.ru', 'inbox.ru', 'list.ru',
-  'gmx.com', 'gmx.net', 'gmx.de', 'gmx.at',
-  'aol.com', 'aol.co.uk',
-  'fastmail.com', 'fastmail.fm',
+  'gmail.com',
+  'googlemail.com',
+  'outlook.com',
+  'hotmail.com',
+  'live.com',
+  'msn.com',
+  'yahoo.com',
+  'yahoo.co.uk',
+  'yahoo.fr',
+  'yahoo.de',
+  'yahoo.co.jp',
+  'yahoo.com.br',
+  'icloud.com',
+  'me.com',
+  'mac.com',
+  'protonmail.com',
+  'proton.me',
+  'protonmail.ch',
+  'zohomail.com',
+  'zoho.com',
+  'yandex.com',
+  'yandex.ru',
+  'mail.ru',
+  'bk.ru',
+  'inbox.ru',
+  'list.ru',
+  'gmx.com',
+  'gmx.net',
+  'gmx.de',
+  'gmx.at',
+  'aol.com',
+  'aol.co.uk',
+  'fastmail.com',
+  'fastmail.fm',
   'hey.com',
-  'tutanota.com', 'tutamail.com',
+  'tutanota.com',
+  'tutamail.com',
 ]);
 
 // Neutral muted fill for initials avatars — matches Notion Mail's restrained
 // style across light + dark mode. No per-sender brand rotation: saves saturation
 // budget for real brand icons.
 const INITIALS_LIGHT = { bg: '#B5B5B7', text: '#FFFFFF' };
-const INITIALS_DARK  = { bg: '#5A5A5A', text: '#FFFFFF' };
+const INITIALS_DARK = { bg: '#5A5A5A', text: '#FFFFFF' };
 
 function extractDomain(email: string) {
   const [, domain = ''] = email.split('@');
@@ -114,9 +249,7 @@ interface BimiAvatarProps {
 // Returns null if the slug isn't in simple-icons.
 function lookupSimpleIcon(slug: string | undefined) {
   if (!slug) return null;
-  const key = `si${slug.charAt(0).toUpperCase()}${slug.slice(1)}`;
-  // Cast through `unknown` because simple-icons types each export individually.
-  const record = (SimpleIcons as unknown as Record<string, { path?: string; title?: string }>)[key];
+  const record = SIMPLE_ICONS[slug];
   return record?.path ? record : null;
 }
 
@@ -129,7 +262,7 @@ function BrandedSenderAvatar({ spec, className }: { spec: SenderIconSpec; classN
   if (!icon) return null;
   return (
     <span
-      className={`${className ?? ''} flex items-center justify-center rounded-full overflow-hidden`}
+      className={`${className ?? ''} flex items-center justify-center overflow-hidden rounded-full`}
       style={{ background: spec.bg, color: spec.fg }}
       aria-hidden
     >
@@ -231,9 +364,7 @@ const NetworkBimiAvatar = ({
       ? [...(avatarData?.fallbackUrls ?? []), ...buildFaviconFallbackUrls(normalizedEmail)]
       : [];
 
-    const urls = [primaryUrl, ...thirdPartyUrls].filter((value): value is string =>
-      Boolean(value),
-    );
+    const urls = [primaryUrl, ...thirdPartyUrls].filter((value): value is string => Boolean(value));
 
     return Array.from(new Set(urls)).slice(0, MAX_FAVICON_URLS);
   }, [
@@ -263,13 +394,13 @@ const NetworkBimiAvatar = ({
   const InitialsFallback = (
     <>
       <span
-        className="dark:hidden flex h-full w-full items-center justify-center rounded-full font-semibold text-sm"
+        className="flex h-full w-full items-center justify-center rounded-full text-sm font-semibold dark:hidden"
         style={{ background: INITIALS_LIGHT.bg, color: INITIALS_LIGHT.text }}
       >
         {firstLetter}
       </span>
       <span
-        className="hidden dark:flex h-full w-full items-center justify-center rounded-full font-semibold text-sm"
+        className="hidden h-full w-full items-center justify-center rounded-full text-sm font-semibold dark:flex"
         style={{ background: INITIALS_DARK.bg, color: INITIALS_DARK.text }}
       >
         {firstLetter}

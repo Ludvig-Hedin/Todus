@@ -95,7 +95,7 @@ final class TaskCaptureServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testServerRejectMarksCaptureFailed() async throws {
+    func testTransientServerFailureKeepsCaptureLocalOnly() async throws {
         URLProtocol.registerClass(SyncURLProtocolStub.self)
         defer { URLProtocol.unregisterClass(SyncURLProtocolStub.self) }
         SyncURLProtocolStub.outcome = .status(500)
@@ -107,8 +107,57 @@ final class TaskCaptureServiceTests: XCTestCase {
 
         await enqueueSync(sync, task, in: ctx)
 
+        XCTAssertEqual(task.syncState, .localOnly,
+            "A 5xx is transient and must keep the task for reconnect retry instead of deleting it.")
+    }
+
+    @MainActor
+    func testRateLimitKeepsCaptureLocalOnly() async throws {
+        URLProtocol.registerClass(SyncURLProtocolStub.self)
+        defer { URLProtocol.unregisterClass(SyncURLProtocolStub.self) }
+        SyncURLProtocolStub.outcome = .status(429)
+
+        let ctx = try makeSyncContext()
+        let config = makeSyncConfig(supabaseURL: URL(string: "https://stub.local")!)
+        let sync = SupabaseSyncService(configuration: config, authStore: AuthSessionStore(configuration: config))
+        let task = makeSyncTask(in: ctx)
+
+        await enqueueSync(sync, task, in: ctx)
+
+        XCTAssertEqual(task.syncState, .localOnly)
+    }
+
+    @MainActor
+    func testMalformedSuccessKeepsCaptureLocalOnly() async throws {
+        URLProtocol.registerClass(SyncURLProtocolStub.self)
+        defer { URLProtocol.unregisterClass(SyncURLProtocolStub.self) }
+        SyncURLProtocolStub.outcome = .response(status: 200, body: Data("not-json".utf8))
+
+        let ctx = try makeSyncContext()
+        let config = makeSyncConfig(supabaseURL: URL(string: "https://stub.local")!)
+        let sync = SupabaseSyncService(configuration: config, authStore: AuthSessionStore(configuration: config))
+        let task = makeSyncTask(in: ctx)
+
+        await enqueueSync(sync, task, in: ctx)
+
+        XCTAssertEqual(task.syncState, .localOnly)
+    }
+
+    @MainActor
+    func testSemanticClientRejectMarksCaptureFailed() async throws {
+        URLProtocol.registerClass(SyncURLProtocolStub.self)
+        defer { URLProtocol.unregisterClass(SyncURLProtocolStub.self) }
+        SyncURLProtocolStub.outcome = .status(422)
+
+        let ctx = try makeSyncContext()
+        let config = makeSyncConfig(supabaseURL: URL(string: "https://stub.local")!)
+        let sync = SupabaseSyncService(configuration: config, authStore: AuthSessionStore(configuration: config))
+        let task = makeSyncTask(in: ctx)
+
+        await enqueueSync(sync, task, in: ctx)
+
         XCTAssertEqual(task.syncState, .failed,
-            "A reached-server rejection (non-2xx) must mark .failed — the case the capture rollback was designed for.")
+            "An explicit semantic 4xx rejection is the only rollback case.")
     }
 
     @MainActor
@@ -133,6 +182,7 @@ final class SyncURLProtocolStub: URLProtocol, @unchecked Sendable {
     enum Outcome {
         case urlError(URLError.Code)
         case status(Int)
+        case response(status: Int, body: Data)
     }
     nonisolated(unsafe) static var outcome: Outcome = .status(200)
 
@@ -150,6 +200,13 @@ final class SyncURLProtocolStub: URLProtocol, @unchecked Sendable {
             )!
             client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: Data("{}".utf8))
+            client?.urlProtocolDidFinishLoading(self)
+        case .response(let code, let body):
+            let resp = HTTPURLResponse(
+                url: request.url!, statusCode: code, httpVersion: "HTTP/1.1", headerFields: nil
+            )!
+            client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: body)
             client?.urlProtocolDidFinishLoading(self)
         }
     }

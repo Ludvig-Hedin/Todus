@@ -9,7 +9,7 @@ final class TaskSyncService {
 
     // The server expects { type, id, payload?: { title, status, ... } }.
     // `payload` is omitted for delete mutations.
-    private struct TaskPayload: Encodable {
+    private struct TaskPayload: Codable {
         let title: String?
         let description: String?
         let status: String?
@@ -18,7 +18,7 @@ final class TaskSyncService {
         let dueDate: String?  // ISO 8601 — server uses z.string().datetime()
     }
 
-    private struct TaskMutation: Encodable {
+    private struct TaskMutation: Codable {
         let type: String
         let id: String
         let payload: TaskPayload?
@@ -32,14 +32,16 @@ final class TaskSyncService {
         let syncedIds: [String]
     }
 
-    private var queue: [TaskMutation] = []
-    private var isProcessing = false
+    private var queue: [TaskMutation] = [] {
+        didSet { persistQueue() }
+    }
+    private var inFlightBatch: [TaskMutation] = []
+    private var processingGeneration: Int?
     private let apiClient: TodosAPIClient
-
-    /// Per-session retry counter keyed by mutation ID (task UUID string).
-    /// Caps retries so a stuck mutation can't pin the queue forever.
-    private var retryCounts: [String: Int] = [:]
-    private static let maxRetries = 5
+    private var activeQueueKey: String?
+    private var scopeGeneration = 0
+    private var isChangingScope = false
+    private static let legacyQueueKey = "TodusMac.taskMutationQueue"
 
     private static let iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -55,6 +57,7 @@ final class TaskSyncService {
 
     /// Marks `task` as pending upload, enqueues an upsert mutation, and flushes the queue.
     func enqueueUpsert(_ task: TaskRecord, in context: ModelContext) async {
+        guard activeQueueKey != nil else { return }
         task.syncStateRawValue = SyncState.pendingUpload.rawValue
         try? context.save()
         let mutation = TaskMutation(
@@ -75,6 +78,7 @@ final class TaskSyncService {
 
     /// Enqueues a delete mutation for the given task ID and flushes the queue.
     func enqueueDelete(taskID: UUID, in context: ModelContext) async {
+        guard activeQueueKey != nil else { return }
         let mutation = TaskMutation(type: "delete", id: taskID.uuidString, payload: nil)
         queue.append(mutation)
         await processQueue(in: context)
@@ -83,6 +87,14 @@ final class TaskSyncService {
     /// Re-enqueues all tasks in `pendingUpload` or `failed` state and flushes.
     /// Called on network reconnect so locally-created tasks eventually reach the server.
     func retryUnsyncedTasks(in context: ModelContext) async {
+        guard activeQueueKey != nil else { return }
+        // Replay persisted tombstones before rebuilding upserts from SwiftData.
+        // Deleted rows no longer exist locally, so this queue is their only source.
+        if !queue.isEmpty {
+            await processQueue(in: context)
+            if !queue.isEmpty { return }
+        }
+
         // Fetch all, then filter in memory. A compound `||` string-equality
         // `#Predicate` traps inside SwiftData here (EXC_BREAKPOINT on fetch),
         // and this now runs on every launch/foreground via `flushPendingSync`,
@@ -110,24 +122,69 @@ final class TaskSyncService {
         await processQueue(in: context)
     }
 
-    /// Discards any queued mutations that have not yet been sent.
-    /// Call on sign-out to prevent a reconnect from replaying the previous user's edits.
+    /// Discards the active account's queued mutations. Account switching uses
+    /// `deactivateScope()` so normal sign-out never destroys pending work.
     func clearQueue() {
+        scopeGeneration += 1
+        inFlightBatch.removeAll()
         queue.removeAll()
-        retryCounts.removeAll()
+    }
+
+    /// Switches the durable mutation journal to the authenticated account.
+    /// The legacy unscoped journal stays quarantined because it has no trustworthy owner.
+    func activateScope(_ scopeID: String) {
+        let nextKey = "\(Self.legacyQueueKey).\(scopeID)"
+        guard activeQueueKey != nextKey else { return }
+
+        scopeGeneration += 1
+        persistQueue()
+        isChangingScope = true
+        inFlightBatch.removeAll()
+        queue.removeAll()
+        activeQueueKey = nextKey
+
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: nextKey),
+           let restored = try? JSONDecoder().decode([TaskMutation].self, from: data) {
+            queue = restored
+        }
+        isChangingScope = false
+        persistQueue()
+    }
+
+    /// Stops the signed-out app from flushing an account journal while keeping
+    /// every pending mutation durable for the next login to that account.
+    func deactivateScope() {
+        scopeGeneration += 1
+        persistQueue()
+        isChangingScope = true
+        inFlightBatch.removeAll()
+        queue.removeAll()
+        activeQueueKey = nil
+        isChangingScope = false
+        processingGeneration = nil
     }
 
     // MARK: - Private
 
     private func processQueue(in context: ModelContext) async {
-        guard !isProcessing, !queue.isEmpty else { return }
-        isProcessing = true
-        defer { isProcessing = false }
+        let processGeneration = scopeGeneration
+        guard activeQueueKey != nil,
+              processingGeneration != processGeneration,
+              !queue.isEmpty else { return }
+        processingGeneration = processGeneration
+        defer {
+            if processingGeneration == processGeneration {
+                processingGeneration = nil
+            }
+        }
 
         // Drain the queue. New mutations enqueued while a batch is in flight
         // would otherwise sit until the next enqueue or reconnect.
         while !queue.isEmpty {
             let batch = queue
+            let batchGeneration = scopeGeneration
+            inFlightBatch = batch
             queue.removeAll()
 
             do {
@@ -135,26 +192,31 @@ final class TaskSyncService {
                     "tasks.sync",
                     input: SyncInput(mutations: batch)
                 )
-                for idStr in output.syncedIds {
+                guard batchGeneration == scopeGeneration, activeQueueKey != nil else { return }
+                let syncedIDs = Set(output.syncedIds)
+                for idStr in syncedIDs {
                     guard let uuid = UUID(uuidString: idStr) else { continue }
                     let desc = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == uuid })
                     if let task = try? context.fetch(desc).first {
                         task.syncStateRawValue = SyncState.synced.rawValue
                     }
-                    // Clear retry counter for anything the server confirmed.
-                    retryCounts.removeValue(forKey: idStr)
                 }
                 try? context.save()
+
+                let unacknowledged = batch.filter { !syncedIDs.contains($0.id) }
+                inFlightBatch.removeAll()
+                if !unacknowledged.isEmpty {
+                    queue.insert(contentsOf: unacknowledged, at: 0)
+                    break
+                }
+                persistQueue()
             } catch {
-                // Classify the failure: 4xx → drop (client-side validation issue,
-                // retrying won't help). Anything else (network, 5xx, decoding) →
-                // requeue with a max-retry cap so a stuck mutation can't pin the
-                // queue forever and burn battery in a hot loop.
+                guard batchGeneration == scopeGeneration, activeQueueKey != nil else { return }
+                // Only the backend's explicit semantic validation response is
+                // permanent. Auth/config/conflict failures may recover and must
+                // not discard edits or delete tombstones.
                 let isClientError: Bool = {
-                    if case let APIError.httpError(statusCode, _) = error,
-                       (400..<500).contains(statusCode) {
-                        return true
-                    }
+                    if case let APIError.httpError(statusCode, _) = error { return statusCode == 422 }
                     return false
                 }()
 
@@ -163,50 +225,44 @@ final class TaskSyncService {
                         "[TaskSyncService] dropping batch of \(batch.count) mutation(s) due to client error: \(error.localizedDescription)"
                     )
                     for mutation in batch {
-                        retryCounts.removeValue(forKey: mutation.id)
                         guard let uuid = UUID(uuidString: mutation.id) else { continue }
                         let desc = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == uuid })
                         if let task = try? context.fetch(desc).first {
                             task.syncStateRawValue = SyncState.failed.rawValue
                         }
                     }
+                    inFlightBatch.removeAll()
+                    persistQueue()
                     try? context.save()
                     break
                 }
 
-                // Network / 5xx — partition into "still retryable" and "exhausted".
-                var retryable: [TaskMutation] = []
+                // Network / 5xx / decoding failures stay queued until the
+                // server acknowledges them. A retry cap loses delete tombstones
+                // and allows the server copy to resurrect on the next refresh.
                 for mutation in batch {
-                    let next = (retryCounts[mutation.id] ?? 0) + 1
-                    retryCounts[mutation.id] = next
-                    if next > Self.maxRetries {
-                        AppLogger.shared.log(
-                            "[TaskSyncService] dropping mutation \(mutation.id) after \(Self.maxRetries) failed attempts: \(error.localizedDescription)"
-                        )
-                        retryCounts.removeValue(forKey: mutation.id)
-                        if let uuid = UUID(uuidString: mutation.id) {
-                            let desc = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == uuid })
-                            if let task = try? context.fetch(desc).first {
-                                task.syncStateRawValue = SyncState.failed.rawValue
-                            }
-                        }
-                    } else {
-                        retryable.append(mutation)
-                        if let uuid = UUID(uuidString: mutation.id) {
-                            let desc = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == uuid })
-                            if let task = try? context.fetch(desc).first {
-                                task.syncStateRawValue = SyncState.failed.rawValue
-                            }
+                    if let uuid = UUID(uuidString: mutation.id) {
+                        let desc = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == uuid })
+                        if let task = try? context.fetch(desc).first {
+                            task.syncStateRawValue = SyncState.failed.rawValue
                         }
                     }
                 }
-                // Re-queue only mutations that haven't exceeded the retry cap.
-                if !retryable.isEmpty {
-                    queue.insert(contentsOf: retryable, at: 0)
-                }
+                inFlightBatch.removeAll()
+                queue.insert(contentsOf: batch, at: 0)
                 try? context.save()
                 break
             }
+        }
+    }
+
+    private func persistQueue() {
+        guard !isChangingScope, let activeQueueKey else { return }
+        let pending = inFlightBatch + queue
+        if pending.isEmpty {
+            UserDefaults.standard.removeObject(forKey: activeQueueKey)
+        } else if let data = try? JSONEncoder().encode(pending) {
+            UserDefaults.standard.set(data, forKey: activeQueueKey)
         }
     }
 }

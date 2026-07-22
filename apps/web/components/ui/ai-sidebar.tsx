@@ -1,24 +1,3 @@
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
-import { ArrowsPointingIn, PanelLeftOpen, Phone } from '../icons/icons';
-import { useActiveConnection } from '@/hooks/use-connections';
-import type { MentionRef } from '@zero/shared';
-import { useSearchValue } from '@/hooks/use-search-value';
-import { useSettings } from '@/hooks/use-settings';
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { createPortal } from 'react-dom';
-import useSearchLabels from '@/hooks/use-labels-search';
-import { useQueryClient, useQuery } from '@tanstack/react-query';
-import { AIChat } from '@/components/create/ai-chat';
-import { useTRPC } from '@/providers/query-provider';
-import { Tools } from '../../../server/src/types';
-import { useDoState } from '../mail/use-do-state';
-import { useBilling } from '@/hooks/use-billing';
-import { PromptsDialog } from './prompts-dialog';
-import { Button } from '@/components/ui/button';
-import { useHotkeys } from 'react-hotkeys-hook';
-import { useLabels } from '@/hooks/use-labels';
-import { useAgentChat } from 'agents/ai-react';
-import { ModelSelector } from '@/components/ui/model-selector';
 import {
   X,
   Expand,
@@ -44,16 +23,6 @@ import {
   Languages,
   type LucideIcon,
 } from 'lucide-react';
-import { IncomingMessageType } from '../party';
-import { Gauge } from '@/components/ui/gauge';
-import { useNavigate, useParams } from 'react-router';
-import { useAgent } from 'agents/react';
-import { useQueryState } from 'nuqs';
-import { cn } from '@/lib/utils';
-import posthog from 'posthog-js';
-import { toast } from 'sonner';
-import { GroupChatView } from '@/components/ui/group-chat-view';
-import { ShareConversationModal } from '@/components/ui/share-conversation-modal';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -62,15 +31,48 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
+import {
+  useAISidebar,
+  useAssistantDisplayMode,
+  type AssistantDisplayMode,
+} from '@/hooks/use-ai-sidebar';
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
+import { ShareConversationModal } from '@/components/ui/share-conversation-modal';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { ArrowsPointingIn, PanelLeftOpen, Phone } from '../icons/icons';
 import { AI_PROMPTS, type AIPrompt } from '@/components/ui/ai-prompts';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
+import { GroupChatView } from '@/components/ui/group-chat-view';
+import { ModelSelector } from '@/components/ui/model-selector';
+import { useActiveConnection } from '@/hooks/use-connections';
+import { useSearchValue } from '@/hooks/use-search-value';
+import useSearchLabels from '@/hooks/use-labels-search';
+import { useNavigate, useParams } from 'react-router';
+import { AIChat } from '@/components/create/ai-chat';
+import { useTRPC } from '@/providers/query-provider';
+import { useSettings } from '@/hooks/use-settings';
+import { Tools } from '../../../server/src/types';
+import { useDoState } from '../mail/use-do-state';
+import { useBilling } from '@/hooks/use-billing';
+import { PromptsDialog } from './prompts-dialog';
+import { Button } from '@/components/ui/button';
+import { useHotkeys } from 'react-hotkeys-hook';
+import { useLabels } from '@/hooks/use-labels';
+import { useAgentChat } from 'agents/ai-react';
+import type { MentionRef } from '@zero/shared';
+import { IncomingMessageType } from '../party';
+import { Gauge } from '@/components/ui/gauge';
+import { createPortal } from 'react-dom';
+import { useAgent } from 'agents/react';
+import { useQueryState } from 'nuqs';
+import { cn } from '@/lib/utils';
+import posthog from 'posthog-js';
+import { toast } from 'sonner';
 
 // ---------------------------------------------------------------------------
 // Display modes
 // ---------------------------------------------------------------------------
 
-export type AssistantDisplayMode = 'sidebar' | 'full' | 'floating' | 'window';
-
-const DISPLAY_MODE_KEY = 'mail.ai.displayMode';
 const FLOATING_GEOM_KEY = 'mail.ai.floatingGeometry';
 
 interface FloatingGeometry {
@@ -89,10 +91,6 @@ const DEFAULT_FLOATING_GEOMETRY: FloatingGeometry = {
 
 const MIN_FLOATING_WIDTH = 320;
 const MIN_FLOATING_HEIGHT = 360;
-
-function isValidDisplayMode(value: string | null): value is AssistantDisplayMode {
-  return value === 'sidebar' || value === 'full' || value === 'floating' || value === 'window';
-}
 
 function loadFloatingGeometry(): FloatingGeometry {
   if (typeof window === 'undefined') return DEFAULT_FLOATING_GEOMETRY;
@@ -166,7 +164,7 @@ function PromptGallery({ prompts, onSelect }: PromptGalleryProps) {
       </div>
       <div className="grid grid-cols-2 gap-2">
         {prompts.map((prompt) => {
-          const Icon = prompt.icon ? PROMPT_ICONS[prompt.icon] ?? Sparkles : Sparkles;
+          const Icon = prompt.icon ? (PROMPT_ICONS[prompt.icon] ?? Sparkles) : Sparkles;
           return (
             <button
               key={prompt.id}
@@ -340,7 +338,7 @@ function ChatHeader({
       ref={dragHandleRef}
       className={cn(
         'relative flex items-center justify-between px-2.5 pb-[10px] pt-[13px]',
-        displayMode === 'floating' && 'cursor-grab active:cursor-grabbing select-none',
+        displayMode === 'floating' && 'cursor-grab select-none active:cursor-grabbing',
       )}
     >
       <div className="flex items-center gap-1">
@@ -482,7 +480,7 @@ function ChatHeader({
                 </TooltipTrigger>
                 <TooltipContent>
                   <p>
-                    You've used {chatMessages.usage} out of {chatMessages.included_usage} chat
+                    You have used {chatMessages.usage} out of {chatMessages.included_usage} chat
                     messages.
                   </p>
                   <p className="mb-2">Upgrade for unlimited messages!</p>
@@ -565,193 +563,6 @@ function ChatHeader({
 
 interface AISidebarProps {
   className?: string;
-}
-
-type ViewMode = 'sidebar' | 'popup' | 'fullscreen';
-
-export function useAIFullScreen() {
-  const [isFullScreenQuery, setIsFullScreenQuery] = useQueryState('isFullScreen');
-
-  // Initialize isFullScreen state from query parameter or localStorage
-  const [isFullScreen, setIsFullScreenState] = useState<boolean>(() => {
-    // First check query parameter
-    if (isFullScreenQuery) {
-      return isFullScreenQuery === 'true';
-    }
-
-    // Then check localStorage if on client
-    if (typeof window !== 'undefined') {
-      const savedFullScreen = localStorage.getItem('ai-fullscreen');
-      if (savedFullScreen) {
-        return savedFullScreen === 'true';
-      }
-    }
-
-    return false;
-  });
-
-  // Update both query parameter and localStorage when fullscreen state changes
-  const setIsFullScreen = useCallback(
-    (value: boolean) => {
-      // Immediately update local state for faster UI response
-      setIsFullScreenState(value);
-
-      // For exiting fullscreen, we need to be extra careful to ensure state is updated properly
-      if (!value) {
-        // Force immediate removal from localStorage for faster response
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('ai-fullscreen');
-        }
-
-        // Use setTimeout to ensure the state update happens in the next tick
-        // This helps prevent the need for double-clicking
-        setTimeout(() => {
-          setIsFullScreenQuery(null).catch(console.error);
-        }, 0);
-      } else {
-        // For entering fullscreen, we can use the normal flow
-        setIsFullScreenQuery('true').catch(console.error);
-
-        // Save to localStorage for persistence across sessions
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('ai-fullscreen', 'true');
-        }
-      }
-    },
-    [setIsFullScreenQuery],
-  );
-
-  // Sync with query parameter on mount or when it changes
-  useEffect(() => {
-    const queryValue = isFullScreenQuery === 'true';
-    if (isFullScreenQuery !== null && queryValue !== isFullScreen) {
-      setIsFullScreenState(queryValue);
-    }
-  }, [isFullScreenQuery, isFullScreen]);
-
-  // Initialize from localStorage on mount if query parameter is not set
-  useEffect(() => {
-    if (typeof window !== 'undefined' && !isFullScreenQuery) {
-      const savedFullScreen = localStorage.getItem('ai-fullscreen');
-      if (savedFullScreen === 'true') {
-        setIsFullScreenQuery('true');
-      }
-    }
-
-    // Force a re-render when exiting fullscreen mode
-    if (isFullScreenQuery === null && isFullScreen) {
-      setIsFullScreenState(false);
-    }
-  }, [isFullScreenQuery, setIsFullScreenQuery, isFullScreen]);
-
-  return {
-    isFullScreen,
-    setIsFullScreen,
-  };
-}
-
-/**
- * Persisted display-mode hook. Bridges the new `'sidebar' | 'full' | 'floating' | 'window'`
- * model with the existing `viewMode` / `isFullScreen` plumbing so we don't have to
- * touch any pages that already use them.
- */
-export function useAssistantDisplayMode(setIsFullScreen: (v: boolean) => void) {
-  const [displayMode, setDisplayModeState] = useState<AssistantDisplayMode>(() => {
-    if (typeof window === 'undefined') return 'sidebar';
-    const stored = window.localStorage.getItem(DISPLAY_MODE_KEY);
-    return isValidDisplayMode(stored) ? stored : 'sidebar';
-  });
-
-  const setDisplayMode = useCallback(
-    (mode: AssistantDisplayMode) => {
-      setDisplayModeState(mode);
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(DISPLAY_MODE_KEY, mode);
-      }
-      // Keep the legacy fullscreen flag in sync — pages that watch it (mail layout,
-      // editor) need to react to `full` mode the same way they always have.
-      setIsFullScreen(mode === 'full');
-    },
-    [setIsFullScreen],
-  );
-
-  return { displayMode, setDisplayMode };
-}
-
-export function useAISidebar() {
-  const [open, setOpenQuery] = useQueryState('aiSidebar');
-  const [viewModeQuery, setViewModeQuery] = useQueryState('viewMode');
-  const { isFullScreen, setIsFullScreen } = useAIFullScreen();
-
-  // Initialize viewMode from query parameter, localStorage, or default to 'sidebar'
-  const [viewMode, setViewModeState] = useState<ViewMode>(() => {
-    if (viewModeQuery) return viewModeQuery as ViewMode;
-
-    // Check localStorage for saved state if on client
-    if (typeof window !== 'undefined') {
-      const savedViewMode = localStorage.getItem('ai-viewmode');
-      if (savedViewMode && (savedViewMode === 'sidebar' || savedViewMode === 'popup')) {
-        return savedViewMode as ViewMode;
-      }
-    }
-
-    return 'popup';
-  });
-
-  // Update query parameter and localStorage when viewMode changes
-  const setViewMode = useCallback(
-    (mode: ViewMode) => {
-      setViewModeState(mode);
-      setViewModeQuery(mode === 'popup' ? null : mode);
-
-      // Save to localStorage for persistence across sessions
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('ai-viewmode', mode);
-      }
-    },
-    [setViewModeQuery],
-  );
-
-  const setOpen = useCallback(
-    (openState: boolean) => {
-      if (!openState) {
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('ai-sidebar-open');
-        }
-        setTimeout(() => {
-          setOpenQuery(null).catch(console.error);
-        }, 0);
-      } else {
-        setOpenQuery('true').catch(console.error);
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('ai-sidebar-open', 'true');
-        }
-      }
-    },
-    [setOpenQuery],
-  );
-
-  const toggleOpen = useCallback(() => setOpen(open !== 'true'), [open, setOpen]);
-
-  useEffect(() => {
-    if (viewModeQuery && viewModeQuery !== viewMode) {
-      setViewModeState(viewModeQuery as ViewMode);
-    }
-  }, [viewModeQuery, viewMode]);
-
-  return {
-    open: !!open,
-    viewMode,
-    setViewMode,
-    setOpen,
-    toggleOpen,
-    toggleViewMode: () => setViewMode(viewMode === 'popup' ? 'sidebar' : 'popup'),
-    isFullScreen,
-    setIsFullScreen,
-    // Add convenience boolean flags for each state
-    isSidebar: viewMode === 'sidebar',
-    isPopup: viewMode === 'popup',
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -891,11 +702,7 @@ function FloatingShell({ children }: FloatingShellProps) {
         className="absolute bottom-0 right-0 z-20 h-4 w-4 cursor-nwse-resize"
         aria-hidden
       >
-        <svg
-          viewBox="0 0 16 16"
-          className="text-[#8C8C8C] dark:text-[#929292]"
-          fill="currentColor"
-        >
+        <svg viewBox="0 0 16 16" className="text-[#8C8C8C] dark:text-[#929292]" fill="currentColor">
           <path d="M14 6L6 14M14 10L10 14" stroke="currentColor" strokeWidth="1.2" />
         </svg>
       </div>
@@ -913,7 +720,7 @@ function AISidebar({ className }: AISidebarProps) {
   // groupId query param — when set the sidebar shows GroupChatView instead of AIChat
   const [groupId, setGroupId] = useQueryState('groupId');
   // Track the current saved conversation ID to enable the Share button
-  const [currentConversationId, setCurrentConversationId] = useQueryState('conversationId');
+  const [currentConversationId] = useQueryState('conversationId');
   const trpc = useTRPC();
   // Fetch the title for the active conversation so the ShareModal can prefill it
   const { data: currentConversationData } = useQuery(
@@ -933,7 +740,7 @@ function AISidebar({ className }: AISidebarProps) {
   const [pendingMentions, setPendingMentions] = useState<MentionRef[]>([]);
 
   const onMessage = useCallback(
-    (message: any) => {
+    (message: MessageEvent<string>) => {
       try {
         const parsedData = JSON.parse(message.data);
         const { type } = parsedData;
@@ -1009,7 +816,7 @@ function AISidebar({ className }: AISidebarProps) {
         // Refresh the cached billing state in case the user just upgraded in
         // another tab — and surface a clear upgrade CTA either way.
         refetchBilling().catch(() => {});
-        toast.error('You\'re out of AI credits this period.', {
+        toast.error("You're out of AI credits this period.", {
           action: {
             label: 'Upgrade',
             onClick: () => navigate('/settings/billing'),
@@ -1134,9 +941,7 @@ function AISidebar({ className }: AISidebarProps) {
         ) : (
           <AIChat {...chatState} onMentionsChange={setPendingMentions} />
         )}
-        {showPromptGallery && (
-          <PromptGallery prompts={AI_PROMPTS} onSelect={handlePromptSelect} />
-        )}
+        {showPromptGallery && <PromptGallery prompts={AI_PROMPTS} onSelect={handlePromptSelect} />}
       </div>
     </>
   );
@@ -1182,7 +987,7 @@ function AISidebar({ className }: AISidebarProps) {
     <>
       {/* Desktop sidebar — fixed right panel, works on all pages */}
       {isSidebar && !isFullScreen && (
-        <div className="bg-panelLight dark:bg-panelDark fixed top-2 right-1 bottom-1 z-40 hidden w-[360px] flex-col rounded-2xl shadow-sm md:flex">
+        <div className="bg-panelLight dark:bg-panelDark fixed bottom-1 right-1 top-2 z-40 hidden w-[360px] flex-col rounded-2xl shadow-sm md:flex">
           <div className={cn('flex h-full flex-col', className)}>{chatBody()}</div>
         </div>
       )}

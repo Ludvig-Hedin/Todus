@@ -1,7 +1,7 @@
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { useConnections } from '@/hooks/use-connections';
-import { useSession } from '@/lib/auth-client';
 import { Button } from '@/components/ui/button';
+import { useSession } from '@/lib/auth-client';
 import { useState, useEffect } from 'react';
 import { APP_NAME } from '@/lib/branding';
 import confetti from 'canvas-confetti';
@@ -17,29 +17,29 @@ const steps = [
     title: `Welcome to ${APP_NAME}`,
     description:
       'Process inbox work faster with clearer threads, quicker replies, and built-in AI help.',
-    video: '/onboarding/get-started.png',
+    media: { src: '/onboarding/get-started.png', type: 'image' as const },
   },
   {
     title: 'Find the next thing to do',
     description:
       'Scan threads, triage what matters, and open the exact conversation you need in one place.',
-    video: '/onboarding/step2.gif',
+    media: { src: '/onboarding/step2.mp4', type: 'video' as const },
   },
   {
     title: 'Draft replies with less effort',
     description:
       'Use AI to summarize threads, draft responses, and get unstuck without leaving your inbox.',
-    video: '/onboarding/step1.gif',
+    media: { src: '/onboarding/step1.mp4', type: 'video' as const },
   },
   {
     title: 'Stay organized as you go',
     description: 'Star, archive, and label messages so your inbox stays easy to understand.',
-    video: '/onboarding/step3.gif',
+    media: { src: '/onboarding/step3.mp4', type: 'video' as const },
   },
   {
     title: 'Ready to start?',
     description: 'Connect your inbox when you are ready, or explore the workspace first.',
-    video: '/onboarding/ready.png',
+    media: { src: '/onboarding/ready.png', type: 'image' as const },
   },
 ];
 
@@ -88,28 +88,31 @@ export function OnboardingDialog({
         className="bg-panelLight mx-auto w-full max-w-[90%] rounded-xl border p-0 sm:max-w-[690px] dark:bg-[#111111]"
       >
         <div className="flex flex-col gap-4 p-4">
-          {steps[currentStep] && steps[currentStep].video && (
+          {steps[currentStep]?.media && (
             <div className="relative flex items-center justify-center">
               <div className="bg-muted aspect-video w-full max-w-4xl overflow-hidden rounded-lg">
-                {steps.map(
-                  (step, index) =>
-                    step.video && (
-                      <div
-                        key={step.title}
-                        className={`absolute inset-0 transition-opacity duration-300 ${
-                          index === currentStep ? 'opacity-100' : 'opacity-0'
-                        }`}
-                      >
-                        <img
-                          loading="eager"
-                          width={500}
-                          height={500}
-                          src={step.video}
-                          alt={step.title}
-                          className="h-full w-full rounded-lg border object-cover"
-                        />
-                      </div>
-                    ),
+                {steps[currentStep].media.type === 'video' ? (
+                  <video
+                    key={steps[currentStep].media.src}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    preload="auto"
+                    aria-label={steps[currentStep].title}
+                    className="h-full w-full rounded-lg border object-cover"
+                  >
+                    <source src={steps[currentStep].media.src} type="video/mp4" />
+                  </video>
+                ) : (
+                  <img
+                    loading="eager"
+                    width={500}
+                    height={500}
+                    src={steps[currentStep].media.src}
+                    alt={steps[currentStep].title}
+                    className="h-full w-full rounded-lg border object-cover"
+                  />
                 )}
               </div>
             </div>

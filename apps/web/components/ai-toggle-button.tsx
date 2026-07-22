@@ -1,5 +1,5 @@
+import { useAISidebar, useAssistantDisplayMode } from '@/hooks/use-ai-sidebar';
 import { Tooltip, TooltipTrigger, TooltipContent } from './ui/tooltip';
-import { useAISidebar, useAssistantDisplayMode } from './ui/ai-sidebar';
 
 // Sparkles constellation matching SF Symbol "sparkles" on iOS/macOS. Painted
 // with the same 4-stop linear gradient as `AssistantButton.swift` (151deg-ish:
@@ -64,10 +64,10 @@ const AIToggleButton = () => {
                 }
               }}
               aria-label="Open AI Assistant"
-              className="group dark:bg-sidebar/85 inline-flex h-11 items-center gap-2 rounded-full border border-foreground/10 bg-background/85 px-4 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.35)] backdrop-blur-xl transition-[transform,opacity,box-shadow] duration-(--motion-duration-fast) ease-(--motion-easing-standard) hover:scale-[1.02] hover:shadow-[0_12px_32px_-10px_rgba(0,0,0,0.45)] active:scale-[0.98]"
+              className="dark:bg-sidebar/85 border-foreground/10 bg-background/85 duration-(--motion-duration-fast) ease-(--motion-easing-standard) group inline-flex h-11 items-center gap-2 rounded-full border px-4 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.35)] backdrop-blur-xl transition-[transform,opacity,box-shadow] hover:scale-[1.02] hover:shadow-[0_12px_32px_-10px_rgba(0,0,0,0.45)] active:scale-[0.98]"
             >
               <AIFabSparkleIcon size={20} />
-              <span className="text-[13px] font-medium text-foreground/70 group-hover:text-foreground">
+              <span className="text-foreground/70 group-hover:text-foreground text-[13px] font-medium">
                 Assistant
               </span>
             </button>

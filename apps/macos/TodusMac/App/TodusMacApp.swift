@@ -16,9 +16,8 @@ struct TodusMacApp: App {
     /// SwiftData schema migrations + persistent-store open (can take seconds on cold launch).
     /// While nil, the splash view renders. `modelContainerFailed` flips to true if every
     /// fallback (default → file → in-memory) raises, which renders a recoverable error UI.
-    @State private var sharedModelContainer: ModelContainer?
     @State private var modelContainerFailed: Bool = false
-    /// Deep-link URLs that arrived before `sharedModelContainer` / services were ready.
+    /// Deep-link URLs that arrived before the model container / services were ready.
     /// Replayed in order once initialization completes so we don't drop auth callbacks
     /// or `mailto:` links sent during the splash-screen window. Cleared after replay.
     @State private var pendingDeepLinks: [URL] = []
@@ -39,11 +38,11 @@ struct TodusMacApp: App {
             Group {
                 if modelContainerFailed {
                     modelContainerErrorView
-                } else if let sharedModelContainer {
+                } else if let modelContainer = services.modelContainer {
                     MacRootView()
                         .environment(services)
                         .environment(services.authService)
-                        .modelContainer(sharedModelContainer)
+                        .modelContainer(modelContainer)
                         .frame(minWidth: 1100, minHeight: 720)
                         // Handle todus://auth-callback and mailto: deep links
                         .onOpenURL { url in
@@ -67,6 +66,15 @@ struct TodusMacApp: App {
                                 candidate?.setFrameAutosaveName("TodusMacMainWindow")
                             }
                         }
+                        .onChange(of: ObjectIdentifier(modelContainer)) { _, _ in
+                            // Account activation swaps the bootstrap container for
+                            // the authenticated user's isolated store. Rewire every
+                            // consumer before replaying deferred local actions.
+                            appDelegate.modelContainer = modelContainer
+                            services.voiceCoordinator.modelContext = modelContainer.mainContext
+                            appDelegate.replayPendingNotificationResponses()
+                            services.applyVoiceAssistantState()
+                        }
                         .onChange(of: scenePhase) { oldPhase, newPhase in
                             // Refresh widgets on .inactive too — a windowed macOS
                             // app rarely reaches .background (only when all windows
@@ -75,7 +83,7 @@ struct TodusMacApp: App {
                             if newPhase == .background || newPhase == .inactive {
                                 Task {
                                     MacWidgetUpdateManager.shared.updateWidgets(
-                                        context: sharedModelContainer.mainContext,
+                                        context: modelContainer.mainContext,
                                         services: services
                                     )
                                 }
@@ -134,11 +142,12 @@ struct TodusMacApp: App {
             Group {
                 if modelContainerFailed {
                     modelContainerErrorView
-                } else if let sharedModelContainer {
+                } else if services.hasActiveLocalDataScope,
+                          let modelContainer = services.modelContainer {
                     AIChatWindowContent()
                         .environment(services)
                         .environment(services.authService)
-                        .modelContainer(sharedModelContainer)
+                        .modelContainer(modelContainer)
                 } else {
                     splashView
                 }
@@ -156,12 +165,13 @@ struct TodusMacApp: App {
             Group {
                 if modelContainerFailed {
                     modelContainerErrorView
-                } else if let sharedModelContainer {
+                } else if services.hasActiveLocalDataScope,
+                          let modelContainer = services.modelContainer {
                     MacSettingsView()
                         .focusEffectDisabled()
                         .environment(services)
                         .environment(services.authService)
-                        .modelContainer(sharedModelContainer)
+                        .modelContainer(modelContainer)
                 } else {
                     splashView
                 }
@@ -195,26 +205,27 @@ struct TodusMacApp: App {
         let schema = Schema([TaskRecord.self, FolderRecord.self, FolderItemRecord.self, DraftRecord.self])
 
         let result: ContainerInitResult = await Task.detached(priority: .userInitiated) {
+            let fileManager = FileManager.default
+            let appSupport = fileManager.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first ?? fileManager.temporaryDirectory
+            let guestDirectory = appSupport.appendingPathComponent("TodusMac", isDirectory: true)
             do {
-                return .success(try ModelContainer(for: schema))
+                try fileManager.createDirectory(at: guestDirectory, withIntermediateDirectories: true)
+                let guestURL = guestDirectory.appendingPathComponent("Guest.store")
+                let guestConfiguration = ModelConfiguration(url: guestURL, allowsSave: true)
+                return .success(
+                    try ModelContainer(for: schema, configurations: guestConfiguration)
+                )
             } catch {
-                let fileManager = FileManager.default
-                let appSupportDir = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-                    ?? fileManager.temporaryDirectory
-                if !fileManager.fileExists(atPath: appSupportDir.path) {
-                    try? fileManager.createDirectory(at: appSupportDir, withIntermediateDirectories: true)
-                }
-                let fallbackURL = appSupportDir.appendingPathComponent("TodusMacFallback.store")
-                let fallbackConfiguration = ModelConfiguration(url: fallbackURL, allowsSave: true)
+                // Guest mode must never open the historical unscoped default
+                // store. Fall back to an empty session store instead.
+                let inMemoryConfig = ModelConfiguration(isStoredInMemoryOnly: true)
                 do {
-                    return .success(try ModelContainer(for: schema, configurations: fallbackConfiguration))
+                    return .success(try ModelContainer(for: schema, configurations: inMemoryConfig))
                 } catch {
-                    let inMemoryConfig = ModelConfiguration(isStoredInMemoryOnly: true)
-                    do {
-                        return .success(try ModelContainer(for: schema, configurations: inMemoryConfig))
-                    } catch {
-                        return .failed
-                    }
+                    return .failed
                 }
             }
         }.value
@@ -223,35 +234,16 @@ struct TodusMacApp: App {
 
         switch result {
         case .success(let container):
-            self.sharedModelContainer = container
             services.modelContainer = container
             services.setupNetworkSync()
-            // Flush any task/folder/draft mutations left `.pendingUpload` from a
-            // previous online session (they used to wait for a reconnect event
-            // that never comes if the user is already online).
-            services.flushPendingSync()
-            // Apply any task completions tapped on a widget while the app was closed.
-            services.drainWidgetTaskCompletions()
-            // Reconcile local task reminders + due-today digest against the loaded task
-            // set (the toggles previously persisted but scheduled nothing).
-            services.reconcileTaskReminders()
-            // Wire the delegate so UNUserNotificationCenter callbacks can resolve tasks
-            // (SwiftData) and reach email/AI services for routing + actions.
-            appDelegate.modelContainer = container
+            // This is an isolated guest store. Per-user task/folder/draft work is deferred until
+            // MacRootView verifies the authenticated account and switches to
+            // its isolated store.
+            // Notification actions stay queued until the authenticated account's
+            // isolated container is active. Pointing the delegate at the guest
+            // store could apply an account notification in the wrong scope.
             appDelegate.services = services
             UNUserNotificationCenter.current().delegate = appDelegate
-            // Replay any notification taps that arrived during cold launch before the
-            // delegate's services/container were wired (mirrors pendingDeepLinks below).
-            appDelegate.replayPendingNotificationResponses()
-            // Wire SwiftData into the voice coordinator so tool calls
-            // (create_task etc.) have a context to mutate. Without this,
-            // voice tools fall back to a friendly "open the chat panel
-            // first" error.
-            services.voiceCoordinator.modelContext = container.mainContext
-            // Apply the user's saved voice prefs after the container is
-            // ready so we never start the hotkey before the chat service
-            // can actually handle a tool call.
-            services.applyVoiceAssistantState()
             // Replay any deep links that arrived before init completed.
             if !pendingDeepLinks.isEmpty {
                 let queued = pendingDeepLinks
@@ -275,7 +267,7 @@ struct TodusMacApp: App {
         // schemes are case-insensitive, normalize so MAILTO:/Mailto: don't slip
         // through to the auth callback branch.
         if url.scheme?.lowercased() == "mailto" {
-            if sharedModelContainer == nil {
+            if services.modelContainer == nil {
                 pendingDeepLinks.append(url)
             } else {
                 handleMailtoURL(url, services: services)
@@ -284,7 +276,7 @@ struct TodusMacApp: App {
         }
 
         // Defer non-ready URLs so they're not silently dropped during cold launch.
-        if sharedModelContainer == nil {
+        if services.modelContainer == nil {
             pendingDeepLinks.append(url)
             return
         }

@@ -5,9 +5,9 @@ import {
   ContextMenuTrigger,
 } from '../ui/context-menu';
 import { ChatSpecRenderer, extractUISpecFromMessage } from '../generative-ui';
+import { useAIFullScreen, useAISidebar } from '@/hooks/use-ai-sidebar';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 import { extractMentionRefsFromDoc } from '@/lib/editor-mentions';
-import { useAIFullScreen, useAISidebar } from '../ui/ai-sidebar';
 import { useRef, useCallback, useEffect, useState } from 'react';
 import { VoiceProvider } from '@/providers/voice-provider';
 import type { Message as AiMessage, Attachment } from 'ai';
@@ -256,31 +256,38 @@ export interface AIChatProps {
 }
 
 // Subcomponents for ToolResponse
-const GetThreadToolResponse = ({ result, args }: { result: any; args: any }) => {
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const GetThreadToolResponse = ({ result, args }: { result: unknown; args: unknown }) => {
   // Extract threadId from result or args
   let threadId: string | null = null;
   if (typeof result === 'string') {
     const match = result.match(/<thread id="([^"]+)" ?\/>/);
     if (match?.[1]) threadId = match[1];
   }
-  if (!threadId && args?.id && typeof args.id === 'string') threadId = args.id;
+  if (!threadId && isRecord(args) && typeof args.id === 'string') threadId = args.id;
   if (!threadId) return null;
   return <ThreadPreview threadId={threadId} />;
 };
 
-const GetUserLabelsToolResponse = ({ result }: { result: any }) => {
-  if (!result?.labels) return null;
+const GetUserLabelsToolResponse = ({ result }: { result: unknown }) => {
+  if (!isRecord(result) || !Array.isArray(result.labels)) return null;
+  const labels = result.labels.filter(
+    (label): label is { id: string; name: string } =>
+      isRecord(label) && typeof label.id === 'string' && typeof label.name === 'string',
+  );
   return (
     <div className="flex flex-wrap gap-2">
-      {result.labels.map((label: any) => (
+      {labels.map((label) => (
         <MailLabels key={label.id} labels={[label]} />
       ))}
     </div>
   );
 };
 
-const ComposeEmailToolResponse = ({ result }: { result: any }) => {
-  if (!result?.newBody) return null;
+const ComposeEmailToolResponse = ({ result }: { result: unknown }) => {
+  if (!isRecord(result) || typeof result.newBody !== 'string') return null;
   return (
     <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
       <div className="prose dark:prose-invert max-w-none">
@@ -291,7 +298,15 @@ const ComposeEmailToolResponse = ({ result }: { result: any }) => {
 };
 
 // Main ToolResponse switcher
-const ToolResponse = ({ toolName, result, args }: { toolName: string; result: any; args: any }) => {
+const ToolResponse = ({
+  toolName,
+  result,
+  args,
+}: {
+  toolName: string;
+  result: unknown;
+  args: unknown;
+}) => {
   switch (toolName) {
     case Tools.GetThread:
       return <GetThreadToolResponse result={result} args={args} />;
@@ -546,17 +561,19 @@ export function AIChat({
                   className="mb-2 flex flex-col"
                   data-message-role={message.role}
                 >
-                  {toolParts.map(
-                    (part, index) =>
-                      (part.toolInvocation as any)?.result && (
+                  {toolParts.map((part, index) => {
+                    const invocation = part.toolInvocation;
+                    return (
+                      invocation.state === 'result' && (
                         <ToolResponse
-                          key={`${part.toolInvocation.toolName}-${index}`}
-                          toolName={part.toolInvocation.toolName}
-                          result={(part.toolInvocation as any).result}
-                          args={part.toolInvocation.args}
+                          key={`${invocation.toolName}-${index}`}
+                          toolName={invocation.toolName}
+                          result={invocation.result}
+                          args={invocation.args}
                         />
-                      ),
-                  )}
+                      )
+                    );
+                  })}
                   {message.role === 'user' &&
                     (
                       message as AiMessage & { experimental_attachments?: Attachment[] }

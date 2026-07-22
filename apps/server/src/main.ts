@@ -22,6 +22,7 @@ import {
   type AttachmentFile,
 } from './lib/attachments';
 import { SyncThreadsCoordinatorWorkflow } from './workflows/sync-threads-coordinator-workflow';
+import { EProviders, type IEmailSendBatch, type IOutgoingMessage } from './types';
 import { WorkerEntrypoint, DurableObject, RpcTarget } from 'cloudflare:workers';
 // import { instrument, type ResolveConfigFn } from '@microlabs/otel-cf-workers';
 import { getZeroAgent, getZeroDB, verifyToken } from './lib/server-utils';
@@ -30,7 +31,6 @@ import { ShardRegistry, ZeroAgent, ZeroDriver } from './routes/agent';
 import { ThreadSyncWorker } from './routes/agent/sync-worker';
 import { eq, and, desc, asc, inArray, gt } from 'drizzle-orm';
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins';
-import { EProviders, type IEmailSendBatch } from './types';
 import { ThinkingMCP } from './lib/sequential-thinking';
 import { serializeSignedCookie } from 'better-call';
 
@@ -837,9 +837,6 @@ const api = new Hono<HonoContext>()
       throw error;
     }
     // Note: Trace will be completed by TRPC middleware after logging
-
-    c.set('sessionUser', undefined);
-    c.set('auth', undefined as any);
   })
   .route('/ai', aiRouter)
   .route('/autumn', autumnApi)
@@ -1884,6 +1881,9 @@ const app = new Hono<HonoContext>()
           });
           span.recordException(error as Error);
           span.setStatus({ code: 2, message: (error as Error).message });
+          // Pub/Sub retries non-2xx responses. Returning 200 here permanently
+          // acknowledged a notification that never reached our sync queue.
+          return c.json({ message: 'Queue temporarily unavailable' }, { status: 503 });
         }
         return c.json({ message: 'OK' }, { status: 200 });
       }
@@ -1904,6 +1904,11 @@ const handler = {
     setEnv(env);
     return app.fetch(request, env, ctx);
   },
+};
+
+type QueueMessage<T> = {
+  body: T;
+  retry?: () => void;
 };
 
 // const config: ResolveConfigFn = (env: ZeroEnv) => {
@@ -1937,8 +1942,13 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
     switch (true) {
       case batch.queue.startsWith('subscribe-queue'): {
         console.log('batch', batch);
+        // Cloudflare types queue batches as unknown; the binding name is the
+        // runtime discriminator for this payload shape.
+        const messages = batch.messages as unknown as Array<
+          QueueMessage<{ connectionId: string; providerId: EProviders }>
+        >;
         await Promise.all(
-          batch.messages.map(async (msg: any) => {
+          messages.map(async (msg) => {
             const connectionId = msg.body.connectionId;
             const providerId = msg.body.providerId;
             try {
@@ -1955,8 +1965,9 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
         return;
       }
       case batch.queue.startsWith('send-email-queue'): {
+        const messages = batch.messages as Array<QueueMessage<IEmailSendBatch>>;
         await Promise.all(
-          batch.messages.map(async (msg: any) => {
+          messages.map(async (msg) => {
             const { messageId, connectionId, mail } = msg.body;
             const { pending_emails_status: statusKV, pending_emails_payload: payloadKV } = this
               .env as { pending_emails_status: KVNamespace; pending_emails_payload: KVNamespace };
@@ -1973,15 +1984,20 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
                 const stored = await payloadKV.get(messageId);
                 if (!stored) {
                   console.error(`No payload found for scheduled email ${messageId}`);
-                  return;
+                  if (typeof msg.retry === 'function') {
+                    msg.retry();
+                    return;
+                  }
+                  throw new Error(`No payload found for scheduled email ${messageId}`);
                 }
-                payload = JSON.parse(stored);
+                payload = JSON.parse(stored) as NonNullable<IEmailSendBatch['mail']>;
               }
 
               const agent = await getZeroAgent(connectionId, this.ctx);
 
-              if (Array.isArray((payload as any).attachments)) {
-                const attachments = (payload as any).attachments;
+              let mailForSend: IOutgoingMessage = payload;
+              if (Array.isArray(payload.attachments)) {
+                const attachments = payload.attachments;
 
                 const processedAttachments = await Promise.all(
                   attachments.map(
@@ -2001,14 +2017,17 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
                   orderedAttachments[index] = attachment;
                 });
 
-                (payload as any).attachments = orderedAttachments;
+                mailForSend = {
+                  ...payload,
+                  attachments: orderedAttachments,
+                } as unknown as IOutgoingMessage;
               }
 
-              if ('draftId' in (payload as any) && (payload as any).draftId) {
-                const { draftId, ...rest } = payload as any;
-                await agent.stub.sendDraft(draftId, rest as any);
+              if ('draftId' in mailForSend && typeof mailForSend.draftId === 'string') {
+                const { draftId, ...rest } = mailForSend;
+                await agent.stub.sendDraft(draftId, rest);
               } else {
-                await agent.stub.create(payload as any);
+                await agent.stub.create(mailForSend);
               }
 
               await statusKV.delete(messageId);
@@ -2033,9 +2052,14 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
       }
       case batch.queue.startsWith('thread-queue'): {
         const tracer = initTracing();
+        // Cloudflare types queue batches as unknown; the binding name is the
+        // runtime discriminator for this payload shape.
+        const messages = batch.messages as unknown as Array<
+          QueueMessage<{ providerId: string; historyId: string; subscriptionName: string }>
+        >;
 
         await Promise.all(
-          batch.messages.map(async (msg: any) => {
+          messages.map(async (msg) => {
             const span = tracer.startSpan('thread_queue_processing', {
               attributes: {
                 'provider.id': msg.body.providerId,
@@ -2065,6 +2089,13 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
               console.error('Error running workflow', error);
               span.recordException(error as Error);
               span.setStatus({ code: 2, message: (error as Error).message });
+              // Explicitly retry this message. Swallowing the error acknowledges
+              // it and can leave the user's inbox stale until a later full sync.
+              if (typeof msg.retry === 'function') {
+                msg.retry();
+              } else {
+                throw error;
+              }
             } finally {
               span.end();
             }

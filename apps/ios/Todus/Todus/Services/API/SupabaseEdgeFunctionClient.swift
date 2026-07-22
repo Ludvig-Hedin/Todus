@@ -3,6 +3,7 @@ import Foundation
 enum BackendClientError: Error, LocalizedError {
     case backendNotConfigured
     case invalidResponse
+    case httpError(statusCode: Int, responseBody: String?)
 
     var errorDescription: String? {
         switch self {
@@ -10,6 +11,8 @@ enum BackendClientError: Error, LocalizedError {
             return "Supabase backend is not configured."
         case .invalidResponse:
             return "The backend returned an invalid response."
+        case .httpError(let statusCode, _):
+            return "The backend request failed with status \(statusCode)."
         }
     }
 }
@@ -48,8 +51,14 @@ struct SupabaseEdgeFunctionClient: Sendable {
         request.httpBody = try JSONEncoder.taskAppEncoder.encode(body)
 
         let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
+        guard let httpResponse = response as? HTTPURLResponse else {
             throw BackendClientError.invalidResponse
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw BackendClientError.httpError(
+                statusCode: httpResponse.statusCode,
+                responseBody: String(data: data, encoding: .utf8)
+            )
         }
 
         if Response.self == EmptyResponse.self, data.isEmpty {

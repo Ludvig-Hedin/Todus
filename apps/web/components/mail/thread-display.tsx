@@ -20,29 +20,29 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
+import { useCreateTaskFromThread } from '@/hooks/use-create-task-from-thread';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { focusedIndexAtom } from '@/hooks/use-mail-navigation';
 import { type ThreadDestination } from '@/lib/thread-actions';
 import { handleUnsubscribe } from '@/lib/email-utils.client';
+import { Inbox, ListChecks, StickyNote } from 'lucide-react';
 import { useThread, useThreads } from '@/hooks/use-threads';
-import { useAISidebar } from '@/components/ui/ai-sidebar';
 import { EmptyStateIcon } from '../icons/empty-state-svg';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { ParsedMessage, Attachment } from '@/types';
 import { useAnimations } from '@/hooks/use-animations';
 import { AnimatePresence, motion } from 'motion/react';
+import { useAISidebar } from '@/hooks/use-ai-sidebar';
 import { MailDisplaySkeleton } from './mail-skeleton';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { Inbox, ListChecks, StickyNote } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cleanHtml } from '@/lib/email-utils';
 import ReplyCompose from './reply-composer';
 import { APP_NAME } from '@/lib/branding';
 import { NotesPanel } from './note-panel';
-import { useCreateTaskFromThread } from '@/hooks/use-create-task-from-thread';
 import { cn, FOLDERS } from '@/lib/utils';
 import { m } from '@/paraglide/messages';
 import MailDisplay from './mail-display';
@@ -172,7 +172,13 @@ export function ThreadDisplay() {
 
   const folder = params?.folder ?? 'inbox';
   const [id, setThreadId] = useQueryState('threadId');
-  const { data: emailData, isLoading, refetch: refetchThread } = useThread(id ?? null);
+  const {
+    data: emailData,
+    isLoading,
+    isError,
+    error,
+    refetch: refetchThread,
+  } = useThread(id ?? null);
   const [, items] = useThreads();
   const [isStarred, setIsStarred] = useState(false);
   const [isImportant, setIsImportant] = useState(false);
@@ -517,10 +523,7 @@ export function ThreadDisplay() {
                     ? `
                   <div class="labels-section">
                     ${message.tags
-                      .map(
-                        (tag) =>
-                          `<span class="label-badge">${escapeHtml(tag.name)}</span>`,
-                      )
+                      .map((tag) => `<span class="label-badge">${escapeHtml(tag.name)}</span>`)
                       .join('')}
                   </div>
                 `
@@ -533,11 +536,7 @@ export function ThreadDisplay() {
                     <span class="meta-label">From:</span>
                     <span class="meta-value">
                       ${escapeHtml(cleanNameDisplay(message.sender?.name))}
-                      ${
-                        message.sender?.email
-                          ? `&lt;${escapeHtml(message.sender.email)}&gt;`
-                          : ''
-                      }
+                      ${message.sender?.email ? `&lt;${escapeHtml(message.sender.email)}&gt;` : ''}
                     </span>
                   </div>
 
@@ -698,16 +697,12 @@ export function ThreadDisplay() {
       await toggleImportant({ ids: [id] });
       await refetchThread();
       toast.success(
-        willBeImportant
-          ? m['common.mail.markedAsImportant']()
-          : 'Removed from Important',
+        willBeImportant ? m['common.mail.markedAsImportant']() : 'Removed from Important',
       );
     } catch (error) {
       console.error('Failed to toggle important:', error);
       toast.error(
-        willBeImportant
-          ? 'Failed to mark as important'
-          : 'Failed to remove from Important',
+        willBeImportant ? 'Failed to mark as important' : 'Failed to remove from Important',
       );
     }
   }, [emailData, id, isImportant, refetchThread, toggleImportant]);
@@ -804,6 +799,18 @@ export function ThreadDisplay() {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        ) : isError ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center px-6">
+            <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+              <p className="text-base font-medium">Could not load this conversation</p>
+              <p className="text-muted-foreground text-[13px]">
+                {error instanceof Error ? error.message : 'Check your connection and try again.'}
+              </p>
+              <Button size="sm" onClick={() => void refetchThread()}>
+                Try again
+              </Button>
             </div>
           </div>
         ) : !emailData || isLoading ? (

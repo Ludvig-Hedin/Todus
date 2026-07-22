@@ -1,6 +1,30 @@
 # Code Review Backlog
 
-Last updated: 2026-07-07
+Last updated: 2026-07-22
+
+---
+
+# Performance and reliability audit — 2026-07-22
+
+The P1 fixes are implemented and verified. These remaining items need a deliberate
+storage or routing design and were not hidden behind a risky local patch:
+
+- **P2 — protected-route auth:** consolidate repeated session loaders under a cached
+  parent route and distinguish an unavailable auth service from a logged-out session.
+- **P2 — calendar pagination:** add bounded multi-page loading with cancellation and a
+  partial-result state for large calendars.
+- **P2 — macOS decode work:** move large mail/docs JSON decoding off the main actor,
+  then profile with Instruments before changing additional actor boundaries.
+- **P2 — macOS legacy local-data recovery:** provide an explicit recovery/export flow
+  for the retained pre-scoping SwiftData store and mutation journals. They cannot be
+  safely assigned to an account automatically because the old records have no owner.
+- **P3 — mail-send idempotency:** replace KV get/put dedupe with a strongly consistent
+  reservation plus provider outcome record.
+- **P3 — atomic claims:** make OTP consumption and AI credit reservation atomic and
+  idempotent in the primary data store.
+
+These are tracked in the full audit at
+`docs/audits/performance-reliability-audit-2026-07-22.md`.
 
 ---
 
