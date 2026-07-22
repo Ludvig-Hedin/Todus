@@ -20,7 +20,7 @@ The iOS-focused follow-up closed the remaining safe, code-proven native findings
   speech completion callbacks are synchronized, and required tab rows cannot enter a confusing snap-back drag;
 - Docs, Meetings, and Settings now use real native More destinations instead of hidden tab content that could render blank.
 
-Verified with 110 iOS unit tests, focused server pagination/scheduled-mail tests, file-scoped ESLint,
+Verified with 123 iOS unit tests, focused server pagination/scheduled-mail tests, file-scoped ESLint,
 an iOS simulator build, and all 10 native UI tests on a dedicated simulator. Historical finding tables below
 are retained as audit evidence; their iOS rows are superseded by this resolution note.
 
@@ -1178,3 +1178,7 @@ Surfaced during the lag/freeze/crash bug-hunt; source-verified but deferred (low
 | PERF-5 | `Features/Email/EmailComposeView.swift` (camera path `:1239-1244`) | `AttachmentService.saveImage` (JPEG encode + disk write) runs on the main-thread camera callback | Move off-main; requires boxing the non-`Sendable` `UIImage` across the `Task` boundary | Camera-to-email is infrequent; photo-library path already fixed. Inline `TODO(perf)` left. |
 | PERF-6 | `Features/Tasks/InboxView.swift:147-160`, `Features/Tasks/BoardView.swift:68-78` | `tasksChangeDigest`/`boardChangeDigest` walk `allTasks` O(n) on every body eval (they're the `.onChange` comparison value) | Cache digest in `@State`, bump it from `TaskCaptureService`/`SyncService` write sites instead of walking in `body` | Knowingly-accepted tradeoff (documented inline); only bites at hundreds+ tasks |
 | PERF-7 | `Services/AI/AIChatService.swift:1164` + `Features/AI/MarkdownView.swift:29-38` | Per-SSE-line `Task.detached` decode (hundreds of hops/reply) and full-markdown reparse on every ~80ms token flush (O(N²) over a long reply) | Decode on one reused background queue for the whole stream; make markdown parse incremental (diff-append) | Both sit on deliberate, documented tradeoffs; off-main already, so no hang |
+
+### iOS task sync follow-up — 2026-07-22
+
+- **IOS-SYNC-1 (P1):** outbound create/update/delete is restored through authenticated `tasks.sync`, including durable delete retries and account-boundary invalidation. Paginated inbound `tasks.list` upserts now hydrate after folders, preserve pending local mutations, resolve by `updatedAt`, and invalidate interrupted pulls across account changes. Cross-device deletes still require a server deletion tombstone/cursor contract. Do not infer deletion from absence in the current offset list: concurrent inserts can shift pages and cause destructive false negatives.

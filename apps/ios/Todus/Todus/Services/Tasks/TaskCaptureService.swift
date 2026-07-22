@@ -38,6 +38,8 @@ final class TaskCaptureService {
     private(set) var lastTruncatedAt: Date?
     private var lastSharedFolderSyncAt: Date?
     private(set) var isSyncingSharedFolders = false
+    private var sharedFolderAccountGeneration: UInt64 = 0
+    private var sharedFolderSyncGeneration: UInt64?
     private let sharedFolderSyncInterval: TimeInterval = 60
 
     init(
@@ -56,6 +58,15 @@ final class TaskCaptureService {
         self.remindersSyncState = remindersSyncState
         self.apiClient = apiClient
         self.folderSyncService = folderSyncService
+    }
+
+    /// Drops account-scoped refresh throttles so a different user who signs in
+    /// immediately does not inherit the previous account's one-minute folder cache.
+    func resetForSignOut() {
+        sharedFolderAccountGeneration &+= 1
+        lastSharedFolderSyncAt = nil
+        sharedFolderSyncGeneration = nil
+        isSyncingSharedFolders = false
     }
 
     /// Captures one or more tasks from raw text, optionally with attachment filenames,
@@ -128,49 +139,19 @@ final class TaskCaptureService {
         do {
             try context.save()
         } catch {
+            context.rollback()
             AppLogger.shared.log("TaskCaptureService.capture: save failed: \(error.localizedDescription)")
+            lastRollbackCount = mutations.count
+            lastRollbackAt = .now
+            return
         }
 
-        let mutationTaskIDs = mutations.compactMap(\.taskID)
-        Task { @MainActor [weak self, syncService, remindersSyncService] in
+        Task { @MainActor [weak self, syncService] in
             await syncService.enqueue(mutations, in: context)
-            // SyncService.enqueue swallows errors and writes the result to TaskRecord.syncState
-            // (.failed when the remote call rejected the batch). Rather than introduce a new
-            // `pendingSyncFailed` flag, treat `.failed` here as the rollback signal: delete
-            // the just-inserted records (and their Reminders mirror) so the user isn't left
-            // with phantom local-only tasks that the rest of the system never sees.
-            let descriptor = FetchDescriptor<TaskRecord>(
-                predicate: #Predicate { task in mutationTaskIDs.contains(task.id) }
-            )
-            let candidates = (try? context.fetch(descriptor)) ?? []
-            let toRollback = candidates.filter { $0.syncState == .failed }
-            let rolledBackIDs = Set(toRollback.map(\.id))
-            if !toRollback.isEmpty {
-                for task in toRollback {
-                    if task.reminderIdentifier != nil {
-                        remindersSyncService.delete(task)
-                    }
-                    context.delete(task)
-                }
-                do {
-                    try context.save()
-                } catch {
-                    AppLogger.shared.log("TaskCaptureService.capture rollback save failed: \(error.localizedDescription)")
-                }
-                AppLogger.shared.log(
-                    "TaskCaptureService.capture: rolled back \(toRollback.count) task(s) after sync failure"
-                )
-                // Publish to observers so views can surface a banner. We assign even when the
-                // value is unchanged so a second consecutive failure still triggers tracking
-                // via `lastRollbackAt`.
-                self?.lastRollbackCount = toRollback.count
-                self?.lastRollbackAt = Date()
-            }
-
-            // Only enrich tasks that survived the initial enqueue. Enriching a
-            // rolled-back task would resurrect a phantom local record. (Bug H8.)
+            // Remote sync is best-effort. Never delete a task the user just created
+            // because a network/backend acknowledgement failed; pending rows retry.
             guard let self else { return }
-            for entry in enrichmentInputs where !rolledBackIDs.contains(entry.taskID) {
+            for entry in enrichmentInputs {
                 self.queueEnrichment(
                     for: entry.taskID,
                     rawInput: entry.rawInput,
@@ -248,6 +229,15 @@ final class TaskCaptureService {
         syncReminder(task, in: context)
     }
 
+    func updatePriority(_ task: TaskRecord, priority: AppTaskPriority, in context: ModelContext) {
+        guard task.priority != priority else { return }
+        task.priority = priority
+        task.updatedAt = .now
+        task.syncState = .pendingUpload
+        persist(task: task, in: context)
+        syncReminder(task, in: context)
+    }
+
     func updateTaskDetails(
         _ task: TaskRecord,
         title: String,
@@ -303,8 +293,8 @@ final class TaskCaptureService {
 
     func delete(_ task: TaskRecord, in context: ModelContext) {
         let mutation = SyncMutation(action: .delete, task: nil, taskID: task.id)
-        deleteReminder(task)
-        notificationService?.cancelTaskReminder(taskID: task.id.uuidString)
+        let reminderIdentifier = task.reminderIdentifier
+        let taskID = task.id.uuidString
         context.delete(task)
         // Only enqueue the remote delete if the local deletion actually persisted.
         // Swallowing this previously could leave the task in the local store while
@@ -312,9 +302,13 @@ final class TaskCaptureService {
         do {
             try context.save()
         } catch {
+            context.rollback()
             AppLogger.shared.log("TaskCaptureService.delete: save failed: \(error.localizedDescription)")
             return
         }
+
+        deleteReminder(identifier: reminderIdentifier)
+        notificationService?.cancelTaskReminder(taskID: taskID)
 
         Task { @MainActor [syncService] in
             await syncService.enqueue([mutation], in: context)
@@ -330,16 +324,31 @@ final class TaskCaptureService {
 
         guard !tasks.isEmpty else { return }
 
-        let mutations = tasks.map { task in
-            SyncMutation(action: .delete, task: nil, taskID: task.id)
+        let deletions = tasks.map { task in
+            (
+                mutation: SyncMutation(action: .delete, task: nil, taskID: task.id),
+                reminderIdentifier: task.reminderIdentifier
+            )
         }
+        let mutations = deletions.map(\.mutation)
 
         for task in tasks {
-            deleteReminder(task)
             context.delete(task)
         }
 
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            AppLogger.shared.log(
+                "TaskCaptureService.clearCompletedTasks: save failed: \(error.localizedDescription)"
+            )
+            return
+        }
+
+        for deletion in deletions {
+            deleteReminder(identifier: deletion.reminderIdentifier)
+        }
 
         Task { @MainActor [syncService] in
             await syncService.enqueue(mutations, in: context)
@@ -507,7 +516,8 @@ final class TaskCaptureService {
 
     func syncSharedFolders(in context: ModelContext) async {
         let now = Date()
-        if isSyncingSharedFolders {
+        let generation = sharedFolderAccountGeneration
+        if sharedFolderSyncGeneration == generation {
             return
         }
         if let lastSharedFolderSyncAt,
@@ -523,9 +533,13 @@ final class TaskCaptureService {
             PerformanceTrace.sharedFolderSync,
             message: "TaskCaptureService.syncSharedFolders begin"
         )
+        sharedFolderSyncGeneration = generation
         isSyncingSharedFolders = true
         defer {
-            isSyncingSharedFolders = false
+            if sharedFolderSyncGeneration == generation {
+                sharedFolderSyncGeneration = nil
+                isSyncingSharedFolders = false
+            }
             PerformanceTrace.endInterval(
                 PerformanceTrace.sharedFolderSync,
                 trace,
@@ -535,6 +549,7 @@ final class TaskCaptureService {
 
         do {
             let response: FolderListResponse = try await apiClient.trpcQuery("folders.list")
+            guard generation == sharedFolderAccountGeneration else { return }
             let remoteFolders = response.folders
             let localFolders = (try? context.fetch(FetchDescriptor<FolderRecord>())) ?? []
             // Keyed by parsed UUID, not uuidString: Swift renders uuidString UPPERCASE
@@ -573,6 +588,7 @@ final class TaskCaptureService {
             }
 
             do {
+                guard generation == sharedFolderAccountGeneration else { return }
                 try context.save()
                 lastSharedFolderSyncAt = now
             } catch {
@@ -704,10 +720,11 @@ final class TaskCaptureService {
         remindersSyncService.upsert(task, in: context)
     }
 
-    private func deleteReminder(_ task: TaskRecord) {
+    private func deleteReminder(identifier: String?) {
         guard remindersSyncState.isEnabled else { return }
         guard remindersSyncState.direction != .fromReminders else { return }
-        remindersSyncService.delete(task)
+        guard let identifier else { return }
+        remindersSyncService.delete(identifier: identifier)
     }
 
     /// Schedule a local notification for a task if it has a due date and reminders are enabled.

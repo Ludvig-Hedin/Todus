@@ -32,26 +32,7 @@ struct TodosApp: App {
                         processUITestingLaunchArgs(services: services)
                     }
                     .onOpenURL { url in
-                        // mailto: links — open compose with pre-filled fields
-                        if url.scheme == "mailto" {
-                            handleMailtoURL(url, services: services)
-                            return
-                        }
-                        // Route todus:// links by host so non-auth deep links don't
-                        // hit the auth state machine (which interprets a missing
-                        // token query param as a failed sign-in and signs the user out).
-                        if url.scheme == "todus", let host = url.host {
-                            switch host {
-                            case "auth-callback", "link-callback":
-                                services.authService.handleAuthCallback(url: url)
-                                services.authStore.handleIncomingAuthCallback(url: url)
-                            default:
-                                break
-                            }
-                            return
-                        }
-                        services.authService.handleAuthCallback(url: url)
-                        services.authStore.handleIncomingAuthCallback(url: url)
+                        handleIncomingURL(url, services: services)
                     }
                     .tint(AppTheme.accent)
                     .preferredColorScheme(services.appearancePreference.colorScheme)
@@ -81,6 +62,11 @@ struct TodosApp: App {
                 // Lightweight splash — renders instantly while services initialize
                 splashView
                     .task { await initializeApp() }
+                    .onOpenURL { url in
+                        // The production URL can arrive before ModelContainer/AppServices
+                        // finish cold-starting. Preserve it and replay once routing exists.
+                        appDelegate.pendingURL = url
+                    }
             }
         }
     }
@@ -159,6 +145,7 @@ struct TodosApp: App {
             container = c
         case .failed:
             self.modelContainerFailed = true
+            appDelegate.didFinishInitialization()
             return
         }
 
@@ -186,6 +173,11 @@ struct TodosApp: App {
 
         self.modelContainer = container
         self.services = svc
+        appDelegate.didFinishInitialization()
+        if let pendingURL = appDelegate.pendingURL {
+            appDelegate.pendingURL = nil
+            handleIncomingURL(pendingURL, services: svc)
+        }
     }
 
     /// Last-resort fallback shown when no `ModelContainer` (file or in-memory) can be created.
@@ -228,6 +220,28 @@ struct TodosApp: App {
             }
         }
     }
+}
+
+@MainActor
+private func handleIncomingURL(_ url: URL, services: AppServices) {
+    if url.scheme == "mailto" {
+        handleMailtoURL(url, services: services)
+        return
+    }
+    // Route todus:// links by host so non-auth deep links do not hit the auth
+    // state machine and get interpreted as a failed sign-in.
+    if url.scheme == "todus", let host = url.host {
+        switch host {
+        case "auth-callback", "link-callback":
+            services.authService.handleAuthCallback(url: url)
+            services.authStore.handleIncomingAuthCallback(url: url)
+        default:
+            break
+        }
+        return
+    }
+    services.authService.handleAuthCallback(url: url)
+    services.authStore.handleIncomingAuthCallback(url: url)
 }
 
 /// Subscribe to the `.todusStartVoiceSession` notification posted by
@@ -378,6 +392,24 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     /// Optional handle so notification action failures can be surfaced in-app on the
     /// next launch (e.g. "Couldn't update task from notification — please retry").
     weak var services: AppServices?
+    var pendingURL: URL?
+    private var initializationFinished = false
+    private var initializationWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func waitUntilInitializationFinishes() async {
+        guard !initializationFinished else { return }
+        await withCheckedContinuation { continuation in
+            initializationWaiters.append(continuation)
+        }
+    }
+
+    func didFinishInitialization() {
+        guard !initializationFinished else { return }
+        initializationFinished = true
+        let waiters = initializationWaiters
+        initializationWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
 
     func application(
         _ application: UIApplication,
@@ -449,6 +481,7 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
 
         // Perform any UI/SwiftData work back on the main actor using only the captured primitives.
         Task { @MainActor in
+            await self.waitUntilInitializationFinishes()
             guard let container = self.modelContainer else { return }
 
             // Handle actions based on the previously captured identifiers.
@@ -554,15 +587,10 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
                     services.pendingEmailThreadId = threadId
                     services.navigateTo = .email
                 } else if let conversationId = conversationIdString, !conversationId.isEmpty {
-                    // AI response: open the AI chat sheet. Conversation id is broadcast
-                    // via NotificationCenter so AIChatView can load the right history
-                    // (no dedicated AppServices field exists for this today).
+                    // AI response: keep the destination in observable app state so it
+                    // survives sheet presentation and cold-start timing.
+                    services.pendingAIConversationId = conversationId
                     services.showsAIChat = true
-                    NotificationCenter.default.post(
-                        name: .todusOpenAIConversation,
-                        object: nil,
-                        userInfo: ["conversationId": conversationId]
-                    )
                 } else if !taskIDString.isEmpty,
                           let taskID = UUID(uuidString: taskIDString) {
                     // Due-task reminder tap: route to the tasks tab focused on the task.
@@ -584,12 +612,4 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         // Present banner and sound even when app is in foreground
         completionHandler([.banner, .sound])
     }
-}
-
-// MARK: - Notification routing channels
-
-extension Notification.Name {
-    /// Broadcast when the user taps an AI-response local notification.
-    /// `userInfo["conversationId"]` carries the conversation to load.
-    static let todusOpenAIConversation = Notification.Name("TodusOpenAIConversation")
 }

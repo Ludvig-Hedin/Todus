@@ -111,6 +111,9 @@ final class AIChatService {
     var currentConversationFolderID: UUID? = nil
     /// Identifier for the currently active conversation, used for move/save updates.
     var currentConversationID: UUID? = nil
+    /// Original creation timestamp for a reopened conversation. Autosave must
+    /// preserve it when updating the existing backend record.
+    private var currentConversationCreatedAt: Date? = nil
 
     /// Currently active model, selectable by the user at runtime.
     var selectedModel: String {
@@ -169,6 +172,10 @@ final class AIChatService {
     /// These are protected from being clobbered by a stale remote fetch — until the
     /// upload completes, the local copy wins.
     private var pendingUploadConversationIDs: Set<UUID> = []
+    /// Invalidates account-scoped async loads when sign-out occurs. Without
+    /// this, a response started for account A can repopulate the in-memory/file
+    /// cache after cleanup and then be uploaded under account B.
+    private var accountGeneration: UInt64 = 0
 
     /// Tone instruction injected from AppServices.aiTonePreference — appended to the system prompt.
     var toneInstruction: String = ""
@@ -517,6 +524,7 @@ final class AIChatService {
         chatTitle = nil
         currentConversationFolderID = nil
         currentConversationID = nil
+        currentConversationCreatedAt = nil
         errorMessage = nil
         isConversationSaved = true
         currentTurnMentions = []
@@ -529,6 +537,30 @@ final class AIChatService {
         guard !messages.isEmpty, !isConversationSaved else { return }
         saveCurrentConversation()
         isConversationSaved = true
+    }
+
+    /// Drop every account-owned local artifact on sign-out. Conversation history
+    /// is server-backed and will be reloaded for the next authenticated account.
+    func resetForSignOut() {
+        accountGeneration &+= 1
+        cancelStream()
+        clearHistory()
+        savedConversations = []
+        locallyDeletedConversationIDs = []
+        pendingUploadConversationIDs = []
+        if let url = Self.chatHistoryFileURL() {
+            try? FileManager.default.removeItem(at: url)
+        }
+        KeychainHelper.delete(key: Self.chatHistoryKey)
+        KeychainHelper.delete(key: Self.deletedConversationIDsKey)
+        UserDefaults.standard.removeObject(forKey: "ai_chat_history")
+    }
+
+    /// Rehydrate server history after a new account authenticates in the same
+    /// process. The local cache is intentionally empty after sign-out.
+    func reloadForAuthenticatedUser() async {
+        accountGeneration &+= 1
+        await syncLoadConversations(generation: accountGeneration)
     }
 
     /// Restore a saved conversation into the active session.
@@ -548,6 +580,7 @@ final class AIChatService {
         }
         chatTitle = conversation.title
         currentConversationID = conversation.id
+        currentConversationCreatedAt = conversation.createdAt
         currentConversationFolderID = conversation.folderID
         errorMessage = nil
         currentTurnMentions = []
@@ -567,8 +600,10 @@ final class AIChatService {
         // if the array is mutated before the async block runs.
         let updatedConversation = savedConversations[index]
         pendingUploadConversationIDs.insert(updatedConversation.id)
+        let generation = accountGeneration
         Task { [convoId = updatedConversation.id] in
-            await syncSaveConversation(updatedConversation)
+            await syncSaveConversation(updatedConversation, generation: generation)
+            guard generation == accountGeneration else { return }
             pendingUploadConversationIDs.remove(convoId)
         }
         if currentConversationID == conversation.id {
@@ -592,6 +627,8 @@ final class AIChatService {
 
         messages = duplicatedMessages
         chatTitle = duplicatedTitle
+        currentConversationID = nil
+        currentConversationCreatedAt = nil
         errorMessage = nil
         currentTurnMentions = []
         lastSubmittedMentions = []
@@ -605,7 +642,8 @@ final class AIChatService {
         savedConversations.removeAll { $0.id == conversation.id }
         persistConversationsLocally()
         // Delete from backend in background — fire-and-forget
-        Task { await syncDeleteConversation(id: conversation.id.uuidString) }
+        let generation = accountGeneration
+        Task { await syncDeleteConversation(id: conversation.id.uuidString, generation: generation) }
     }
 
     // MARK: - Voice Chat Integration
@@ -2076,11 +2114,10 @@ final class AIChatService {
     private func saveCurrentConversation() {
         guard !messages.isEmpty else { return }
         let now = Date()
-        let saved = AIChatConversation(
-            id: UUID(),
+        let result = Self.conversationSaveSnapshot(
+            currentConversationID: currentConversationID,
+            currentConversationCreatedAt: currentConversationCreatedAt,
             title: chatTitle ?? "Untitled",
-            createdAt: now,
-            updatedAt: now,
             folderID: currentConversationFolderID,
             messages: messages.map {
                 AIChatConversation.SavedMessage(
@@ -2089,22 +2126,66 @@ final class AIChatService {
                     mentions: $0.mentions,
                     attachmentFileNames: $0.attachmentFileNames
                 )
-            }
+            },
+            savedConversations: savedConversations,
+            now: now,
+            generatedID: UUID()
         )
-        savedConversations.insert(saved, at: 0)
+        let saved = result.conversation
+        savedConversations = result.savedConversations
         currentConversationID = saved.id
-        // Cap history at 50 conversations
-        if savedConversations.count > 50 { savedConversations.removeLast() }
+        currentConversationCreatedAt = saved.createdAt
         persistConversationsLocally()
         // Mark as pending-upload so a parallel background list-refresh can't
         // overwrite the local copy with a stale remote payload before the push
         // completes (see `syncLoadConversations` merge logic).
         pendingUploadConversationIDs.insert(saved.id)
         // Sync new conversation to backend in background
+        let generation = accountGeneration
         Task { [savedId = saved.id] in
-            await syncSaveConversation(saved)
+            await syncSaveConversation(saved, generation: generation)
+            guard generation == accountGeneration else { return }
             pendingUploadConversationIDs.remove(savedId)
         }
+    }
+
+    /// Pure save policy shared by production autosave and focused regression tests.
+    /// Reopened conversations replace their existing row and preserve identity;
+    /// genuinely new conversations are inserted at the front with a generated ID.
+    nonisolated static func conversationSaveSnapshot(
+        currentConversationID: UUID?,
+        currentConversationCreatedAt: Date?,
+        title: String,
+        folderID: UUID?,
+        messages: [AIChatConversation.SavedMessage],
+        savedConversations: [AIChatConversation],
+        now: Date,
+        generatedID: UUID
+    ) -> (conversation: AIChatConversation, savedConversations: [AIChatConversation]) {
+        let id = currentConversationID ?? generatedID
+        let existingIndex = savedConversations.firstIndex { $0.id == id }
+        let createdAt = currentConversationCreatedAt
+            ?? existingIndex.map { savedConversations[$0].createdAt }
+            ?? now
+        let conversation = AIChatConversation(
+            id: id,
+            title: title,
+            createdAt: createdAt,
+            updatedAt: now,
+            folderID: folderID,
+            messages: messages
+        )
+
+        var updated = savedConversations
+        if let existingIndex {
+            updated[existingIndex] = conversation
+        } else {
+            updated.insert(conversation, at: 0)
+        }
+        if updated.count > 50 {
+            updated.removeLast(updated.count - 50)
+        }
+        return (conversation, updated)
     }
 
     private static let chatHistoryKey = "com.todus.ai.chatHistory"
@@ -2174,7 +2255,8 @@ final class AIChatService {
             UserDefaults.standard.removeObject(forKey: "ai_chat_history")
         }
         // Then fetch from backend to get conversations from other devices
-        Task { await syncLoadConversations() }
+        let generation = accountGeneration
+        Task { await syncLoadConversations(generation: generation) }
     }
 
     // MARK: - Backend Sync
@@ -2199,12 +2281,13 @@ final class AIChatService {
     }
 
     /// Fetch conversation list from backend and merge with local cache
-    private func syncLoadConversations() async {
+    private func syncLoadConversations(generation: UInt64) async {
         guard let api = apiClient else { return }
         let preSyncIDs = Set(savedConversations.map { $0.id })
         let preSyncDeletedIDs = locallyDeletedConversationIDs
         do {
             let response: ConversationListResponse = try await api.trpcQuery("ai.listConversations")
+            guard generation == accountGeneration else { return }
             let remoteConvos = response.conversations
             let deletedIDsToSkip = preSyncDeletedIDs.union(locallyDeletedConversationIDs)
             var mergedByID = Dictionary(uniqueKeysWithValues: savedConversations.map { ($0.id, $0) })
@@ -2220,6 +2303,7 @@ final class AIChatService {
 
                 // Fetch full conversation with messages and update the local item in place.
                 if let full = await fetchFullConversation(id: remote.id) {
+                    guard generation == accountGeneration else { return }
                     guard !deletedIDsToSkip.contains(full.id) else { continue }
                     // If the local copy has a fresher `updatedAt` (user added a turn,
                     // renamed, or moved a folder), keep it. The local copy is the
@@ -2234,6 +2318,7 @@ final class AIChatService {
             // main actor between iterations, so a new conversation saved by
             // saveCurrentConversation during this loop would otherwise be
             // clobbered when we assign back below.
+            guard generation == accountGeneration else { return }
             for convo in savedConversations where mergedByID[convo.id] == nil {
                 mergedByID[convo.id] = convo
             }
@@ -2250,12 +2335,14 @@ final class AIChatService {
                 where preSyncIDs.contains(convo.id)
                 && !remoteIDs.contains(convo.id)
                 && !deletedIDsToSkip.contains(convo.id) {
-                await syncSaveConversation(convo)
+                await syncSaveConversation(convo, generation: generation)
+                guard generation == accountGeneration else { return }
             }
-            await syncPendingDeletedConversations()
+            await syncPendingDeletedConversations(generation: generation)
         } catch {
             // Backend unreachable — local cache is still available, no action needed
-            await syncPendingDeletedConversations()
+            guard generation == accountGeneration else { return }
+            await syncPendingDeletedConversations(generation: generation)
         }
     }
 
@@ -2280,8 +2367,8 @@ final class AIChatService {
     }
 
     /// Save a conversation to the backend
-    private func syncSaveConversation(_ conversation: AIChatConversation) async {
-        guard let api = apiClient else { return }
+    private func syncSaveConversation(_ conversation: AIChatConversation, generation: UInt64) async {
+        guard generation == accountGeneration, let api = apiClient else { return }
         struct SaveInput: Encodable {
             let id: String
             let title: String
@@ -2304,12 +2391,13 @@ final class AIChatService {
     }
 
     /// Delete a conversation from the backend
-    private func syncDeleteConversation(id: String) async {
-        guard let api = apiClient else { return }
+    private func syncDeleteConversation(id: String, generation: UInt64) async {
+        guard generation == accountGeneration, let api = apiClient else { return }
         struct DeleteInput: Encodable { let id: String }
         let maxAttempts = 4
         for attempt in 0..<maxAttempts {
             do {
+                guard generation == accountGeneration else { return }
                 let _: SyncSuccess = try await api.trpcMutation(
                     "ai.deleteConversation",
                     input: DeleteInput(id: id)
@@ -2329,10 +2417,11 @@ final class AIChatService {
     }
 
     /// Retry any backend deletes that are still pending confirmation.
-    private func syncPendingDeletedConversations() async {
-        guard !locallyDeletedConversationIDs.isEmpty else { return }
+    private func syncPendingDeletedConversations(generation: UInt64) async {
+        guard generation == accountGeneration, !locallyDeletedConversationIDs.isEmpty else { return }
         for id in locallyDeletedConversationIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
-            await syncDeleteConversation(id: id.uuidString)
+            await syncDeleteConversation(id: id.uuidString, generation: generation)
+            guard generation == accountGeneration else { return }
         }
     }
 

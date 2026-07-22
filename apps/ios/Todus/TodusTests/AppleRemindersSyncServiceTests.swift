@@ -3,13 +3,8 @@ import EventKit
 import SwiftData
 @testable import Todus
 
-/// AppleRemindersSyncService is a thin wrapper around EKEventStore + a
-/// SwiftData ModelContext. Both dependencies are constructed internally
-/// (no protocol seam), so most behavioural tests require either an EventKit
-/// test fixture (requires reminders permission, polluting the developer's
-/// Reminders database) or a refactor extracting an `EKReminderStoring`
-/// protocol. The tests below cover what can be asserted without driving
-/// EventKit; the rest are deliberately skipped with explicit TODOs.
+/// AppleRemindersSyncService is tested through its `EKReminderStoring` seam so
+/// reliability paths do not touch the developer's Reminders database.
 @MainActor
 final class AppleRemindersSyncServiceTests: XCTestCase {
 
@@ -112,6 +107,52 @@ final class AppleRemindersSyncServiceTests: XCTestCase {
             "After an EK error the upsert must remove the task id from inFlightUpserts so future upserts can proceed.")
     }
 
+    func testEKErrorKeepsExistingReminderIdentifierForRetry() async throws {
+        let fakeStore = FakeReminderStorage()
+        fakeStore.saveError = EKError(.eventStoreNotAuthorized)
+        let svc = AppleRemindersSyncService(
+            storage: fakeStore,
+            authorizationProbe: { .authorized }
+        )
+        let container = try makeContainer()
+        let context = container.mainContext
+        let task = TaskRecord(rawInput: "retry reminder", title: "retry reminder")
+        task.reminderIdentifier = "existing-reminder"
+        context.insert(task)
+        try context.save()
+
+        svc.upsert(task, in: context)
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertEqual(task.reminderIdentifier, "existing-reminder")
+    }
+
+    func testDeletingTaskDuringSaveRemovesOrphanReminderAndInflightState() async throws {
+        let fakeStore = FakeReminderStorage()
+        fakeStore.identifierToReturn = "orphan-candidate"
+        fakeStore.saveDelayNanoseconds = 50_000_000
+        let svc = AppleRemindersSyncService(
+            storage: fakeStore,
+            authorizationProbe: { .authorized }
+        )
+        let container = try makeContainer()
+        let context = container.mainContext
+        let task = TaskRecord(rawInput: "delete while saving", title: "delete while saving")
+        let taskID = task.id
+        context.insert(task)
+        try context.save()
+
+        svc.upsert(task, in: context)
+        context.delete(task)
+        try context.save()
+
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertFalse(svc._test_inFlightUpserts.contains(taskID))
+        let deletedIdentifiers = await fakeStore.deletedIdentifiers
+        XCTAssertEqual(deletedIdentifiers, ["orphan-candidate"])
+    }
+
     // MARK: - Lazy init contract
 
     func testInitDoesNotCreateEventStoreEagerly() {
@@ -136,6 +177,26 @@ final class AppleRemindersSyncServiceTests: XCTestCase {
     }
 }
 
+final class CalendarFolderMapPruningTests: XCTestCase {
+    func testPruningKeepsEveryExistingMappedEventRegardlessOfDateWindow() {
+        let mappings = [
+            "near-event": "folder-a",
+            "far-future-event": "folder-b",
+            "deleted-event": "folder-c",
+        ]
+        let existing = Set(["near-event", "far-future-event"])
+
+        let result = CalendarService.retainingExistingFolderMappings(mappings) {
+            existing.contains($0)
+        }
+
+        XCTAssertEqual(result, [
+            "near-event": "folder-a",
+            "far-future-event": "folder-b",
+        ])
+    }
+}
+
 // MARK: - Fake EKReminderStoring for AppleRemindersSyncService tests
 
 /// Thread-safe counter for FakeReminderStorage's saveCount.
@@ -144,17 +205,28 @@ actor SaveCounter {
     func increment() { value += 1 }
 }
 
+actor IdentifierRecorder {
+    private(set) var values: [String] = []
+    func append(_ value: String) { values.append(value) }
+}
+
 /// In-memory fake that records calls + returns canned results. Used to drive
 /// the upsert / reconcile / inflight-cleanup branches without touching
 /// EventKit or prompting the user for Reminders permission.
 final class FakeReminderStorage: EKReminderStoring, @unchecked Sendable {
     let counter = SaveCounter()
+    let deleteRecorder = IdentifierRecorder()
     var identifierToReturn: String = "fake-id"
     var saveError: Error?
+    var saveDelayNanoseconds: UInt64 = 0
     var statusesByID: [String: RemindersStorageActor.ReminderStatus] = [:]
 
     var saveCount: Int {
         get async { await counter.value }
+    }
+
+    var deletedIdentifiers: [String] {
+        get async { await deleteRecorder.values }
     }
 
     func requestFullAccess() async throws -> Bool { true }
@@ -169,6 +241,9 @@ final class FakeReminderStorage: EKReminderStoring, @unchecked Sendable {
         existingIdentifier: String?
     ) async throws -> RemindersStorageActor.SaveResult {
         await counter.increment()
+        if saveDelayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: saveDelayNanoseconds)
+        }
         if let saveError { throw saveError }
         return RemindersStorageActor.SaveResult(
             identifier: existingIdentifier ?? identifierToReturn,
@@ -176,7 +251,9 @@ final class FakeReminderStorage: EKReminderStoring, @unchecked Sendable {
         )
     }
 
-    func delete(identifier: String) async throws { /* no-op */ }
+    func delete(identifier: String) async throws {
+        await deleteRecorder.append(identifier)
+    }
 
     func fetchAllIncompleteReminders() async -> [ImportedReminder] { [] }
 

@@ -131,10 +131,7 @@ struct BoardTaskCard: View {
                         guard p != task.priority else { return }
                         AppHaptic.light.play()
                         withAnimation(AppTheme.Motion.fast) {
-                            task.priority = p
-                            task.updatedAt = .now
-                            task.syncState = .pendingUpload
-                            try? modelContext.save()
+                            services.captureService.updatePriority(task, priority: p, in: modelContext)
                         }
                     } label: {
                         if p == task.priority {

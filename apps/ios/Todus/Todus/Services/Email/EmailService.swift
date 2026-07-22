@@ -1543,19 +1543,15 @@ final class EmailService {
                 headers["In-Reply-To"] = wrapped
                 headers["References"] = wrapped
             }
-            // Load attachment bytes from disk into the server's serialized-file
-            // wire format. A file that vanished (deleted externally) is skipped
-            // rather than failing the whole send.
-            let serializedAttachments: [SerializedAttachment] = attachmentNames.compactMap { filename in
-                let url = AttachmentService.shared.url(for: filename)
-                guard let data = try? Data(contentsOf: url) else { return nil }
-                return SerializedAttachment(
-                    name: filename,
-                    type: AttachmentService.shared.mimeType(for: filename),
-                    size: data.count,
-                    lastModified: Int(Date().timeIntervalSince1970 * 1000),
-                    base64: data.base64EncodedString()
-                )
+            // Reading and base64-encoding large attachments can take hundreds of
+            // milliseconds. EmailService is MainActor-isolated, so keep that file
+            // work off the UI actor and return only the Sendable wire values.
+            let serializedAttachments = await Task.detached(priority: .userInitiated) {
+                Self.serializeAttachments(attachmentNames)
+            }.value
+            guard serializedAttachments.count == attachmentNames.count else {
+                errorMessage = "One or more attachments could not be read. Reattach them and try again."
+                return false
             }
 
             let input = SendEmailInput(
@@ -1575,7 +1571,12 @@ final class EmailService {
                 isForward: draft.isForward ? true : nil,
                 originalMessage: draft.isForward ? draft.originalMessage : nil
             )
-            let _: SendResponse = try await api.trpcMutation("mail.send", input: input)
+            let response: SendResponse = try await api.trpcMutation("mail.send", input: input)
+            guard response.success else {
+                errorMessage = response.error.map { "Failed to send: \($0)" }
+                    ?? "Failed to send email."
+                return false
+            }
             return true
         } catch {
             // Surface the underlying message if available — saves the user from
@@ -1595,6 +1596,20 @@ final class EmailService {
                 errorMessage = "Failed to send email."
             }
             return false
+        }
+    }
+
+    nonisolated static func serializeAttachments(_ attachmentNames: [String]) -> [SerializedAttachment] {
+        attachmentNames.compactMap { filename in
+            let url = AttachmentService.shared.url(for: filename)
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            return SerializedAttachment(
+                name: filename,
+                type: AttachmentService.shared.mimeType(for: filename),
+                size: data.count,
+                lastModified: Int(Date().timeIntervalSince1970 * 1000),
+                base64: data.base64EncodedString()
+            )
         }
     }
 
@@ -2052,7 +2067,7 @@ private struct SendRecipient: Encodable {
 }
 
 /// Wire format for `mail.send` attachments — the server's `serializedFileSchema`.
-struct SerializedAttachment: Encodable {
+struct SerializedAttachment: Encodable, Sendable {
     let name: String
     let type: String
     let size: Int
@@ -2215,6 +2230,7 @@ struct EmailConnection: Decodable, Identifiable {
 
 private struct SendResponse: Decodable {
     let success: Bool
+    let error: String?
 }
 
 private struct AssistantOpenLoopsResponse: Decodable {

@@ -302,6 +302,10 @@ final class AppServices {
     var pendingEmailThreadId: String? = nil
     /// Set by AI chat card taps to navigate to a specific task after dismissing the sheet.
     var pendingTaskId: UUID? = nil
+    /// Saved conversation requested by an AI-response notification tap. The chat
+    /// sheet consumes this after it is mounted, so cold-launch taps cannot race a
+    /// transient NotificationCenter observer.
+    var pendingAIConversationId: String? = nil
     var appearancePreference: AppAppearancePreference {
         didSet {
             defaults.set(appearancePreference.rawValue, forKey: Keys.appearancePreference)
@@ -587,9 +591,14 @@ final class AppServices {
         self.networkMonitor = NetworkMonitor()
         self.notificationService = NotificationService()
 
-        // Legacy services — still used for task sync during migration
+        // Task sync keeps its historical type name for Xcode project compatibility,
+        // but now uses the unified Better Auth + tRPC transport.
         self.authStore = AuthSessionStore(configuration: configuration)
-        self.syncService = SupabaseSyncService(configuration: configuration, authStore: authStore)
+        self.syncService = SupabaseSyncService(
+            configuration: configuration,
+            authStore: authStore,
+            apiClient: apiClient
+        )
         self.remindersSyncService = AppleRemindersSyncService()
         self.remindersSyncState = RemindersSyncState()
 
@@ -859,10 +868,21 @@ final class AppServices {
     }
 
     func signOut() {
+        // Per-user cleanup is invoked by AuthService.onSignOut, so this manual
+        // path and automatic session-expiry sign-outs share the same teardown.
+        authService.signOut()
+    }
+
+    /// Clears account-scoped state for every AuthService sign-out. This must
+    /// not call `authService.signOut()` or the callback would recurse.
+    private func performSignOutCleanup() {
         // Clear in-memory sync queues so a reconnect after re-login does not
         // replay the previous user's offline mutations under the new session.
+        syncService.clearPendingMutations()
         folderSyncService.clearQueue()
+        captureService.resetForSignOut()
         emailService.resetForSignOut()
+        aiChatService.resetForSignOut()
         clearProfileScopedPreferences()
         // Compose drafts live in UserDefaults under `email_compose_autosave_v1.*`.
         // They contain recipient addresses, subject lines, and body text — PII for
@@ -873,7 +893,6 @@ final class AppServices {
         // otherwise the previous user's tasks/folders remain on disk and would
         // be presented to whoever signs in next on the same device.
         wipeLocalAccountData()
-        authService.signOut()
         authStore.signOutToGuest()
     }
 
@@ -907,7 +926,7 @@ final class AppServices {
         return (try? context.fetchCount(descriptor)) ?? 0
     }
 
-    /// Deletes SwiftData TaskRecord/FolderRecord rows so a sign-in by a
+    /// Deletes SwiftData task, folder, and draft rows so a sign-in by a
     /// different user on this device starts with a clean local store. Local
     /// rows are not authoritative — they re-sync from the backend on first
     /// authenticated load — so this is safe to call on every sign-out.
@@ -916,6 +935,7 @@ final class AppServices {
         do {
             try context.delete(model: TaskRecord.self)
             try context.delete(model: FolderRecord.self)
+            try context.delete(model: DraftRecord.self)
             try context.save()
         } catch {
             AppLogger.shared.log("[AppServices] wipeLocalAccountData failed: \(error)")
@@ -965,10 +985,18 @@ final class AppServices {
         networkMonitor.onReconnect = { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, let context = self.modelContainer?.mainContext else { return }
+                guard self.authService.isAuthenticated else { return }
                 await self.syncService.retryUnsyncedTasks(in: context)
                 await self.folderSyncService.retryPending()
+                await self.captureService.syncSharedFolders(in: context)
+                await self.syncService.reconcileRemoteTasks(in: context)
                 await self.draftService.flushPending(in: context)
             }
+        }
+        // AuthService owns every transition to guest, including automatic
+        // session-expiry paths. Hook cleanup here so none can bypass it.
+        authService.onSignOut = { [weak self] in
+            self?.performSignOutCleanup()
         }
     }
 

@@ -1,6 +1,10 @@
 import Foundation
 import SwiftData
 
+/// Offline-capable task mutation queue.
+///
+/// The filename is retained for Xcode project compatibility, but transport now uses
+/// the unified Better Auth + tRPC backend through `TodosAPIClient`.
 @MainActor
 final class SupabaseSyncService: SyncService {
     /// Capture rollback is destructive, so only statuses whose contract explicitly
@@ -12,106 +16,164 @@ final class SupabaseSyncService: SyncService {
     private struct PendingBatch {
         let mutations: [SyncMutation]
         let taskIDs: [UUID]
-        // Resumed when this specific batch finishes processing (success or
-        // failure) so callers of enqueue() can await their batch's outcome —
-        // not merely "the queue is non-busy".
+        let generation: UInt64
         let continuation: CheckedContinuation<Void, Never>
     }
 
-    private let configuration: AppConfiguration
-    private let authStore: AuthSessionStore
-    private let client: SupabaseEdgeFunctionClient?
+    private struct TaskSyncRequest: Encodable {
+        let mutations: [TaskMutation]
+    }
+
+    private struct TaskMutation: Encodable {
+        let type: String
+        let id: String
+        let payload: TaskMutationPayload?
+
+        private enum CodingKeys: String, CodingKey {
+            case type, id, payload
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(type, forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encodeIfPresent(payload, forKey: .payload)
+        }
+    }
+
+    private struct TaskMutationPayload: Encodable {
+        let title: String
+        let description: String
+        let status: String
+        let priority: String
+        /// Intentionally a string rather than `Date`: `tasks.sync` validates this
+        /// field with `z.string().datetime()`. `TodosAPIClient.trpcMutation` revives
+        /// Swift Dates through superjson, which would turn it into a JS Date before
+        /// Zod validation and reject an otherwise valid task.
+        let dueDate: String?
+        let folderId: String?
+        let reminderIdentifier: String?
+        let emailThreadId: String?
+        let eventId: String?
+    }
+
+    private struct TaskSyncResponse: Decodable {
+        let syncedIds: [String]
+    }
+
+    private struct TaskSyncEnvelope: Decodable {
+        struct Result: Decodable {
+            struct DataValue: Decodable {
+                let json: TaskSyncResponse
+            }
+
+            let data: DataValue
+        }
+
+        let result: Result
+    }
+
+    private struct TaskListInput: Encodable {
+        let sortBy = "newest"
+        let limit: Int
+        let offset: Int
+    }
+
+    private struct TaskListResponse: Decodable {
+        let tasks: [RemoteTask]
+    }
+
+    private struct RemoteTask: Decodable {
+        let id: String
+        let title: String
+        let description: String
+        let status: String
+        let priority: String
+        let dueDate: Date?
+        let folderId: String?
+        let reminderIdentifier: String?
+        let emailThreadId: String?
+        let eventId: String?
+        let createdAt: Date
+        let updatedAt: Date
+    }
+
+    private let apiClient: TodosAPIClient?
+    private let defaults: UserDefaults
+    private let pendingDeleteRetriesKey: String
     private var queue: [PendingBatch] = []
     private var isProcessing = false
-    /// Delete mutations that failed on a *network* error. Deletions remove the
-    /// local TaskRecord immediately, so unlike upserts they can't be rebuilt from
-    /// surviving records by `retryUnsyncedTasks` — dropping the batch lost the
-    /// deletion forever and the task resurrected from the server on next pull.
-    /// Deduped by taskID, replayed on the next retry pass, and persisted to
-    /// UserDefaults (SyncMutation is Codable) so an app kill before reconnect
-    /// doesn't lose the deletion either.
+    /// Generation currently pulling remote tasks. A new account may start its
+    /// own pull even while the invalidated previous account request unwinds.
+    private var remoteReconcileGeneration: UInt64?
+    /// Invalidates an awaited batch when sign-out clears account-scoped state.
+    /// A failed request from the old account must never repopulate the durable
+    /// delete journal after the next account signs in.
+    private var queueGeneration: UInt64 = 0
+    /// Deletes need their own durable journal because the local `TaskRecord` is
+    /// gone and cannot be reconstructed by `retryUnsyncedTasks`. They are added
+    /// before transport starts, so an app kill during the request is also safe.
     private var pendingDeleteRetries: [SyncMutation] = [] {
         didSet { persistPendingDeleteRetries() }
     }
 
     private static let pendingDeleteRetriesKey = "TaskApp.pendingDeleteRetries"
 
-    init(configuration: AppConfiguration, authStore: AuthSessionStore) {
-        self.configuration = configuration
-        self.authStore = authStore
-        self.client = configuration.hasRemoteBackend ? SupabaseEdgeFunctionClient(configuration: configuration) : nil
-        // Restore delete tombstones from a previous run (offline delete → kill).
-        if let data = UserDefaults.standard.data(forKey: Self.pendingDeleteRetriesKey),
+    init(
+        configuration: AppConfiguration,
+        authStore: AuthSessionStore,
+        apiClient: TodosAPIClient? = nil,
+        defaults: UserDefaults = .standard,
+        pendingDeleteRetriesKey: String = SupabaseSyncService.pendingDeleteRetriesKey
+    ) {
+        _ = configuration
+        _ = authStore
+        self.apiClient = apiClient
+        self.defaults = defaults
+        self.pendingDeleteRetriesKey = pendingDeleteRetriesKey
+        if let data = defaults.data(forKey: pendingDeleteRetriesKey),
            let restored = try? JSONDecoder().decode([SyncMutation].self, from: data) {
-            pendingDeleteRetries = restored
-        }
-    }
-
-    private func persistPendingDeleteRetries() {
-        if pendingDeleteRetries.isEmpty {
-            UserDefaults.standard.removeObject(forKey: Self.pendingDeleteRetriesKey)
-        } else if let data = try? JSONEncoder().encode(pendingDeleteRetries) {
-            UserDefaults.standard.set(data, forKey: Self.pendingDeleteRetriesKey)
+            pendingDeleteRetries = Self.deduplicatingDeletes(restored)
         }
     }
 
     func enqueue(_ mutations: [SyncMutation], in context: ModelContext) async {
+        guard !mutations.isEmpty else { return }
         let affectedTaskIDs = Array(Set(mutations.flatMap(\.affectedTaskIDs)))
+        recordPendingDeletes(from: mutations)
 
-        // Track this batch via a continuation so callers can await its actual
-        // completion — not just "some batch is processing". Without this, a
-        // second enqueue() while another batch is in flight returned
-        // immediately, causing the rollback path to see `.pendingUpload`
-        // instead of `.failed` and silently skip rollback (#22).
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             queue.append(PendingBatch(
                 mutations: mutations,
                 taskIDs: affectedTaskIDs,
+                generation: queueGeneration,
                 continuation: continuation
             ))
 
-            if client == nil {
+            guard apiClient != nil else {
                 markTasks(taskIDs: affectedTaskIDs, syncState: .localOnly, in: context)
-                // No remote backend to drain against — remove the batch we just
-                // appended and resume the caller's continuation exactly once.
-                // The previous pop-then-resume pattern double-resumed the same
-                // continuation (the popped batch IS the outer one), tripping
-                // CheckedContinuation's fatal-error guard.
                 queue.removeLast()
                 continuation.resume()
                 return
             }
 
-            // Kick off processing. processQueue() resumes each batch's
-            // continuation as it finishes that batch.
             Task { await self.processQueue(in: context) }
         }
     }
 
-    /// Re-enqueues every task currently in `.localOnly` or `.failed` state for another upload
-    /// attempt. Called when network connectivity is restored — wired in `AppServices` via
-    /// `NetworkMonitor.onReconnect` — so offline tasks don't sit forever waiting for the next
-    /// manual mutation to flush them.
+    /// Re-enqueues every local task that still needs upload, plus durable delete
+    /// tombstones whose records no longer exist locally.
     func retryUnsyncedTasks(in context: ModelContext) async {
-        guard client != nil else { return }
-        let descriptor = FetchDescriptor<TaskRecord>()
-        let tasks = (try? context.fetch(descriptor)) ?? []
-        // Include `.pendingUpload` so tasks that were mid-flight when the app
-        // was killed (e.g. background-suspend → kill before the await returned)
-        // get retried. The in-memory queue doesn't survive a kill, so without
-        // this they'd stay stranded in pendingUpload forever — never picked up
-        // by either the queue or this retry pass.
+        guard apiClient != nil else { return }
+        let tasks = (try? context.fetch(FetchDescriptor<TaskRecord>())) ?? []
         let toRetry = tasks.filter {
             $0.syncState == .localOnly
                 || $0.syncState == .failed
                 || $0.syncState == .pendingUpload
         }
-        // Deletions kept from network-failed batches — their records are gone
-        // locally, so they must be replayed verbatim or the server resurrects
-        // the task on the next pull. Drain even when there are no upsert retries.
         let deleteRetries = pendingDeleteRetries
-        pendingDeleteRetries = []
         guard !toRetry.isEmpty || !deleteRetries.isEmpty else { return }
+
         if toRetry.isEmpty {
             await enqueue(deleteRetries, in: context)
             return
@@ -120,17 +182,10 @@ final class SupabaseSyncService: SyncService {
         let mutations = deleteRetries + toRetry.map { task in
             SyncMutation(action: .upsert, task: task.asPayload(), taskID: task.id)
         }
-        // Capture each task's pre-retry state so we can restore it verbatim if the
-        // optimistic save fails. Without this snapshot, a `.failed` task would be
-        // rolled back to `.localOnly` since the bulk transition to `.pendingUpload`
-        // erases the original state.
         let originalStates: [(TaskRecord, SyncState)] = toRetry.map { ($0, $0.syncState) }
         for task in toRetry {
             task.syncState = .pendingUpload
         }
-        // If we can't persist the optimistic state transition, don't fire mutations
-        // that would later show as duplicates against tasks the disk still believes
-        // are .localOnly / .failed.
         do {
             try context.save()
         } catch {
@@ -143,101 +198,283 @@ final class SupabaseSyncService: SyncService {
         await enqueue(mutations, in: context)
     }
 
-    func upgradeAnonymousUserIfNeeded(email: String, in context: ModelContext) async {
-        guard let client, !email.isEmpty else {
-            return
+    /// Hydrates tasks created or changed on another client. Local pending work
+    /// always wins until it is acknowledged; remote absence is not treated as a
+    /// deletion because the current offset API has no stable snapshot/tombstones.
+    /// This makes sign-out/sign-in recovery and cross-device upserts safe without
+    /// risking data loss during concurrent pagination.
+    func reconcileRemoteTasks(in context: ModelContext) async {
+        let generation = queueGeneration
+        guard remoteReconcileGeneration != generation, let apiClient else { return }
+        remoteReconcileGeneration = generation
+        defer {
+            if remoteReconcileGeneration == generation {
+                remoteReconcileGeneration = nil
+            }
         }
 
-        let request = UpgradeAnonymousUserRequest(
-            anonymousID: authStore.anonymousID,
-            authenticatedUserID: email
-        )
+        let pageSize = 200
+        let maxPages = 100
+        var remoteByID: [UUID: RemoteTask] = [:]
 
         do {
-            let _: EmptyResponse = try await client.invoke(
-                path: configuration.upgradeFunctionPath,
-                body: request
-            )
+            for page in 0..<maxPages {
+                let response: TaskListResponse = try await apiClient.trpcQuery(
+                    "tasks.list",
+                    input: TaskListInput(limit: pageSize, offset: page * pageSize)
+                )
+                guard generation == queueGeneration else { return }
 
-            let descriptor = FetchDescriptor<TaskRecord>()
-            let tasks = (try? context.fetch(descriptor)) ?? []
-            for task in tasks where task.syncState == .localOnly || task.syncState == .failed {
-                task.syncState = .pendingUpload
+                for remote in response.tasks {
+                    guard let id = UUID(uuidString: remote.id) else { continue }
+                    if let existing = remoteByID[id], existing.updatedAt >= remote.updatedAt {
+                        continue
+                    }
+                    remoteByID[id] = remote
+                }
+                if response.tasks.count < pageSize { break }
+                if page == maxPages - 1 {
+                    AppLogger.shared.log("[TaskSync] tasks.list stopped at \(maxPages * pageSize) rows")
+                }
             }
-            try? context.save()
+
+            guard generation == queueGeneration else { return }
+            applyRemoteTasks(Array(remoteByID.values), in: context)
         } catch {
-            return
+            // Offline/auth/server errors leave the complete local cache untouched.
+            AppLogger.shared.log("[TaskSync] tasks.list failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// The unified backend already scopes tasks to the Better Auth session, so
+    /// there is no anonymous-user edge function to call. Signing in simply
+    /// flushes any local work through the authenticated tRPC client.
+    func upgradeAnonymousUserIfNeeded(email: String, in context: ModelContext) async {
+        guard !email.isEmpty else { return }
+        await retryUnsyncedTasks(in: context)
+    }
+
+    /// Clears queued and durable account-scoped mutations on sign-out. The
+    /// generation check also prevents an old in-flight failure from restoring
+    /// tombstones after a different account signs in.
+    func clearPendingMutations() {
+        queueGeneration &+= 1
+        let abandoned = queue
+        queue.removeAll()
+        pendingDeleteRetries.removeAll()
+        persistPendingDeleteRetries()
+        for batch in abandoned {
+            batch.continuation.resume()
         }
     }
 
     private func processQueue(in context: ModelContext) async {
-        guard !isProcessing else { return }
-        guard let client else { return }
+        guard !isProcessing, let apiClient else { return }
         isProcessing = true
-
-        defer {
-            isProcessing = false
-        }
+        defer { isProcessing = false }
 
         while !queue.isEmpty {
             let batch = queue.removeFirst()
-            let request = SyncTasksRequest(
-                installID: authStore.installID,
-                userID: authStore.currentUserID,
-                mutations: batch.mutations
-            )
+            let wireMutations = makeWireMutations(batch.mutations, in: context)
 
             do {
-                let response: SyncTasksResponse = try await client.invoke(
-                    path: configuration.syncFunctionPath,
-                    body: request
-                )
-                markTasks(taskIDs: response.syncedTaskIDs, syncState: .synced, in: context)
-            } catch {
-                // `TaskCaptureService` rolls back (DELETES) `.failed` tasks, so we
-                // must only mark `.failed` when the server actively rejected the
-                // batch — never when we simply couldn't reach it, or it would
-                // delete a task the user captured while offline. Keep those
-                // `.localOnly` so they stay in the list and re-upload on reconnect
-                // via `retryUnsyncedTasks` (wired through `NetworkMonitor.onReconnect`).
-                let keepLocal: Bool
-                switch error {
-                case is URLError:
-                    // Offline / timeout / DNS / cannot-connect.
-                    keepLocal = true
-                case BackendClientError.backendNotConfigured:
-                    // No usable Supabase endpoint — same as the no-remote-backend
-                    // path; the task has nowhere to sync, so keep it, don't delete.
-                    keepLocal = true
-                case BackendClientError.httpError(let statusCode, _):
-                    // Roll back only explicitly allowlisted semantic rejections.
-                    // Every other HTTP failure is recoverable by default.
-                    keepLocal = !Self.semanticRejectionStatusCodes.contains(statusCode)
-                case BackendClientError.invalidResponse:
-                    // A non-HTTP response or response-shape drift says nothing
-                    // about whether the server rejected the task. Preserve it.
-                    keepLocal = true
-                default:
-                    // Decoding and other unknown failures are retryable by
-                    // default. Data loss is worse than retaining a local task.
-                    keepLocal = true
+                let response = try await send(wireMutations, using: apiClient)
+                guard batch.generation == queueGeneration else {
+                    batch.continuation.resume()
+                    continue
                 }
+
+                let syncedIDs = Set(response.syncedIds.compactMap(UUID.init(uuidString:)))
+                markTasks(taskIDs: Array(syncedIDs), syncState: .synced, in: context)
+                let unacknowledged = batch.taskIDs.filter { !syncedIDs.contains($0) }
+                markTasks(taskIDs: unacknowledged, syncState: .localOnly, in: context)
+                removePendingDeletes(acknowledgedIDs: syncedIDs)
+            } catch {
+                guard batch.generation == queueGeneration else {
+                    batch.continuation.resume()
+                    continue
+                }
+                AppLogger.shared.log("[TaskSync] tasks.sync failed: \(error.localizedDescription)")
+                let keepLocal = Self.isRecoverable(error)
                 markTasks(
                     taskIDs: batch.taskIDs,
                     syncState: keepLocal ? .localOnly : .failed,
                     in: context
                 )
-                if keepLocal {
-                    // Preserve the batch's delete mutations for the reconnect
-                    // retry — their local records are already gone, so nothing
-                    // else can regenerate them (FolderSyncService requeues its
-                    // whole batch for the same reason).
-                    let deletes = batch.mutations.filter { $0.action == .delete }
-                    let alreadyPending = Set(pendingDeleteRetries.map(\.taskID))
-                    pendingDeleteRetries.append(contentsOf: deletes.filter { !alreadyPending.contains($0.taskID) })
+                if !keepLocal {
+                    removePendingDeletes(
+                        acknowledgedIDs: Set(batch.mutations.compactMap(\.taskID))
+                    )
                 }
             }
             batch.continuation.resume()
+        }
+    }
+
+    private func makeWireMutations(
+        _ mutations: [SyncMutation],
+        in context: ModelContext
+    ) -> [TaskMutation] {
+        mutations.compactMap { mutation in
+            guard let id = mutation.task?.id ?? mutation.taskID else { return nil }
+            guard mutation.action == .upsert, let task = mutation.task else {
+                return TaskMutation(type: "delete", id: id.uuidString, payload: nil)
+            }
+
+            let record = fetchTask(id: id, in: context)
+            return TaskMutation(
+                type: "upsert",
+                id: id.uuidString,
+                payload: TaskMutationPayload(
+                    title: task.title,
+                    description: task.taskDescription,
+                    status: task.status.rawValue,
+                    priority: task.priority.rawValue,
+                    dueDate: task.dueDate.map(Self.iso8601String),
+                    folderId: task.folderID?.uuidString,
+                    reminderIdentifier: task.reminderIdentifier,
+                    emailThreadId: record?.emailThreadId,
+                    eventId: record?.eventId
+                )
+            )
+        }
+    }
+
+    private func applyRemoteTasks(_ remoteTasks: [RemoteTask], in context: ModelContext) {
+        let localTasks = (try? context.fetch(FetchDescriptor<TaskRecord>())) ?? []
+        var localByID = Dictionary(uniqueKeysWithValues: localTasks.map { ($0.id, $0) })
+        let folders = (try? context.fetch(FetchDescriptor<FolderRecord>())) ?? []
+        let foldersByID = Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0) })
+
+        for remote in remoteTasks {
+            guard let id = UUID(uuidString: remote.id),
+                  let status = TaskStatus(rawValue: remote.status),
+                  let priority = AppTaskPriority(rawValue: remote.priority) else { continue }
+            let folder = remote.folderId.flatMap(UUID.init(uuidString:)).flatMap { foldersByID[$0] }
+
+            if let local = localByID[id] {
+                guard local.syncState == .synced, remote.updatedAt > local.updatedAt else { continue }
+                local.title = remote.title
+                local.taskDescription = remote.description
+                local.status = status
+                local.completedAt = status == .done ? remote.updatedAt : nil
+                local.priority = priority
+                local.dueDate = remote.dueDate
+                local.folder = folder
+                local.reminderIdentifier = remote.reminderIdentifier
+                local.emailThreadId = remote.emailThreadId
+                local.eventId = remote.eventId
+                local.createdAt = remote.createdAt
+                local.updatedAt = remote.updatedAt
+                local.parseState = .parsed
+                local.syncState = .synced
+            } else {
+                let task = TaskRecord(
+                    id: id,
+                    rawInput: remote.title,
+                    title: remote.title,
+                    taskDescription: remote.description,
+                    completed: status == .done,
+                    status: status,
+                    priority: priority,
+                    attachmentNames: [],
+                    reminderIdentifier: remote.reminderIdentifier,
+                    createdAt: remote.createdAt,
+                    updatedAt: remote.updatedAt,
+                    dueDate: remote.dueDate,
+                    completedAt: status == .done ? remote.updatedAt : nil,
+                    folder: folder,
+                    parseState: .parsed,
+                    syncState: .synced
+                )
+                task.emailThreadId = remote.emailThreadId
+                task.eventId = remote.eventId
+                context.insert(task)
+                localByID[id] = task
+            }
+        }
+
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            AppLogger.shared.log("[TaskSync] failed to save reconciled tasks: \(error)")
+        }
+    }
+
+    /// Sends a pre-encoded tRPC envelope so `dueDate` stays an ISO string. The
+    /// generic superjson helper intentionally revives ISO strings as JS Dates,
+    /// while this endpoint's Zod schema requires a string.
+    private func send(
+        _ mutations: [TaskMutation],
+        using apiClient: TodosAPIClient
+    ) async throws -> TaskSyncResponse {
+        let request = TaskSyncRequest(mutations: mutations)
+        let json = try JSONEncoder().encode(request)
+        let requestObject = try JSONSerialization.jsonObject(with: json)
+        let body = try JSONSerialization.data(withJSONObject: ["json": requestObject])
+        let data = try await apiClient.sendRawData(
+            path: "api/trpc/tasks.sync",
+            method: "POST",
+            body: body
+        )
+        do {
+            return try JSONDecoder().decode(TaskSyncEnvelope.self, from: data).result.data.json
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+
+    private static func isRecoverable(_ error: Error) -> Bool {
+        switch error {
+        case is URLError:
+            return true
+        case APIError.httpError(let statusCode, _):
+            return !semanticRejectionStatusCodes.contains(statusCode)
+        case APIError.unauthorized, APIError.invalidResponse, APIError.decodingError:
+            return true
+        default:
+            return true
+        }
+    }
+
+    private static func iso8601String(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
+    private func fetchTask(id: UUID, in context: ModelContext) -> TaskRecord? {
+        var descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try? context.fetch(descriptor).first
+    }
+
+    private func recordPendingDeletes(from mutations: [SyncMutation]) {
+        let merged = pendingDeleteRetries + mutations.filter { $0.action == .delete }
+        pendingDeleteRetries = Self.deduplicatingDeletes(merged)
+    }
+
+    private func removePendingDeletes(acknowledgedIDs: Set<UUID>) {
+        guard !acknowledgedIDs.isEmpty else { return }
+        pendingDeleteRetries.removeAll { mutation in
+            mutation.taskID.map(acknowledgedIDs.contains) ?? false
+        }
+    }
+
+    private static func deduplicatingDeletes(_ mutations: [SyncMutation]) -> [SyncMutation] {
+        var seen: Set<UUID> = []
+        return mutations.filter { mutation in
+            guard mutation.action == .delete, let id = mutation.taskID else { return false }
+            return seen.insert(id).inserted
+        }
+    }
+
+    private func persistPendingDeleteRetries() {
+        if pendingDeleteRetries.isEmpty {
+            defaults.removeObject(forKey: pendingDeleteRetriesKey)
+        } else if let data = try? JSONEncoder().encode(pendingDeleteRetries) {
+            defaults.set(data, forKey: pendingDeleteRetriesKey)
         }
     }
 

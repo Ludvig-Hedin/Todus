@@ -43,8 +43,6 @@ actor CalendarService {
     private let folderMapKey = "com.todus.calendar.eventFolderMap"
     private var lastFolderPruneAt: Date?
     private let folderPruneInterval: TimeInterval = 6 * 60 * 60
-    private let folderPrunePastWindow: TimeInterval = 60 * 60 * 24 * 365
-    private let folderPruneFutureWindow: TimeInterval = 60 * 60 * 24 * 365
     private var cachedTodayDate: Date?
     private var cachedTodayEvents: [CalendarEvent] = []
     private var cachedTodayFetchedAt: Date?
@@ -335,10 +333,10 @@ actor CalendarService {
             return
         }
         lastFolderPruneAt = now
-        pruneStaleFolderMapEntries(referenceDate: now)
+        pruneStaleFolderMapEntries()
     }
 
-    private func pruneStaleFolderMapEntries(referenceDate: Date) {
+    private func pruneStaleFolderMapEntries() {
         guard canReadEvents() else { return }
         let trace = PerformanceTrace.beginInterval(
             PerformanceTrace.calendarFolderPrune,
@@ -352,28 +350,23 @@ actor CalendarService {
             )
         }
 
-        let startDate = referenceDate.addingTimeInterval(-folderPrunePastWindow)
-        let endDate = referenceDate.addingTimeInterval(folderPruneFutureWindow)
-
-        let existingIdentifiers = Set(
-            eventStore
-                .events(
-                    matching: eventStore.predicateForEvents(
-                        withStart: startDate,
-                        end: endDate,
-                        calendars: nil
-                    )
-                )
-                .compactMap(\.eventIdentifier)
-        )
-
-        guard !existingIdentifiers.isEmpty else { return }
-
         let currentMap = folderMap
-        let prunedMap = currentMap.filter { existingIdentifiers.contains($0.key) }
+        let prunedMap = Self.retainingExistingFolderMappings(currentMap) { identifier in
+            eventStore.event(withIdentifier: identifier) != nil
+        }
         if prunedMap.count != currentMap.count {
             folderMap = prunedMap
         }
+    }
+
+    /// Folder associations are not bounded to the visible calendar window.
+    /// Validate each mapped EventKit identifier directly so a valid event more
+    /// than a year away is not mistaken for a deleted event.
+    static func retainingExistingFolderMappings(
+        _ mappings: [String: String],
+        eventExists: (String) -> Bool
+    ) -> [String: String] {
+        mappings.filter { eventExists($0.key) }
     }
 
     private func invalidateTodayCache() {

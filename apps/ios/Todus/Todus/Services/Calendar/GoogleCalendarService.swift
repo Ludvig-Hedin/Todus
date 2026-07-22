@@ -12,6 +12,19 @@ extension Notification.Name {
 /// affected `connectionId: String?` (nil means "any/unknown — show generic banner").
 let TodusCalendarScopeMissingConnectionIdKey = "connectionId"
 
+struct GoogleCalendarRefreshGate {
+    private(set) var generation = 0
+
+    mutating func begin() -> Int {
+        generation &+= 1
+        return generation
+    }
+
+    func isCurrent(_ candidate: Int) -> Bool {
+        candidate == generation
+    }
+}
+
 /// Backend-shaped calendar event from `calendar.eventsMulti`.
 struct GoogleCalendarEvent: Decodable, Sendable {
     let id: String
@@ -63,6 +76,7 @@ final class GoogleCalendarService {
     /// Last successful refresh time, for TTL.
     private var lastRefreshAt: Date?
     private let refreshTTL: TimeInterval = 5 * 60
+    private var refreshGate = GoogleCalendarRefreshGate()
 
     private enum Keys {
         static let cachedSources = "Todus.googleCalendarSourcesV1"
@@ -105,6 +119,7 @@ final class GoogleCalendarService {
     /// Refresh the per-connection calendar lists. Safe to call repeatedly;
     /// fetches in parallel.
     func refresh(googleConnections: [ConnectionAccount]) async {
+        let generation = refreshGate.begin()
         guard !googleConnections.isEmpty else {
             sourcesByConnection = [:]
             scopeMissingConnectionIds = []
@@ -129,6 +144,10 @@ final class GoogleCalendarService {
             }
         }
 
+        // A newer refresh (especially refresh([]) on disconnect/sign-out)
+        // owns the state now. Never let an older account's delayed response
+        // repopulate memory or the persisted cache.
+        guard refreshGate.isCurrent(generation) else { return }
         sourcesByConnection = newSources
         scopeMissingConnectionIds = newScopeMissing
         lastRefreshAt = Date()

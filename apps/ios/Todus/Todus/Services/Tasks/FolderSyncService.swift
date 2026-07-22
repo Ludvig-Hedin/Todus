@@ -59,16 +59,28 @@ final class FolderSyncService {
     /// can't drop it either (upsert/delete replays are idempotent server-side).
     private var inFlightBatch: [Mutation] = []
     private var isProcessing = false
+    /// Invalidates an awaited batch when sign-out clears the journal. Without
+    /// this, a failed request can resume after `clearQueue()` and persist the
+    /// previous account's mutations for replay under the next session.
+    private var queueGeneration: UInt64 = 0
     private let apiClient: TodosAPIClient
+    private let defaults: UserDefaults
+    private let queueKey: String
 
     private static let queueKey = "TaskApp.folderMutationQueue"
 
     // MARK: - Init
 
-    init(apiClient: TodosAPIClient) {
+    init(
+        apiClient: TodosAPIClient,
+        defaults: UserDefaults = .standard,
+        queueKey: String = FolderSyncService.queueKey
+    ) {
         self.apiClient = apiClient
+        self.defaults = defaults
+        self.queueKey = queueKey
         // Restore mutations from a previous run (offline edit → kill before reconnect).
-        if let data = UserDefaults.standard.data(forKey: Self.queueKey),
+        if let data = defaults.data(forKey: queueKey),
            let restored = try? JSONDecoder().decode([Mutation].self, from: data) {
             queue = restored
         }
@@ -90,8 +102,13 @@ final class FolderSyncService {
     /// Discards any queued mutations that have not yet been sent.
     /// Call on sign-out to prevent a reconnect from replaying the previous user's edits.
     func clearQueue() {
+        queueGeneration &+= 1
         inFlightBatch = []
+        inFlightIDs.removeAll()
         queue.removeAll()
+        // `removeAll()` normally triggers the observer, but persist explicitly:
+        // sign-out is a security boundary and must remove the durable journal.
+        persistQueue()
     }
 
     /// Whether a not-yet-acknowledged mutation (queued or in flight) exists for
@@ -110,6 +127,7 @@ final class FolderSyncService {
 
         while !queue.isEmpty {
             let batch = queue
+            let batchGeneration = queueGeneration
             // Keep the drained batch in the persisted copy until its outcome is
             // known — set before removeAll so the didSet persist never drops it.
             inFlightBatch = batch
@@ -146,6 +164,11 @@ final class FolderSyncService {
                     "folders.sync",
                     input: FolderSyncRequest(mutations: payloads)
                 )
+                // A sign-out may have cleared this batch while the request was
+                // awaiting the network. Never let its result mutate the next
+                // account's queue. Continue so mutations enqueued after the clear
+                // are still processed by this worker.
+                guard batchGeneration == queueGeneration else { continue }
                 // Server may indicate partial success; requeue any mutations whose ids
                 // were not acknowledged so retryPending() can replay them.
                 let synced = Set(response.syncedIds)
@@ -164,6 +187,7 @@ final class FolderSyncService {
                 inFlightBatch = []
                 persistQueue()
             } catch {
+                guard batchGeneration == queueGeneration else { continue }
                 inFlightBatch = []
                 // Network / server error — requeue the batch so retryPending() can replay it.
                 queue.insert(contentsOf: batch, at: 0)
@@ -180,9 +204,9 @@ final class FolderSyncService {
     private func persistQueue() {
         let pending = inFlightBatch + queue
         if pending.isEmpty {
-            UserDefaults.standard.removeObject(forKey: Self.queueKey)
+            defaults.removeObject(forKey: queueKey)
         } else if let data = try? JSONEncoder().encode(pending) {
-            UserDefaults.standard.set(data, forKey: Self.queueKey)
+            defaults.set(data, forKey: queueKey)
         }
     }
 }

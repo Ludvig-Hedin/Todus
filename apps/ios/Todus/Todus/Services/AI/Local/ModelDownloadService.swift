@@ -6,6 +6,30 @@ import MLXLLM
 import MLXLMCommon
 #endif
 
+struct ModelDownloadAttemptRegistry {
+    private var attemptByModelID: [String: UUID] = [:]
+
+    mutating func begin(modelID: String, attemptID: UUID = UUID()) -> UUID {
+        attemptByModelID[modelID] = attemptID
+        return attemptID
+    }
+
+    func owns(modelID: String, attemptID: UUID) -> Bool {
+        attemptByModelID[modelID] == attemptID
+    }
+
+    @discardableResult
+    mutating func finish(modelID: String, attemptID: UUID) -> Bool {
+        guard owns(modelID: modelID, attemptID: attemptID) else { return false }
+        attemptByModelID.removeValue(forKey: modelID)
+        return true
+    }
+
+    mutating func cancel(modelID: String) {
+        attemptByModelID.removeValue(forKey: modelID)
+    }
+}
+
 // MARK: - ModelDownloadService
 //
 // User-facing download orchestration for MLX models. The actual transfer is
@@ -36,6 +60,7 @@ final class ModelDownloadService {
     /// (failures route through `LocalModelStateStore.apply(.failed)`), so the
     /// task type is `Task<Void, Never>` rather than `Task<Void, Error>`.
     private var inFlight: [String: Task<Void, Never>] = [:]
+    private var attempts = ModelDownloadAttemptRegistry()
     private let log = Logger(subsystem: "com.todus.ios", category: "ModelDownloadService")
 
     init(stateStore: LocalModelStateStore, inferenceService: MLXInferenceService) {
@@ -61,14 +86,17 @@ final class ModelDownloadService {
             to: model.id
         )
 
+        let attemptID = attempts.begin(modelID: model.id)
         let task = Task { [weak self] in
             guard let self else { return }
-            defer { Task { @MainActor in self.inFlight[model.id] = nil } }
+            defer { self.finishAttempt(modelID: model.id, attemptID: attemptID) }
             do {
-                try await self.runDownload(model)
+                try await self.runDownload(model, attemptID: attemptID)
             } catch is CancellationError {
+                guard self.attempts.owns(modelID: model.id, attemptID: attemptID) else { return }
                 store.apply(.notInstalled, to: model.id)
             } catch {
+                guard self.attempts.owns(modelID: model.id, attemptID: attemptID) else { return }
                 self.log.error("[Download] \(model.id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
                 store.apply(.failed(message: error.localizedDescription), to: model.id)
             }
@@ -79,8 +107,8 @@ final class ModelDownloadService {
     /// Cancel an in-flight download. State store transitions back to
     /// `.notInstalled` so the row's Download button reappears.
     func cancelDownload(_ modelId: String) {
-        inFlight[modelId]?.cancel()
-        inFlight.removeValue(forKey: modelId)
+        attempts.cancel(modelID: modelId)
+        inFlight.removeValue(forKey: modelId)?.cancel()
         stateStore?.apply(.notInstalled, to: modelId)
     }
 
@@ -97,9 +125,11 @@ final class ModelDownloadService {
             let cacheRoot = MLXInferenceService.huggingFaceCachePath()
                 .appendingPathComponent(repo, isDirectory: true)
             do {
-                if FileManager.default.fileExists(atPath: cacheRoot.path) {
-                    try FileManager.default.removeItem(at: cacheRoot)
-                }
+                try await Task.detached(priority: .userInitiated) {
+                    if FileManager.default.fileExists(atPath: cacheRoot.path) {
+                        try FileManager.default.removeItem(at: cacheRoot)
+                    }
+                }.value
                 self.inferenceService?.evict(model.id)
                 store.apply(.notInstalled, to: model.id)
             } catch {
@@ -111,7 +141,7 @@ final class ModelDownloadService {
 
     // MARK: - Private
 
-    private func runDownload(_ model: LocalModel) async throws {
+    private func runDownload(_ model: LocalModel, attemptID: UUID) async throws {
         guard let repo = model.mlxRepo else { return }
         guard let store = stateStore else { return }
 
@@ -130,7 +160,8 @@ final class ModelDownloadService {
             Task { @MainActor in
                 // If the user cancelled in the meantime, drop the update so
                 // we don't fight the cancel transition.
-                guard let current = self.stateStore?.state(for: model),
+                guard self.attempts.owns(modelID: model.id, attemptID: attemptID),
+                      let current = self.stateStore?.state(for: model),
                       case .downloading = current else { return }
                 self.stateStore?.apply(
                     .downloading(progress: fraction, bytesDownloaded: estimatedDownloaded, bytesTotal: totalBytes),
@@ -139,16 +170,33 @@ final class ModelDownloadService {
             }
         }
 
+        try Task.checkCancellation()
+        guard attempts.owns(modelID: model.id, attemptID: attemptID) else {
+            throw CancellationError()
+        }
+
         // Cache size is the source of truth for "what's actually on disk".
-        let onDisk = Self.directorySize(at: MLXInferenceService.huggingFaceCachePath()
-            .appendingPathComponent(repo, isDirectory: true))
+        let cacheURL = MLXInferenceService.huggingFaceCachePath()
+            .appendingPathComponent(repo, isDirectory: true)
+        let onDisk = await Task.detached(priority: .utility) {
+            Self.directorySize(at: cacheURL)
+        }.value
+        try Task.checkCancellation()
+        guard attempts.owns(modelID: model.id, attemptID: attemptID) else {
+            throw CancellationError()
+        }
         store.apply(.installed(diskBytes: onDisk > 0 ? onDisk : totalBytes), to: model.id)
         #else
         store.apply(.failed(message: "MLX is not available in this build."), to: model.id)
         #endif
     }
 
-    static func directorySize(at url: URL) -> Int64 {
+    private func finishAttempt(modelID: String, attemptID: UUID) {
+        guard attempts.finish(modelID: modelID, attemptID: attemptID) else { return }
+        inFlight.removeValue(forKey: modelID)
+    }
+
+    nonisolated static func directorySize(at url: URL) -> Int64 {
         guard FileManager.default.fileExists(atPath: url.path) else { return 0 }
         guard let enumerator = FileManager.default.enumerator(
             at: url,

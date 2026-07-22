@@ -136,6 +136,27 @@ final class EmailServiceTests: XCTestCase {
             "silent=false must populate errorMessage for user-initiated mark-as-read.")
     }
 
+    // MARK: - Send acknowledgement
+
+    func testSendEmailReturnsFalseWhenServerDeclinesSuccessfulHTTPResponse() async {
+        let svc = makeStubbedService { request in
+            let body = Data(
+                #"{"result":{"data":{"json":{"success":false,"error":"Failed to enqueue email send"}}}}"#.utf8
+            )
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, body)
+        }
+        defer { EmailServiceURLProtocolStub.unregister() }
+
+        let sent = await svc.sendEmail(EmailDraft(to: ["recipient@example.com"]))
+
+        XCTAssertFalse(sent)
+        XCTAssertEqual(svc.errorMessage, "Failed to send: Failed to enqueue email send")
+    }
+
     // MARK: - restoreThreadSnapshots (rollback contract)
 
     func testThreadSnapshotsCanRoundTripThroughEquatable() {

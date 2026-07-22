@@ -1,6 +1,22 @@
 import XCTest
 @testable import Todus
 
+final class ModelDownloadAttemptRegistryTests: XCTestCase {
+    func testFinishingCancelledAttemptCannotClearReplacement() {
+        var registry = ModelDownloadAttemptRegistry()
+        let first = UUID()
+        let replacement = UUID()
+
+        _ = registry.begin(modelID: "model", attemptID: first)
+        registry.cancel(modelID: "model")
+        _ = registry.begin(modelID: "model", attemptID: replacement)
+
+        XCTAssertFalse(registry.finish(modelID: "model", attemptID: first))
+        XCTAssertTrue(registry.owns(modelID: "model", attemptID: replacement))
+        XCTAssertTrue(registry.finish(modelID: "model", attemptID: replacement))
+    }
+}
+
 /// Focused on the SSE framing helper that runs inside `runStep`. The
 /// production path consumes bytes via `URLSession.bytes.lines`, which only
 /// splits on `\n` and leaves trailing `\r` characters attached — the H14 fix
@@ -193,5 +209,63 @@ final class AIChatServiceTests: XCTestCase {
             ),
             .drop
         )
+    }
+
+    // MARK: - Conversation autosave identity
+
+    func testAutosaveSnapshotUpdatesReopenedConversationWithoutChangingIdentity() {
+        let conversationID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let generatedID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let createdAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let updatedAt = Date(timeIntervalSince1970: 1_700_001_000)
+        let original = AIChatConversation(
+            id: conversationID,
+            title: "Original",
+            createdAt: createdAt,
+            messages: [.init(role: "user", content: "First turn")]
+        )
+        let updatedMessages = [
+            AIChatConversation.SavedMessage(role: "user", content: "First turn"),
+            AIChatConversation.SavedMessage(role: "assistant", content: "First reply"),
+            AIChatConversation.SavedMessage(role: "user", content: "Follow-up"),
+        ]
+
+        let result = AIChatService.conversationSaveSnapshot(
+            currentConversationID: conversationID,
+            currentConversationCreatedAt: createdAt,
+            title: "Original",
+            folderID: nil,
+            messages: updatedMessages,
+            savedConversations: [original],
+            now: updatedAt,
+            generatedID: generatedID
+        )
+
+        XCTAssertEqual(result.conversation.id, conversationID)
+        XCTAssertEqual(result.conversation.createdAt, createdAt)
+        XCTAssertEqual(result.conversation.updatedAt, updatedAt)
+        XCTAssertEqual(result.savedConversations.count, 1)
+        XCTAssertEqual(result.savedConversations[0].id, conversationID)
+        XCTAssertEqual(result.savedConversations[0].messages.count, 3)
+    }
+
+    func testAutosaveSnapshotCreatesNewConversationWhenNoConversationIsOpen() {
+        let generatedID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let now = Date(timeIntervalSince1970: 1_700_002_000)
+
+        let result = AIChatService.conversationSaveSnapshot(
+            currentConversationID: nil,
+            currentConversationCreatedAt: nil,
+            title: "New chat",
+            folderID: nil,
+            messages: [.init(role: "user", content: "Hello")],
+            savedConversations: [],
+            now: now,
+            generatedID: generatedID
+        )
+
+        XCTAssertEqual(result.conversation.id, generatedID)
+        XCTAssertEqual(result.conversation.createdAt, now)
+        XCTAssertEqual(result.savedConversations.map(\.id), [generatedID])
     }
 }

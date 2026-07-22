@@ -154,6 +154,7 @@ struct TasksTabView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task {
             await services.captureService.syncSharedFolders(in: modelContext)
+            await services.syncService.reconcileRemoteTasks(in: modelContext)
             await services.captureService.fetchFolderSummary(in: modelContext)
         }
         // Deep navigation from AI chat cards — open task detail sheet
@@ -244,6 +245,7 @@ struct TasksTabView: View {
     /// automatically once new records arrive.
     private func reload() async {
         await services.captureService.syncSharedFolders(in: modelContext)
+        await services.syncService.reconcileRemoteTasks(in: modelContext)
         await services.captureService.fetchFolderSummary(in: modelContext)
         await services.remindersSyncService.refreshFromReminders(in: modelContext)
     }

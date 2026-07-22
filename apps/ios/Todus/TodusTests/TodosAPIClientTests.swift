@@ -8,6 +8,15 @@ import XCTest
 @MainActor
 final class TodosAPIClientTests: XCTestCase {
 
+    func testGoogleCalendarRefreshGateRejectsStaleCompletion() {
+        var gate = GoogleCalendarRefreshGate()
+        let oldRefresh = gate.begin()
+        let clearingRefresh = gate.begin()
+
+        XCTAssertFalse(gate.isCurrent(oldRefresh))
+        XCTAssertTrue(gate.isCurrent(clearingRefresh))
+    }
+
     // MARK: - superjson envelope
 
     func testSuperjsonWrapAddsDateMetaWhenPayloadContainsDate() throws {

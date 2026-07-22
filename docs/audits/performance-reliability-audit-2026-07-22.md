@@ -128,12 +128,15 @@ The native overflow now contains real Docs, Meetings, and Settings destinations 
 hidden tab content that could select successfully but render blank. Speech completion callbacks
 are lock-protected and return to the main actor without Swift 6 Sendable warnings.
 
-Task capture now uses an explicit semantic-rejection allowlist: only backend `422` validation
-can roll back a new capture, while auth, throttling, timeout, conflict, server, transport, and
-malformed-response failures preserve it for retry. Scheduled-email consumers also stop retrying
+Task capture now uses the authenticated Todus `tasks.sync` tRPC route instead of an unconfigured
+legacy Supabase client. Local captures are never deleted because a remote acknowledgement failed;
+auth, throttling, timeout, conflict, server, transport, and malformed-response failures preserve
+them for retry. Paginated inbound task upserts hydrate after folders without overwriting pending local
+edits, and durable task/folder journals plus in-flight pulls are invalidated across account changes.
+Scheduled-email consumers also stop retrying
 stale missing payloads after the retained send window, closing the cancelled-message retry loop.
 
-Verification: iOS `TodusTests` passed 110/110, focused server tests passed 9/9,
+Verification: iOS `TodusTests` passed 123/123, focused server tests passed 9/9,
 file-scoped server ESLint and formatting passed, the iOS Release simulator build succeeded,
 and all 10 seeded UI tests passed on a dedicated clean
 iPhone simulator. Real Gmail/Calendar account behavior still requires the existing physical-device

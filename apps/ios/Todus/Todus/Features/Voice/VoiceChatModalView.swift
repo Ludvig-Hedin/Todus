@@ -83,7 +83,11 @@ struct VoiceChatModalView: View {
             }
         }
         .onAppear {
-            let vm = VoiceChatViewModel(tokenService: tokenService, chatService: chatService)
+            let vm = VoiceChatViewModel(
+                tokenService: tokenService,
+                chatService: chatService,
+                micLock: services.voiceMicLock
+            )
             vm.allTasks = allTasks
             vm.modelContext = modelContext
             self.viewModel = vm

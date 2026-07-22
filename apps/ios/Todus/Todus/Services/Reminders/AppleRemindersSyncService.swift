@@ -308,18 +308,11 @@ final class AppleRemindersSyncService {
                     existingIdentifier: existingIdentifier
                 )
             } catch let error as EKError {
-                // EventKit save failed. If the reminder we were tracking has been deleted in
-                // the Reminders app (or otherwise rejected), clear the local pointer so the
-                // next upsert creates a fresh reminder rather than trying to update a ghost.
-                // EventKit doesn't expose a dedicated "not found" code, so on any EKError with
-                // a prior identifier we drop it and let the next pass re-create.
-                if existingIdentifier != nil {
-                    let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID })
-                    if let task = try? context.fetch(descriptor).first {
-                        task.reminderIdentifier = nil
-                        try? context.save()
-                    }
-                }
+                // `storage.save` already detects a genuinely missing existing
+                // reminder and recreates it. Any thrown EKError is therefore a
+                // failed save, not proof that the old reminder disappeared. Keep
+                // its identifier so a transient EventKit failure cannot make the
+                // next retry create a duplicate reminder.
                 AppLogger.shared.log("AppleRemindersSyncService.upsert failed: \(error.localizedDescription)")
                 self.inFlightUpserts.remove(taskID)
                 self.pendingUpsertTaskIDs.remove(taskID)
@@ -333,7 +326,22 @@ final class AppleRemindersSyncService {
 
             // Back on the main actor — safe to use the SwiftData ModelContext.
             let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID })
-            guard let task = try? context.fetch(descriptor).first else { return }
+            guard let task = try? context.fetch(descriptor).first else {
+                // The local task can be deleted while EventKit is saving. Clean up
+                // both sides: otherwise the just-created reminder is orphaned and
+                // this task ID remains stuck in the coalescing set forever.
+                self.inFlightUpserts.remove(taskID)
+                self.pendingUpsertTaskIDs.remove(taskID)
+                self.coalescedRetryCount[taskID] = nil
+                do {
+                    try await storage.delete(identifier: result.identifier)
+                } catch {
+                    AppLogger.shared.log(
+                        "AppleRemindersSyncService.upsert: failed to remove orphan reminder: \(error.localizedDescription)"
+                    )
+                }
+                return
+            }
             // If the previously-tracked reminder was missing, our save() created a fresh
             // one; either way we now point at a live identifier.
             let identifierChanged = task.reminderIdentifier != result.identifier
@@ -450,11 +458,21 @@ final class AppleRemindersSyncService {
     }
 
     func delete(_ task: TaskRecord) {
-        guard authorizationState() == .authorized else { return }
         guard let identifier = task.reminderIdentifier else { return }
+        delete(identifier: identifier)
+    }
+
+    func delete(identifier: String) {
+        guard authorizationState() == .authorized else { return }
 
         Task {
-            try? await storage.delete(identifier: identifier)
+            do {
+                try await storage.delete(identifier: identifier)
+            } catch {
+                AppLogger.shared.log(
+                    "AppleRemindersSyncService.delete failed: \(error.localizedDescription)"
+                )
+            }
         }
     }
 

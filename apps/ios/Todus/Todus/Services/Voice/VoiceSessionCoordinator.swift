@@ -197,9 +197,13 @@ final class VoiceSessionCoordinator {
             return
         }
         Task {
-            try? await provider.sendText(trimmed)
-            if !userTranscript.isEmpty { userTranscript += " " }
-            userTranscript += trimmed
+            do {
+                try await provider.sendText(trimmed)
+                if !userTranscript.isEmpty { userTranscript += " " }
+                userTranscript += trimmed
+            } catch {
+                failSession("Voice connection lost before your message was sent. Please reconnect and try again.")
+            }
         }
     }
 
@@ -211,7 +215,14 @@ final class VoiceSessionCoordinator {
             // onChunk is invoked off-main from a DispatchSource timer; fire
             // a fresh Task so the async provider call lives outside the timer.
             Task.detached {
-                try? await providerRef.sendAudioPCM(chunk)
+                do {
+                    try await providerRef.sendAudioPCM(chunk)
+                } catch {
+                    await MainActor.run { [weak self] in
+                        guard let self, self.status != .idle else { return }
+                        self.failSession("Voice connection lost while sending audio. Please reconnect.")
+                    }
+                }
             }
         }
     }
@@ -268,7 +279,12 @@ final class VoiceSessionCoordinator {
                 // transitioning back to .listening here resurrected a dead,
                 // mic-released session as "active".
                 guard !self.isStopping, self.status != .idle else { return }
-                try? await self.provider.sendToolResponse(id: id, name: name, result: result)
+                do {
+                    try await self.provider.sendToolResponse(id: id, name: name, result: result)
+                } catch {
+                    self.failSession("The voice assistant lost its connection while completing \(name). Please reconnect.")
+                    return
+                }
                 guard !self.isStopping, self.status != .idle else { return }
                 self.transition(to: .listening, reason: "tool '\(name)' done")
             }

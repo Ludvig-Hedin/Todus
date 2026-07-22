@@ -124,6 +124,16 @@ final class AuthServiceTests: XCTestCase {
         XCTAssertNil(svc.bearerToken)
     }
 
+    func testExplicitSignOutInvokesCleanupCallbackOnce() {
+        let svc = makeService(bearer: "preloaded.jwt.token")
+        var cleanupCount = 0
+        svc.onSignOut = { cleanupCount += 1 }
+
+        svc.signOut()
+
+        XCTAssertEqual(cleanupCount, 1)
+    }
+
     // MARK: - Bearer token preview helper
 
     func testBearerTokenPreviewSafeForLogging() {
@@ -202,11 +212,15 @@ final class AuthServiceTests: XCTestCase {
             currentSessionId: "sid-existing"
         )
         let svc = AuthService(backendURL: url, preloaded: preload, transport: stubSession)
+        var cleanupCount = 0
+        svc.onSignOut = { cleanupCount += 1 }
         XCTAssertTrue(svc.isAuthenticated, "Preloaded refresh token authenticates the service.")
 
         let refreshed = await svc.attemptSilentRefresh()
 
         XCTAssertFalse(refreshed, "401 from refresh endpoint must cause attemptSilentRefresh to return false.")
+        XCTAssertEqual(cleanupCount, 1,
+            "Automatic session-expiry sign-out must invoke host cleanup exactly once.")
         XCTAssertFalse(svc.isAuthenticated, "401 from refresh endpoint must trigger signOut() → guest state.")
         XCTAssertNil(svc.bearerToken, "signOut() must clear the bearer token.")
         XCTAssertNil(svc.refreshToken, "signOut() must clear the refresh token.")

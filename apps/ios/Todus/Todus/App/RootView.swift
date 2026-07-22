@@ -134,6 +134,11 @@ struct RootView: View {
             // user will actually see instead of a hardcoded 5.
             captureOnboardingSnapshotIfNeeded()
             guard !services.isUITestingMode else { return }
+            await services.folderSyncService.retryPending()
+            await services.syncService.retryUnsyncedTasks(in: modelContext)
+            await services.captureService.syncSharedFolders(in: modelContext)
+            await services.syncService.reconcileRemoteTasks(in: modelContext)
+            await services.aiChatService.reloadForAuthenticatedUser()
             await services.loadSharedAIProfile()
         }
         .task(id: services.authService.showsOnboarding) {

@@ -463,6 +463,24 @@ struct AIChatView: View {
             pageContextAttached = true
             loadEventMentions()
         }
+        .onChange(of: services.pendingAIConversationId, initial: true) { _, _ in
+            loadPendingNotificationConversationIfAvailable()
+        }
+        .onChange(of: chatService.savedConversations.map(\.id)) { _, _ in
+            // Cold-start notification routing can present this sheet before the
+            // authenticated history request completes. Retry when history lands.
+            loadPendingNotificationConversationIfAvailable()
+        }
+    }
+
+    private func loadPendingNotificationConversationIfAvailable() {
+        guard let pendingID = services.pendingAIConversationId,
+              let id = UUID(uuidString: pendingID),
+              let conversation = chatService.savedConversations.first(where: { $0.id == id }) else {
+            return
+        }
+        chatService.loadConversation(conversation)
+        services.pendingAIConversationId = nil
     }
 
     // MARK: - Mutation Confirmation Helpers

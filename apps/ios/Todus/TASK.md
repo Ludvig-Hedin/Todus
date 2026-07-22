@@ -10,7 +10,7 @@
   - Fixed local-model runtime detection/scan races, notification error visibility, EventKit concurrency warnings, and required-tab dragging
   - Replaced blank hidden overflow tabs with real native More destinations and stabilized Settings/Docs UI coverage
   - Made task-capture rollback explicit: only backend `422` validation can delete the local capture
-  - Verified 110 iOS unit tests and all 10 native UI tests on a dedicated clean simulator
+  - Verified 123 iOS unit tests and all 10 native UI tests on a dedicated clean simulator
 - [x] **IOS-083** — Apply iOS CodeRabbit review fixes across folders/tasks/AI/widgets/voice/api and remove tracked user-specific Xcode state
   - Fixed stale `restrictToInbox` refreshes in board/table views
   - Prevented duplicate folder item inserts in pickers + service layer
@@ -47,8 +47,10 @@
 #### iOS — Task Service (Migration)
 - [ ] **IOS-021** — Create `TaskService.swift` (task CRUD via TodosAPIClient)
   - Replaces SupabaseSyncService
-  - list, create, update, delete, sync methods
-- [ ] **IOS-022** — Rewire TaskCaptureService to use TaskService instead of Supabase
+  - [x] create, update, delete, sync use authenticated `tasks.sync`
+  - [x] hydrate paginated `tasks.list` upserts after folders without overwriting pending local edits
+  - [ ] add server deletion tombstones/cursor so cross-device deletes reconcile without unsafe absence-based deletion
+- [x] **IOS-022** — Rewire TaskCaptureService to use the unified tRPC task sync transport
 - [x] **IOS-023** — Rewire AIChatService to use new backend endpoint
 - [x] **IOS-024** — Add AI chat message retry + stable copy action row
 - [x] **IOS-025** — Preserve AI mention context across saved chats, prune stale turns on retry, and hide raw spec JSON for spec-only replies
