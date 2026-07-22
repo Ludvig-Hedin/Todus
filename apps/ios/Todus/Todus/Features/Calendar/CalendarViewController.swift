@@ -18,6 +18,13 @@ private struct SendableStoreBox: @unchecked Sendable {
     let store: EKEventStore
 }
 
+/// `EKEvent` predates Swift concurrency. The edited instance is committed on
+/// the main thread, then handed to this controller's serial EventKit queue for
+/// the synchronous save. No other code touches it during that hop.
+private struct SendableEventBox: @unchecked Sendable {
+    let event: EKEvent
+}
+
 final class CalendarViewController: DayViewController {
     // nil until initialized off the main thread in viewDidLoad.
     // EKEventStore() is a synchronous XPC call to the calendardd daemon that blocks
@@ -341,10 +348,10 @@ final class CalendarViewController: DayViewController {
                 // save (matching how EKEventStore() init and fetches are handled in
                 // this file) and reload on main once it completes.
                 let boxedStore = SendableStoreBox(store: store)
-                let ekEvent = editingEvent.ekEvent
+                let boxedEvent = SendableEventBox(event: editingEvent.ekEvent)
                 backgroundQueue.async { [weak self] in
                     do {
-                        try boxedStore.store.save(ekEvent, span: .thisEvent)
+                        try boxedStore.store.save(boxedEvent.event, span: .thisEvent)
                         DispatchQueue.main.async { self?.reloadData() }
                     } catch {
                         DispatchQueue.main.async {

@@ -2189,7 +2189,10 @@ struct GetThreadResponse: Decodable {
         } else {
             self.messages = []
         }
-        self.latest = try container.decodeIfPresent(EmailMessage.self, forKey: .latest)
+        // `latest` duplicates one element from `messages`. Treat it as an
+        // optional convenience field so one malformed preview cannot make an
+        // otherwise usable thread fail to load.
+        self.latest = (try? container.decodeIfPresent(EmailMessage.self, forKey: .latest)) ?? nil
         self.hasUnread = try container.decodeIfPresent(Bool.self, forKey: .hasUnread)
         self.totalReplies = try container.decodeIfPresent(Int.self, forKey: .totalReplies)
         self.labels = try container.decodeIfPresent([ThreadLabel].self, forKey: .labels)
@@ -2237,4 +2240,3 @@ private struct SuccessResponse: Decodable {
 
 /// Accepts any JSON response without requiring specific fields
 private struct EmailEmptyResponse: Decodable {}
-

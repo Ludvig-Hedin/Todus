@@ -14,11 +14,12 @@
  *     (optional `connectionId` targets a specific user-owned connection's calendar)
  */
 import { activeConnectionProcedure, multiConnectionProcedure, router } from '../trpc';
+import { collectAllPages } from './calendar-pagination';
+import { getZeroDB } from '../../lib/server-utils';
 import { OAuth2Client } from 'google-auth-library';
 import { TRPCError } from '@trpc/server';
 import { env } from '../../env';
 import { z } from 'zod';
-import { getZeroDB } from '../../lib/server-utils';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -66,7 +67,9 @@ async function resolveTargetConnection<T extends { id: string }>(
  */
 /** Returned when the user's Google token lacks the `calendar.readonly` scope. */
 export class CalendarScopeMissingError extends Error {
-  constructor() { super('Calendar scope missing'); }
+  constructor() {
+    super('Calendar scope missing');
+  }
 }
 
 async function calendarFetch<T>(
@@ -75,7 +78,8 @@ async function calendarFetch<T>(
   params: Record<string, string> = {},
 ): Promise<T> {
   const { token } = await auth.getAccessToken();
-  if (!token) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Could not refresh Google token' });
+  if (!token)
+    throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Could not refresh Google token' });
 
   const url = new URL(`https://www.googleapis.com/calendar/v3${path}`);
   for (const [k, v] of Object.entries(params)) {
@@ -87,15 +91,49 @@ async function calendarFetch<T>(
   });
 
   if (!res.ok) {
-    if (res.status === 401) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Google Calendar access denied' });
+    if (res.status === 401)
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Google Calendar access denied' });
     // 403 typically means the token doesn't have the calendar scope yet
     // (user authenticated before we added calendar.readonly). Signal this specially
     // so the caller can prompt a re-auth rather than surfacing a generic error.
     if (res.status === 403) throw new CalendarScopeMissingError();
-    throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Google Calendar API error: ${res.status}` });
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: `Google Calendar API error: ${res.status}`,
+    });
   }
 
   return res.json() as Promise<T>;
+}
+
+/**
+ * Fetch every Google list page with a defensive cap. Google Calendar list
+ * endpoints default to partial pages and return `nextPageToken`; ignoring it
+ * silently hid calendars and busy users' events from native clients.
+ */
+export async function calendarFetchAllPages<T>(
+  auth: OAuth2Client,
+  path: string,
+  params: Record<string, string>,
+  maxItems?: number,
+): Promise<T[]> {
+  const maxPages = 20;
+  return collectAllPages(
+    (pageToken) =>
+      calendarFetch<{ items?: T[]; nextPageToken?: string }>(
+        auth,
+        path,
+        pageToken ? { ...params, pageToken } : params,
+      ),
+    {
+      maxPages,
+      maxItems,
+      onRepeatedToken: () =>
+        console.error(`[calendar] Repeated page token for ${path}; returning collected results`),
+      onPageCap: () =>
+        console.warn(`[calendar] Pagination capped at ${maxPages} pages for ${path}`),
+    },
+  );
 }
 
 /**
@@ -112,7 +150,8 @@ export async function calendarFetchJSON<T>(
   },
 ): Promise<T | null> {
   const { token } = await auth.getAccessToken();
-  if (!token) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Could not refresh Google token' });
+  if (!token)
+    throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Could not refresh Google token' });
 
   const url = new URL(`https://www.googleapis.com/calendar/v3${path}`);
   for (const [k, v] of Object.entries(options.params ?? {})) {
@@ -129,9 +168,11 @@ export async function calendarFetchJSON<T>(
   });
 
   if (!res.ok) {
-    if (res.status === 401) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Google Calendar access denied' });
+    if (res.status === 401)
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Google Calendar access denied' });
     if (res.status === 403) throw new CalendarScopeMissingError();
-    if (res.status === 404) throw new TRPCError({ code: 'NOT_FOUND', message: 'Calendar event not found' });
+    if (res.status === 404)
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Calendar event not found' });
     const errorBody = await res.text().catch(() => '');
     throw new TRPCError({
       code: 'INTERNAL_SERVER_ERROR',
@@ -160,13 +201,6 @@ interface GCalEvent {
   attendees?: { email: string; displayName?: string; responseStatus?: string }[];
 }
 
-interface GCalEventsResponse {
-  items: GCalEvent[];
-  nextPageToken?: string;
-  summary?: string;
-  timeZone?: string;
-}
-
 interface GCalCalendar {
   id: string;
   summary: string;
@@ -177,15 +211,19 @@ interface GCalCalendar {
   accessRole: string;
 }
 
-interface GCalCalendarListResponse {
-  items: GCalCalendar[];
-}
-
 // Google's colorId → hex mapping (background colors)
 const GOOGLE_CALENDAR_COLORS: Record<string, string> = {
-  '1': '#a4bdfc', '2': '#7ae7bf', '3': '#dbadff', '4': '#ff887c',
-  '5': '#fbd75b', '6': '#ffb878', '7': '#46d6db', '8': '#e1e1e1',
-  '9': '#5484ed', '10': '#51b749', '11': '#dc2127',
+  '1': '#a4bdfc',
+  '2': '#7ae7bf',
+  '3': '#dbadff',
+  '4': '#ff887c',
+  '5': '#fbd75b',
+  '6': '#ffb878',
+  '7': '#46d6db',
+  '8': '#e1e1e1',
+  '9': '#5484ed',
+  '10': '#51b749',
+  '11': '#dc2127',
 };
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -224,18 +262,19 @@ export const calendarRouter = router({
 
       const auth = buildAuthClient(activeConnection.refreshToken);
 
-      let data: GCalEventsResponse;
+      let eventItems: GCalEvent[];
       try {
-        data = await calendarFetch<GCalEventsResponse>(
+        eventItems = await calendarFetchAllPages<GCalEvent>(
           auth,
           `/calendars/${encodeURIComponent(input.calendarId)}/events`,
           {
             timeMin: input.timeMin,
             timeMax: input.timeMax,
             maxResults: String(input.maxResults),
-            singleEvents: 'true',      // expand recurring events into instances
+            singleEvents: 'true', // expand recurring events into instances
             orderBy: 'startTime',
           },
+          input.maxResults,
         );
       } catch (err) {
         // Token lacks calendar.readonly — tell the frontend to prompt a re-auth
@@ -243,7 +282,7 @@ export const calendarRouter = router({
         throw err;
       }
 
-      const events = (data.items ?? [])
+      const events = eventItems
         .filter((e) => e.status !== 'cancelled')
         .flatMap((e) => {
           const startTime = e.start.dateTime ?? e.start.date;
@@ -256,20 +295,22 @@ export const calendarRouter = router({
             return [];
           }
 
-          return [{
-            id: e.id,
-            title: e.summary ?? '(No title)',
-            description: e.description ?? null,
-            location: e.location ?? null,
-            // All-day events use `date` (no time); timed events use `dateTime`
-            startTime,
-            endTime,
-            allDay: !e.start.dateTime,
-            color: e.colorId ? (GOOGLE_CALENDAR_COLORS[e.colorId] ?? '#5484ed') : '#5484ed',
-            htmlLink: e.htmlLink ?? null,
-            organizer: e.organizer?.displayName ?? e.organizer?.email ?? null,
-            isOrganizer: e.organizer?.self ?? false,
-          }];
+          return [
+            {
+              id: e.id,
+              title: e.summary ?? '(No title)',
+              description: e.description ?? null,
+              location: e.location ?? null,
+              // All-day events use `date` (no time); timed events use `dateTime`
+              startTime,
+              endTime,
+              allDay: !e.start.dateTime,
+              color: e.colorId ? (GOOGLE_CALENDAR_COLORS[e.colorId] ?? '#5484ed') : '#5484ed',
+              htmlLink: e.htmlLink ?? null,
+              organizer: e.organizer?.displayName ?? e.organizer?.email ?? null,
+              isOrganizer: e.organizer?.self ?? false,
+            },
+          ];
         });
 
       return { events, scopeMissing: false };
@@ -313,30 +354,29 @@ export const calendarRouter = router({
 
       const auth = buildAuthClient(targetConnection.refreshToken);
 
-    let data: GCalCalendarListResponse;
-    try {
-      data = await calendarFetch<GCalCalendarListResponse>(
-        auth,
-        '/users/me/calendarList',
-        { minAccessRole: 'reader', maxResults: '50' },
-      );
-    } catch (err) {
-      if (err instanceof CalendarScopeMissingError) return { calendars: [], scopeMissing: true };
-      throw err;
-    }
+      let calendarItems: GCalCalendar[];
+      try {
+        calendarItems = await calendarFetchAllPages<GCalCalendar>(auth, '/users/me/calendarList', {
+          minAccessRole: 'reader',
+          maxResults: '250',
+        });
+      } catch (err) {
+        if (err instanceof CalendarScopeMissingError) return { calendars: [], scopeMissing: true };
+        throw err;
+      }
 
-    const calendars = (data.items ?? []).map((c) => ({
-      id: c.id,
-      name: c.summary,
-      color: c.backgroundColor ?? '#5484ed',
-      primary: c.primary ?? false,
-      // Echo the access role so clients know which calendars are writable
-      // (owner/writer) vs read-only (reader/freeBusyReader) instead of guessing.
-      accessRole: c.accessRole ?? 'reader',
-    }));
+      const calendars = calendarItems.map((c) => ({
+        id: c.id,
+        name: c.summary,
+        color: c.backgroundColor ?? '#5484ed',
+        primary: c.primary ?? false,
+        // Echo the access role so clients know which calendars are writable
+        // (owner/writer) vs read-only (reader/freeBusyReader) instead of guessing.
+        accessRole: c.accessRole ?? 'reader',
+      }));
 
-    return { calendars, scopeMissing: false };
-  }),
+      return { calendars, scopeMissing: false };
+    }),
 
   /**
    * List calendars across ALL of the user's Google connections, grouped and
@@ -386,16 +426,16 @@ export const calendarRouter = router({
         googleConnections.map(async (conn): Promise<CalendarGroup> => {
           const auth = buildAuthClient(conn.refreshToken!);
           try {
-            const data = await calendarFetch<GCalCalendarListResponse>(
+            const calendarItems = await calendarFetchAllPages<GCalCalendar>(
               auth,
               '/users/me/calendarList',
-              { minAccessRole: 'reader', maxResults: '50' },
+              { minAccessRole: 'reader', maxResults: '250' },
             );
             return {
               connectionId: conn.id,
               connectionEmail: conn.email,
               connectionColor: conn.color,
-              calendars: (data.items ?? []).map((c) => ({
+              calendars: calendarItems.map((c) => ({
                 id: c.id,
                 name: c.summary,
                 color: c.backgroundColor ?? '#5484ed',
@@ -416,10 +456,7 @@ export const calendarRouter = router({
                 error: null,
               };
             }
-            console.error(
-              `[calendar.calendarsMulti] connection=${conn.id} failed:`,
-              err,
-            );
+            console.error(`[calendar.calendarsMulti] connection=${conn.id} failed:`, err);
             return {
               connectionId: conn.id,
               connectionEmail: conn.email,
@@ -532,7 +569,7 @@ export const calendarRouter = router({
           // connection — record the error and continue.
           for (const calendarId of calendarsToFetch) {
             try {
-              const data = await calendarFetch<GCalEventsResponse>(
+              const eventItems = await calendarFetchAllPages<GCalEvent>(
                 auth,
                 `/calendars/${encodeURIComponent(calendarId)}/events`,
                 {
@@ -542,9 +579,10 @@ export const calendarRouter = router({
                   singleEvents: 'true',
                   orderBy: 'startTime',
                 },
+                input.maxResults,
               );
 
-              for (const e of data.items ?? []) {
+              for (const e of eventItems) {
                 if (e.status === 'cancelled') continue;
                 const startTime = e.start.dateTime ?? e.start.date;
                 const endTime = e.end.dateTime ?? e.end.date;
@@ -591,10 +629,20 @@ export const calendarRouter = router({
 
       // Merge results
       const allEvents: Array<{
-        id: string; title: string; description: string | null; location: string | null;
-        startTime: string; endTime: string; allDay: boolean; color: string;
-        htmlLink: string | null; organizer: string | null; isOrganizer: boolean;
-        connectionId: string; connectionEmail: string; connectionColor: string | null;
+        id: string;
+        title: string;
+        description: string | null;
+        location: string | null;
+        startTime: string;
+        endTime: string;
+        allDay: boolean;
+        color: string;
+        htmlLink: string | null;
+        organizer: string | null;
+        isOrganizer: boolean;
+        connectionId: string;
+        connectionEmail: string;
+        connectionColor: string | null;
         calendarId: string;
       }> = [];
       const errors: Array<{ connectionId: string; connectionEmail: string; error: string }> = [];
@@ -602,7 +650,8 @@ export const calendarRouter = router({
 
       for (const result of results) {
         if (result.status === 'fulfilled') {
-          const { connectionId, connectionEmail, connectionColor, events, scopeMissing } = result.value;
+          const { connectionId, connectionEmail, connectionColor, events, scopeMissing } =
+            result.value;
           if (scopeMissing) anyScopeMissing = true;
           for (const event of events) {
             allEvents.push({ ...event, connectionId, connectionEmail, connectionColor });
@@ -687,7 +736,8 @@ export const calendarRouter = router({
 
       const auth = buildAuthClient(targetConnection.refreshToken);
       // Strip routing-only fields from the Google event body.
-      const { calendarId, connectionId: _connectionId, ...body } = input;
+      const { calendarId, ...body } = input;
+      delete body.connectionId;
 
       try {
         const created = await calendarFetchJSON<GCalEvent>(

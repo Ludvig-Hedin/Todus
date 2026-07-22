@@ -2695,7 +2695,7 @@ private struct MessageBubble: View {
                 isSpeaking = false
             } else {
                 // Reset the pill when speech ends on its own (no manual stop).
-                speechDelegate.onDone = { isSpeaking = false }
+                speechDelegate.setOnDone { isSpeaking = false }
                 speechSynthesizer.delegate = speechDelegate
                 let utterance = AVSpeechUtterance(string: copyableText)
                 utterance.rate = AVSpeechUtteranceDefaultSpeechRate
@@ -3795,14 +3795,30 @@ private struct SeededRNG {
 /// Bridges `AVSpeechSynthesizer` completion back to SwiftUI state so a message
 /// row's "Speak"/"Stop" pill resets when narration finishes on its own — not
 /// only on a manual stop. The owning view assigns `onDone` to clear `isSpeaking`.
-final class SpeechCompletionDelegate: NSObject, AVSpeechSynthesizerDelegate {
-    var onDone: (() -> Void)?
+final class SpeechCompletionDelegate: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
+    typealias Completion = @MainActor @Sendable () -> Void
+
+    private let lock = NSLock()
+    private var completion: Completion?
+
+    func setOnDone(_ completion: @escaping Completion) {
+        lock.lock()
+        self.completion = completion
+        lock.unlock()
+    }
+
+    private func notifyDone() {
+        lock.lock()
+        let completion = completion
+        lock.unlock()
+        Task { @MainActor in completion?() }
+    }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        onDone?()
+        notifyDone()
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        onDone?()
+        notifyDone()
     }
 }

@@ -261,6 +261,20 @@ final class EmailServiceTests: XCTestCase {
             "An unparseable date must sort to the bottom (distantPast), not silently become 'now'.")
     }
 
+    func testMalformedLatestDoesNotBlankValidThreadMessages() throws {
+        let json = Data(#"""
+        {
+          "messages":[{"id":"m1","sender":{"name":"A","email":"a@x.com"},"receivedOn":"2025-03-24T10:30:00Z"}],
+          "latest":{"sender":{"name":"broken","email":"broken@x.com"}}
+        }
+        """#.utf8)
+
+        let thread = try JSONDecoder().decode(GetThreadResponse.self, from: json)
+
+        XCTAssertEqual(thread.messages.map(\.id), ["m1"])
+        XCTAssertNil(thread.latest, "A malformed optional preview must not reject the valid message list.")
+    }
+
     // MARK: - Recipient tokenization (EmailComposeView multi-recipient fix)
     //
     // Pins the contract behind the raw-@State recipient fields: typing or pasting

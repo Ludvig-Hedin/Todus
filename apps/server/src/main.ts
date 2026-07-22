@@ -23,6 +23,7 @@ import {
 } from './lib/attachments';
 import { SyncThreadsCoordinatorWorkflow } from './workflows/sync-threads-coordinator-workflow';
 import { EProviders, type IEmailSendBatch, type IOutgoingMessage } from './types';
+import { shouldRetryMissingScheduledEmailPayload } from './lib/scheduled-email';
 import { WorkerEntrypoint, DurableObject, RpcTarget } from 'cloudflare:workers';
 // import { instrument, type ResolveConfigFn } from '@microlabs/otel-cf-workers';
 import { getZeroAgent, getZeroDB, verifyToken } from './lib/server-utils';
@@ -1968,7 +1969,7 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
         const messages = batch.messages as Array<QueueMessage<IEmailSendBatch>>;
         await Promise.all(
           messages.map(async (msg) => {
-            const { messageId, connectionId, mail } = msg.body;
+            const { messageId, connectionId, mail, sendAt } = msg.body;
             const { pending_emails_status: statusKV, pending_emails_payload: payloadKV } = this
               .env as { pending_emails_status: KVNamespace; pending_emails_payload: KVNamespace };
 
@@ -1983,12 +1984,20 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
               if (!payload) {
                 const stored = await payloadKV.get(messageId);
                 if (!stored) {
-                  console.error(`No payload found for scheduled email ${messageId}`);
-                  if (typeof msg.retry === 'function') {
-                    msg.retry();
-                    return;
+                  if (shouldRetryMissingScheduledEmailPayload(sendAt, Date.now())) {
+                    console.warn(`Payload not yet available for scheduled email ${messageId}`);
+                    if (typeof msg.retry === 'function') {
+                      msg.retry();
+                      return;
+                    }
+                    throw new Error(`No payload found for scheduled email ${messageId}`);
                   }
-                  throw new Error(`No payload found for scheduled email ${messageId}`);
+                  // A cancellation deletes the payload. Its marker is retained through
+                  // send time plus the retry window; after that both keys are absent.
+                  // Treat the stale queue delivery as terminal instead of exhausting
+                  // retries for an email the user intentionally cancelled.
+                  console.log(`No retained payload for scheduled email ${messageId}; skipping.`);
+                  return;
                 }
                 payload = JSON.parse(stored) as NonNullable<IEmailSendBatch['mail']>;
               }

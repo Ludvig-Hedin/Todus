@@ -64,6 +64,11 @@ final class LocalModelStateStore {
     /// "Installed" section behind this so it doesn't flash empty on launch.
     private(set) var hasScanned: Bool = false
 
+    /// Deletions that occur while the detached launch scan is walking disk.
+    /// Without this tombstone, the scan's stale snapshot can reinsert a model
+    /// as installed immediately after the user deletes it.
+    private var deletedDuringInitialScan: Set<String> = []
+
     private let log = Logger(subsystem: "com.todus.ios", category: "LocalModelStateStore")
 
     /// Root directory for downloaded model weights. `mlx-swift-examples` writes
@@ -139,7 +144,9 @@ final class LocalModelStateStore {
     func apply(_ state: LocalModelInstallState, to modelId: String) {
         if case .notInstalled = state {
             stateById.removeValue(forKey: modelId)
+            if !hasScanned { deletedDuringInitialScan.insert(modelId) }
         } else {
+            deletedDuringInitialScan.remove(modelId)
             stateById[modelId] = state
         }
     }
@@ -172,6 +179,7 @@ final class LocalModelStateStore {
         // outside the store (or a download from a prior session that happens
         // to be on disk) keeps showing the old error.
         for (id, scannedState) in seeded {
+            guard !deletedDuringInitialScan.contains(id) else { continue }
             switch self.stateById[id] {
             case .none, .notInstalled, .failed:
                 self.stateById[id] = scannedState
@@ -179,6 +187,7 @@ final class LocalModelStateStore {
                 continue
             }
         }
+        deletedDuringInitialScan.removeAll()
         log.info("[LocalModels] Initial scan found \(seeded.count, privacy: .public) installed model(s)")
     }
 

@@ -9,6 +9,37 @@ final class ParitySmokeTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    private func openSettings(in app: XCUIApplication) throws {
+        let directButton = app.buttons["Settings"]
+        let directLabel = app.staticTexts["Settings"]
+        let direct = directButton.waitForExistence(timeout: 1) ? directButton : directLabel
+        if direct.waitForExistence(timeout: 1) {
+            direct.tap()
+            return
+        }
+
+        let tabBarMore = app.tabBars.buttons["More"].firstMatch
+        let more = tabBarMore.waitForExistence(timeout: 3)
+            ? tabBarMore
+            : app.buttons["More"].firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 2), "More tab should expose secondary pages")
+        more.tap()
+
+        let settingsButton = app.buttons["Settings"]
+        let settingsLabel = app.staticTexts["Settings"]
+        let settings = settingsButton.waitForExistence(timeout: 2) ? settingsButton : settingsLabel
+        XCTAssertTrue(settings.waitForExistence(timeout: 5), "Settings should be reachable from More")
+        settings.tap()
+    }
+
+    private func scrollToElement(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
+        for _ in 0..<8 {
+            if element.exists { return true }
+            app.swipeUp()
+        }
+        return element.waitForExistence(timeout: 2)
+    }
+
     // MARK: - Fresh install lands on the branded startup card
 
     func testStartupCardShowsForFreshInstall() throws {
@@ -38,19 +69,11 @@ final class ParitySmokeTests: XCTestCase {
         // through the More sheet equivalent: the legacy entry surfaces a
         // "Settings" button on the AppTopHeader. If it's not present in this
         // shell build, the test xfails gracefully.
-        let settingsButton = app.buttons["Settings"]
-        guard settingsButton.waitForExistence(timeout: 5) else {
-            throw XCTSkip("Settings entry point not exposed on the current shell build")
-        }
-        settingsButton.tap()
+        try openSettings(in: app)
 
-        // Navigate AI Assistant → Voice Assistant.
-        let aiAssistant = app.buttons["AI Assistant"]
-        XCTAssertTrue(aiAssistant.waitForExistence(timeout: 5))
-        aiAssistant.tap()
-
-        let voice = app.buttons["Voice Assistant"]
-        XCTAssertTrue(voice.waitForExistence(timeout: 5))
+        // Voice Assistant is a top-level Settings row alongside AI Assistant.
+        let voice = app.buttons["settings.ai.voiceAssistant"]
+        XCTAssertTrue(scrollToElement(voice, in: app))
         voice.tap()
 
         let toggle = app.switches["voice.settings.enableToggle"]
@@ -78,8 +101,10 @@ final class ParitySmokeTests: XCTestCase {
         }
         more.tap()
 
-        let docs = app.buttons["Docs"]
-        guard docs.waitForExistence(timeout: 5) else {
+        let docsButton = app.buttons["Docs"]
+        let docsLabel = app.staticTexts["Docs"]
+        let docs = docsButton.waitForExistence(timeout: 2) ? docsButton : docsLabel
+        guard docs.waitForExistence(timeout: 3) else {
             throw XCTSkip("Docs entry not exposed from the current More surface")
         }
         docs.tap()
@@ -101,21 +126,11 @@ final class ParitySmokeTests: XCTestCase {
         app.launchArguments += ["--ui-testing"]
         app.launch()
 
-        let settingsButton = app.buttons["Settings"]
-        guard settingsButton.waitForExistence(timeout: 5) else {
-            throw XCTSkip("Settings entry point not exposed on the current shell build")
-        }
-        settingsButton.tap()
+        try openSettings(in: app)
 
         // The Email section is inline in SettingsView — tap "Automation policy".
-        let automation = app.buttons["Automation policy"]
-        // It may be off-screen; scroll until found.
-        var attempts = 0
-        while !automation.exists && attempts < 5 {
-            app.swipeUp()
-            attempts += 1
-        }
-        XCTAssertTrue(automation.waitForExistence(timeout: 3))
+        let automation = app.buttons["settings.email.automationPolicy"]
+        XCTAssertTrue(scrollToElement(automation, in: app))
         automation.tap()
 
         let field = app.textFields["email.automationPolicy.excludedSenderField"]

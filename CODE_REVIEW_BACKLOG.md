@@ -6,13 +6,29 @@ Last updated: 2026-07-22
 
 # Performance and reliability audit — 2026-07-22
 
+## iOS follow-up resolution
+
+The iOS-focused follow-up closed the remaining safe, code-proven native findings:
+
+- bounded Google Calendar pagination now loads every page up to a 20-page safety cap;
+- transient calendar-list refresh failures preserve the last good source list;
+- camera image encoding/disk writes run off the main thread;
+- docs hierarchy lookup is indexed and title mutations are serialized;
+- malformed optional email previews no longer reject valid threads;
+- local-model runtime detection, launch-scan deletion races, and repeated device probes are fixed;
+- notification scheduling failures are observable, EventKit background saves are Swift 6-clean,
+  speech completion callbacks are synchronized, and required tab rows cannot enter a confusing snap-back drag;
+- Docs, Meetings, and Settings now use real native More destinations instead of hidden tab content that could render blank.
+
+Verified with 110 iOS unit tests, focused server pagination/scheduled-mail tests, file-scoped ESLint,
+an iOS simulator build, and all 10 native UI tests on a dedicated simulator. Historical finding tables below
+are retained as audit evidence; their iOS rows are superseded by this resolution note.
+
 The P1 fixes are implemented and verified. These remaining items need a deliberate
 storage or routing design and were not hidden behind a risky local patch:
 
 - **P2 — protected-route auth:** consolidate repeated session loaders under a cached
   parent route and distinguish an unavailable auth service from a logged-out session.
-- **P2 — calendar pagination:** add bounded multi-page loading with cancellation and a
-  partial-result state for large calendars.
 - **P2 — macOS decode work:** move large mail/docs JSON decoding off the main actor,
   then profile with Instruments before changing additional actor boundaries.
 - **P2 — macOS legacy local-data recovery:** provide an explicit recovery/export flow

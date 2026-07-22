@@ -350,7 +350,10 @@ final class GoogleCalendarService {
             return (conn.id, sources, false)
         } catch {
             AppLogger.shared.log("[GoogleCalendarService] calendars fetch failed for \(conn.email): \(error)")
-            return (conn.id, [], false)
+            // A transient refresh failure must not erase the last known
+            // calendar list and make every non-primary calendar disappear
+            // from the picker until the next successful refresh.
+            return (conn.id, sourcesByConnection[conn.id] ?? [], false)
         }
     }
 

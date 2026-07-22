@@ -3,6 +3,14 @@
 ## Current Tasks
 
 ### ✅ Recently Completed
+- [x] **IOS-084** — Close residual iOS performance/reliability findings from the 2026-07-22 audit
+  - Added bounded Google Calendar pagination and preserved cached sources on transient refresh failures
+  - Moved camera attachment encoding/writes off-main and indexed Docs hierarchy rendering
+  - Serialized Docs title saves and hardened email preview decoding
+  - Fixed local-model runtime detection/scan races, notification error visibility, EventKit concurrency warnings, and required-tab dragging
+  - Replaced blank hidden overflow tabs with real native More destinations and stabilized Settings/Docs UI coverage
+  - Made task-capture rollback explicit: only backend `422` validation can delete the local capture
+  - Verified 110 iOS unit tests and all 10 native UI tests on a dedicated clean simulator
 - [x] **IOS-083** — Apply iOS CodeRabbit review fixes across folders/tasks/AI/widgets/voice/api and remove tracked user-specific Xcode state
   - Fixed stale `restrictToInbox` refreshes in board/table views
   - Prevented duplicate folder item inserts in pickers + service layer

@@ -3,6 +3,12 @@ import SwiftData
 
 @MainActor
 final class SupabaseSyncService: SyncService {
+    /// Capture rollback is destructive, so only statuses whose contract explicitly
+    /// means "this task payload is semantically invalid" belong here. Authentication,
+    /// throttling, conflicts, timeouts, and server failures are recoverable and must
+    /// keep the local task for retry.
+    private static let semanticRejectionStatusCodes: Set<Int> = [422]
+
     private struct PendingBatch {
         let mutations: [SyncMutation]
         let taskIDs: [UUID]
@@ -204,10 +210,9 @@ final class SupabaseSyncService: SyncService {
                     // path; the task has nowhere to sync, so keep it, don't delete.
                     keepLocal = true
                 case BackendClientError.httpError(let statusCode, _):
-                    // Only the backend's explicit validation status is a
-                    // semantic rejection. Auth/config/conflict failures can be
-                    // repaired and must not delete the user's captured task.
-                    keepLocal = statusCode != 422
+                    // Roll back only explicitly allowlisted semantic rejections.
+                    // Every other HTTP failure is recoverable by default.
+                    keepLocal = !Self.semanticRejectionStatusCodes.contains(statusCode)
                 case BackendClientError.invalidResponse:
                     // A non-HTTP response or response-shape drift says nothing
                     // about whether the server rejected the task. Preserve it.

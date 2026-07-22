@@ -113,3 +113,28 @@ Measured outcomes:
 The remaining P2/P3 architectural work is recorded in `CODE_REVIEW_BACKLOG.md`; each
 item needs a schema, storage, or routing decision and should not be smuggled into this
 low-risk remediation pass.
+
+## iOS follow-up — 2026-07-22
+
+The subsequent iOS-focused pass closed the remaining safe native findings and the
+calendar-pagination item from P2. Google Calendar list/event calls now follow bounded
+pagination and retain cached sources through transient refresh errors. Camera attachments
+encode/write off-main. Docs hierarchy rendering uses a mutation-time parent index and title
+saves are serialized. Email thread decoding tolerates a malformed optional preview. Local
+model availability uses the real Apple Intelligence runtime state, caches stable device
+probes, and honors deletions that race the launch scan. Notification scheduling failures are
+logged, EventKit queue handoff is Swift 6-clean, and required tab rows cannot be dragged.
+The native overflow now contains real Docs, Meetings, and Settings destinations instead of
+hidden tab content that could select successfully but render blank. Speech completion callbacks
+are lock-protected and return to the main actor without Swift 6 Sendable warnings.
+
+Task capture now uses an explicit semantic-rejection allowlist: only backend `422` validation
+can roll back a new capture, while auth, throttling, timeout, conflict, server, transport, and
+malformed-response failures preserve it for retry. Scheduled-email consumers also stop retrying
+stale missing payloads after the retained send window, closing the cancelled-message retry loop.
+
+Verification: iOS `TodusTests` passed 110/110, focused server tests passed 9/9,
+file-scoped server ESLint and formatting passed, the iOS Release simulator build succeeded,
+and all 10 seeded UI tests passed on a dedicated clean
+iPhone simulator. Real Gmail/Calendar account behavior still requires the existing physical-device
+release smoke test and is not inferred from seeded UI tests.

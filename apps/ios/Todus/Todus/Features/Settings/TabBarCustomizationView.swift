@@ -5,7 +5,7 @@ import SwiftUI
 ///
 /// Rules:
 /// • Home is always first and cannot be removed (it surfaces non-tab pages).
-/// • Min 2 tabs total, max 4 — the burger (☰) button is a fixed extra slot.
+/// • Min 2 tabs total, max 4 — iOS supplies the native More overflow.
 /// • Changes are saved to AppServices / UserDefaults on "Save".
 struct TabBarCustomizationView: View {
     @Environment(AppServices.self) private var services
@@ -64,6 +64,7 @@ struct TabBarCustomizationView: View {
                 }
                 // Disable swipe-to-delete for required tabs
                 .deleteDisabled(tab.isRequired)
+                .moveDisabled(tab.isRequired)
             }
             .onDelete { indices in
                 // Guard: don't delete required tabs; keep min 2
@@ -145,4 +146,3 @@ struct TabBarCustomizationView: View {
         dismiss()
     }
 }
-

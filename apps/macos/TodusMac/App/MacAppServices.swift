@@ -123,9 +123,11 @@ final class MacAppServices {
     let folderSyncService: FolderSyncService
     /// Retained here so `setupNetworkSync()` can reach `mainContext` on reconnect.
     var modelContainer: ModelContainer?
+    private var guestModelContainer: ModelContainer?
     private var accountModelContainers: [String: ModelContainer] = [:]
     private var activeLocalDataScopeID: String?
     var hasActiveLocalDataScope: Bool { activeLocalDataScopeID != nil }
+    private var pendingSyncTask: Task<Void, Never>?
     private let defaults = UserDefaults.standard
     let remindersSyncService = AppleRemindersSyncService()
     let remindersSyncState = RemindersSyncState()
@@ -576,7 +578,8 @@ final class MacAppServices {
     }
 
     func syncSharedFolders(in context: ModelContext) async throws {
-        guard authService.isAuthenticated else { return }
+        guard authService.isAuthenticated,
+              let scopeID = activeScopeID(for: context) else { return }
 
         struct FolderListResponse: Decodable {
             let folders: [RemoteFolder]
@@ -586,6 +589,7 @@ final class MacAppServices {
         defer { isSyncingSharedFolders = false }
 
         let response: FolderListResponse = try await apiClient.trpcQuery("folders.list")
+        guard activeScopeID(for: context) == scopeID else { return }
         let remoteFolders = response.folders
         let localFolders = try context.fetch(FetchDescriptor<FolderRecord>())
         var foldersByID = Dictionary(
@@ -629,9 +633,11 @@ final class MacAppServices {
     /// Pull the folder summary (counts, breakdowns, recent items) and update the
     /// local FolderRecord caches so cards render instantly.
     func fetchFolderSummary(in context: ModelContext) async {
-        guard authService.isAuthenticated else { return }
+        guard authService.isAuthenticated,
+              let scopeID = activeScopeID(for: context) else { return }
         do {
             let response: MacFolderSummaryResponse = try await apiClient.trpcQuery("folders.summary")
+            guard activeScopeID(for: context) == scopeID else { return }
             let localFolders = try context.fetch(FetchDescriptor<FolderRecord>())
             let byID = Dictionary(
                 uniqueKeysWithValues: localFolders.map { ($0.id.uuidString.lowercased(), $0) }
@@ -669,6 +675,7 @@ final class MacAppServices {
         iconName: String?,
         in context: ModelContext
     ) async -> FolderRecord? {
+        guard activeScopeID(for: context) != nil else { return nil }
         let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return nil }
 
@@ -683,35 +690,15 @@ final class MacAppServices {
         context.insert(folder)
         try? context.save()
 
-        struct CreateInput: Encodable {
-            let id: String
-            let name: String
-            let color: String?
-            let icon: String?
-            let position: Int
-        }
-        do {
-            let _: EmptyResponse = try await apiClient.trpcMutation(
-                "folders.create",
-                input: CreateInput(
-                    id: folder.id.uuidString,
-                    name: folder.name,
-                    color: folder.colorHex,
-                    icon: folder.iconName,
-                    position: folder.position
-                )
-            )
-        } catch {
-            // API failed (offline or transient error) — enqueue an upsert so the
-            // folders.sync endpoint retries this on the next reconnect.
-            await folderSyncService.enqueue(.upsert(
-                id: folder.id.uuidString,
-                name: folder.name,
-                color: folder.colorHex,
-                icon: folder.iconName,
-                position: folder.position
-            ))
-        }
+        // Journal before networking so an account switch or process exit cannot
+        // lose this create between the local save and the backend request.
+        await folderSyncService.enqueue(.upsert(
+            id: folder.id.uuidString,
+            name: folder.name,
+            color: folder.colorHex,
+            icon: folder.iconName,
+            position: folder.position
+        ), in: context)
         return folder
     }
 
@@ -723,6 +710,7 @@ final class MacAppServices {
         position: Int? = nil,
         in context: ModelContext
     ) async {
+        guard activeScopeID(for: context) != nil else { return }
         if let name { folder.name = name }
         if case let .some(value) = colorHex { folder.colorHex = value }
         if case let .some(value) = iconName { folder.iconName = value }
@@ -730,37 +718,17 @@ final class MacAppServices {
         folder.updatedAt = .now
         try? context.save()
 
-        struct UpdateInput: Encodable {
-            let id: String
-            let name: String?
-            let color: String?
-            let icon: String?
-            let position: Int?
-        }
-        do {
-            let _: EmptyResponse = try await apiClient.trpcMutation(
-                "folders.update",
-                input: UpdateInput(
-                    id: folder.id.uuidString,
-                    name: folder.name,
-                    color: folder.colorHex,
-                    icon: folder.iconName,
-                    position: folder.position
-                )
-            )
-        } catch {
-            // API failed — enqueue an upsert so folders.sync retries on reconnect.
-            await folderSyncService.enqueue(.upsert(
-                id: folder.id.uuidString,
-                name: folder.name,
-                color: folder.colorHex,
-                icon: folder.iconName,
-                position: folder.position
-            ))
-        }
+        await folderSyncService.enqueue(.upsert(
+            id: folder.id.uuidString,
+            name: folder.name,
+            color: folder.colorHex,
+            icon: folder.iconName,
+            position: folder.position
+        ), in: context)
     }
 
     func deleteSharedFolder(_ folder: FolderRecord, in context: ModelContext) async {
+        guard activeScopeID(for: context) != nil else { return }
         let id = folder.id.uuidString
         // Unlink tasks
         let allTasks = (try? context.fetch(FetchDescriptor<TaskRecord>())) ?? []
@@ -771,16 +739,7 @@ final class MacAppServices {
         context.delete(folder)
         try? context.save()
 
-        struct DeleteInput: Encodable { let id: String }
-        do {
-            let _: EmptyResponse = try await apiClient.trpcMutation(
-                "folders.delete",
-                input: DeleteInput(id: id)
-            )
-        } catch {
-            // API failed — enqueue a delete so folders.sync retries on reconnect.
-            await folderSyncService.enqueue(.delete(id: id))
-        }
+        await folderSyncService.enqueue(.delete(id: id), in: context)
     }
 
     func addItemToSharedFolder(
@@ -887,6 +846,14 @@ final class MacAppServices {
         }
     }
 
+    /// Registers the isolated guest store used before sign-in and after sign-out.
+    /// Account stores are never reused as the unauthenticated shell's environment.
+    func installGuestModelContainer(_ container: ModelContainer) {
+        guestModelContainer = container
+        guard activeLocalDataScopeID == nil else { return }
+        modelContainer = container
+    }
+
     /// Opens an account-specific SwiftData store before the authenticated shell can render.
     /// The legacy unscoped store is intentionally left untouched and quarantined: assigning
     /// unknown rows to the first account could expose or upload another user's data.
@@ -957,8 +924,17 @@ final class MacAppServices {
             return false
         }
 
-        taskSyncService.activateScope(scopeID)
-        folderSyncService.activateScope(scopeID)
+        let context = container.mainContext
+        guard taskSyncService.activateScope(scopeID, context: context) else {
+            taskSyncService.deactivateScope()
+            folderSyncService.deactivateScope()
+            return false
+        }
+        guard folderSyncService.activateScope(scopeID, context: context) else {
+            taskSyncService.deactivateScope()
+            folderSyncService.deactivateScope()
+            return false
+        }
         activeLocalDataScopeID = scopeID
         modelContainer = container
         AppLogger.shared.log("[MacAppServices] Activated account-scoped local data store")
@@ -966,9 +942,12 @@ final class MacAppServices {
     }
 
     private func deactivateLocalDataScope() {
+        pendingSyncTask?.cancel()
+        pendingSyncTask = nil
         activeLocalDataScopeID = nil
         taskSyncService.deactivateScope()
         folderSyncService.deactivateScope()
+        modelContainer = guestModelContainer
     }
 
     /// Flushes any pending/failed task, folder, and draft mutations to the
@@ -978,14 +957,27 @@ final class MacAppServices {
     /// "changes sync when reconnected" banner was a false promise). Now also
     /// called on app launch and when the app returns to the foreground.
     func flushPendingSync() {
-        guard activeLocalDataScopeID != nil else { return }
+        guard let scopeID = activeLocalDataScopeID else { return }
         guard let context = modelContainer?.mainContext else { return }
-        Task { @MainActor [weak self] in
+        pendingSyncTask?.cancel()
+        pendingSyncTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            guard self.activeScopeID(for: context) == scopeID else { return }
             await self.taskSyncService.retryUnsyncedTasks(in: context)
-            await self.folderSyncService.retryPending()
+            guard !Task.isCancelled, self.activeScopeID(for: context) == scopeID else { return }
+            await self.folderSyncService.retryPending(in: context)
+            guard !Task.isCancelled, self.activeScopeID(for: context) == scopeID else { return }
             await self.draftService.flushPending(in: context)
         }
+    }
+
+    private func activeScopeID(for context: ModelContext) -> String? {
+        guard let activeLocalDataScopeID,
+              let modelContainer,
+              ObjectIdentifier(context.container) == ObjectIdentifier(modelContainer) else {
+            return nil
+        }
+        return activeLocalDataScopeID
     }
 
     /// Applies task completions queued from a widget's "complete" button (handed

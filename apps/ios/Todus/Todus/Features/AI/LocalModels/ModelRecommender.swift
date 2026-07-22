@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
+
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -22,7 +26,7 @@ struct ModelRecommendation: Hashable {
     let reason: String
 }
 
-struct DeviceProfile: Hashable {
+struct DeviceProfile: Hashable, Sendable {
     let platform: LocalModelPlatform
     /// Total physical RAM in GB (rounded down to the nearest GB).
     let totalRamGB: Int
@@ -33,23 +37,30 @@ struct DeviceProfile: Hashable {
     /// Intelligence is *enabled* — that's the runtime adapter's job.
     let appleFMAvailable: Bool
 
+    /// Hardware facts are stable for the process lifetime. Cache the disk/RAM
+    /// probes so SwiftUI body evaluation does not stat the filesystem for every
+    /// local-model row. Apple Intelligence availability stays live because the
+    /// system model can finish downloading while Todus is open.
+    private static let cachedRamGB = Int(ProcessInfo.processInfo.physicalMemory / 1_073_741_824)
+
+    private static let cachedFreeDiskGB: Int = {
+        let url = URL(fileURLWithPath: NSHomeDirectory())
+        if let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+           let bytes = values.volumeAvailableCapacityForImportantUsage {
+            return Int(bytes / 1_073_741_824)
+        }
+        return 0
+    }()
+
     static var current: DeviceProfile {
-        let ramBytes = ProcessInfo.processInfo.physicalMemory
-        let ramGB = Int(ramBytes / 1_073_741_824) // bytes → GiB
-
-        let freeGB: Int = {
-            let url = URL(fileURLWithPath: NSHomeDirectory())
-            if let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
-               let bytes = values.volumeAvailableCapacityForImportantUsage {
-                return Int(bytes / 1_073_741_824)
-            }
-            return 0
-        }()
-
         #if os(iOS)
         let platform: LocalModelPlatform = .iOS
         let appleFM: Bool = {
-            if #available(iOS 26.0, *) { return true }
+            #if canImport(FoundationModels)
+            if #available(iOS 26.0, *) {
+                return SystemLanguageModel.default.availability == .available
+            }
+            #endif
             return false
         }()
         #else
@@ -62,8 +73,8 @@ struct DeviceProfile: Hashable {
 
         return DeviceProfile(
             platform: platform,
-            totalRamGB: ramGB,
-            freeDiskGB: freeGB,
+            totalRamGB: cachedRamGB,
+            freeDiskGB: cachedFreeDiskGB,
             appleFMAvailable: appleFM
         )
     }

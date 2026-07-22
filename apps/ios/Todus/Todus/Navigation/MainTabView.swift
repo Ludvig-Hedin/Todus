@@ -187,10 +187,11 @@ struct MainTabView: View {
     }
 
     private var tabView: some View {
-        // Every content tab stays instantiated (hidden ones are still valid
-        // programmatic selections for deep links via `services.navigateTo`);
-        // only bar membership + order follow `services.tabBarTabs`. The fixed
-        // More tab exposes whatever isn't in the bar plus customization.
+        // Keep every destination as a real Tab. With more than five items,
+        // UIKit supplies its native More list for the overflow. This matters:
+        // hiding the extra Tab content made programmatic selections render a
+        // blank page, while trying to hide only the tab item produced a nested
+        // second More screen.
         TabView(selection: $selectedTab) {
             ForEach(barTabs) { tab in
                 Tab(value: tab) {
@@ -206,13 +207,10 @@ struct MainTabView: View {
                 } label: {
                     Label(tab.title, systemImage: tab.inactiveIcon())
                 }
-                .hidden(true)
             }
 
             Tab(value: AppTab.more) {
-                MoreSheetView(showsDone: false) { tab in
-                    services.navigateTo = tab
-                }
+                SettingsView(showsDone: false)
             } label: {
                 Label(AppTab.more.title, systemImage: AppTab.more.inactiveIcon())
             }
@@ -343,8 +341,8 @@ struct MainTabView: View {
         Set(AppTab.contentTabs).union([.more])
     }
 
-    /// Root view for a content tab. Kept in one place so the bar and the hidden
-    /// (overflow, deep-linkable) copies render identically.
+    /// Root view for a content tab. Kept in one place so direct and native-More
+    /// selections render identically.
     @ViewBuilder
     private func tabRoot(for tab: AppTab) -> some View {
         switch tab {

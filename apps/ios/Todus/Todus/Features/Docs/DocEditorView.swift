@@ -28,6 +28,9 @@ struct DocEditorView: View {
     @State private var isStarred: Bool
     @State private var saveState: SaveState = .idle
     @State private var saveTask: Task<Void, Never>?
+    @State private var saveOperation: Task<Void, Never>?
+    @State private var queuedSaveTitle: String?
+    @State private var saveGeneration = 0
     @State private var autofocusTask: Task<Void, Never>?
     @State private var showShare = false
     @State private var showInfo = false
@@ -245,18 +248,46 @@ struct DocEditorView: View {
             if case .failed = saveState { saveState = .saved }
             return
         }
-        saveState = .saving
-        do {
-            _ = try await services.docsService.renameDoc(id: doc.id, title: finalTitle)
-            lastSavedTitle = finalTitle
-            markSaved()
-        } catch is CancellationError {
-            // Debounce cancellation is normal — don't flash 'Save failed'.
+
+        // Focus loss, Return, debounce, and onDisappear can all request the
+        // same save. Reuse that operation instead of issuing concurrent
+        // rename mutations for one title.
+        if queuedSaveTitle == finalTitle, let saveOperation {
+            await saveOperation.value
             return
-        } catch {
-            if (error as? URLError)?.code == .cancelled { return }
-            AppLogger.shared.log("[DocEditor] title save: \(error)")
-            saveState = .failed(error.localizedDescription)
+        }
+
+        let previousOperation = saveOperation
+        saveGeneration &+= 1
+        let generation = saveGeneration
+        queuedSaveTitle = finalTitle
+        saveState = .saving
+        let service = services.docsService
+        let id = doc.id
+        let operation = Task { @MainActor in
+            // Serialize different title revisions too. Otherwise a slow older
+            // request can arrive last and overwrite the user's newest title.
+            if let previousOperation { await previousOperation.value }
+            guard !Task.isCancelled else { return }
+            do {
+                _ = try await service.renameDoc(id: id, title: finalTitle)
+                lastSavedTitle = finalTitle
+                if generation == saveGeneration { markSaved() }
+            } catch is CancellationError {
+                return
+            } catch {
+                if (error as? URLError)?.code == .cancelled { return }
+                AppLogger.shared.log("[DocEditor] title save: \(error)")
+                if generation == saveGeneration {
+                    saveState = .failed(error.localizedDescription)
+                }
+            }
+        }
+        saveOperation = operation
+        await operation.value
+        if generation == saveGeneration {
+            saveOperation = nil
+            queuedSaveTitle = nil
         }
     }
 
@@ -268,11 +299,8 @@ struct DocEditorView: View {
         autofocusTask?.cancel()
         let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed == lastSavedTitle { return }
-        let svc = services.docsService
-        let id = doc.id
-        let finalTitle = trimmed.isEmpty ? "Untitled" : trimmed
         Task { @MainActor in
-            _ = try? await svc.renameDoc(id: id, title: finalTitle)
+            await saveTitleNow()
         }
     }
 

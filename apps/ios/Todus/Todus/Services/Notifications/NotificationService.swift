@@ -125,7 +125,7 @@ final class NotificationService {
             trigger: trigger
         )
 
-        center.add(request)
+        add(request, context: "task reminder")
     }
 
     func cancelTaskReminder(taskID: String) {
@@ -162,7 +162,7 @@ final class NotificationService {
             content: content,
             trigger: trigger
         )
-        center.add(request)
+        add(request, context: "new email")
     }
 
     /// Schedule a reminder for revisiting an email thread.
@@ -261,7 +261,7 @@ final class NotificationService {
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
         let request = UNNotificationRequest(identifier: "due-today-digest", content: content, trigger: trigger)
         center.removePendingNotificationRequests(withIdentifiers: ["due-today-digest"])
-        center.add(request)
+        add(request, context: "due-today digest")
     }
 
     // MARK: - AI Response Notifications
@@ -285,7 +285,7 @@ final class NotificationService {
             trigger: trigger
         )
         center.removePendingNotificationRequests(withIdentifiers: ["ai-\(conversationId)"])
-        center.add(request)
+        add(request, context: "AI response")
     }
 
     func cancelAIResponseNotification(conversationId: String) {
@@ -306,6 +306,19 @@ final class NotificationService {
     func cancel(withIdentifiers identifiers: [String]) {
         center.removePendingNotificationRequests(withIdentifiers: identifiers)
         center.removeDeliveredNotifications(withIdentifiers: identifiers)
+    }
+
+    /// Fire-and-forget notification paths still report scheduling failures.
+    /// This catches OS limits (including the pending-request cap) and malformed
+    /// triggers instead of silently pretending the reminder was scheduled.
+    private func add(_ request: UNNotificationRequest, context: String) {
+        Task {
+            do {
+                try await center.add(request)
+            } catch {
+                AppLogger.shared.log("[NotificationService] Failed to schedule \(context): \(error)")
+            }
+        }
     }
 
     // MARK: - Categories

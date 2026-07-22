@@ -78,6 +78,30 @@ final class TaskCaptureServiceTests: XCTestCase {
     }
 
     @MainActor
+    private func assertHTTPFailureKeepsCapture(
+        statusCode: Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws {
+        SyncURLProtocolStub.outcome = .status(statusCode)
+
+        let ctx = try makeSyncContext()
+        let config = makeSyncConfig(supabaseURL: URL(string: "https://stub.local")!)
+        let sync = SupabaseSyncService(configuration: config, authStore: AuthSessionStore(configuration: config))
+        let task = makeSyncTask(in: ctx)
+
+        await enqueueSync(sync, task, in: ctx)
+
+        XCTAssertEqual(
+            task.syncState,
+            .localOnly,
+            "HTTP \(statusCode) must retain the capture for retry.",
+            file: file,
+            line: line
+        )
+    }
+
+    @MainActor
     func testOfflineCaptureKeptLocalOnlyNotDeleted() async throws {
         URLProtocol.registerClass(SyncURLProtocolStub.self)
         defer { URLProtocol.unregisterClass(SyncURLProtocolStub.self) }
@@ -115,16 +139,32 @@ final class TaskCaptureServiceTests: XCTestCase {
     func testRateLimitKeepsCaptureLocalOnly() async throws {
         URLProtocol.registerClass(SyncURLProtocolStub.self)
         defer { URLProtocol.unregisterClass(SyncURLProtocolStub.self) }
-        SyncURLProtocolStub.outcome = .status(429)
+        try await assertHTTPFailureKeepsCapture(statusCode: 429)
+    }
 
-        let ctx = try makeSyncContext()
-        let config = makeSyncConfig(supabaseURL: URL(string: "https://stub.local")!)
-        let sync = SupabaseSyncService(configuration: config, authStore: AuthSessionStore(configuration: config))
-        let task = makeSyncTask(in: ctx)
+    @MainActor
+    func testAuthFailuresKeepCaptureLocalOnly() async throws {
+        URLProtocol.registerClass(SyncURLProtocolStub.self)
+        defer { URLProtocol.unregisterClass(SyncURLProtocolStub.self) }
 
-        await enqueueSync(sync, task, in: ctx)
+        try await assertHTTPFailureKeepsCapture(statusCode: 401)
+        try await assertHTTPFailureKeepsCapture(statusCode: 403)
+    }
 
-        XCTAssertEqual(task.syncState, .localOnly)
+    @MainActor
+    func testRequestTimeoutKeepsCaptureLocalOnly() async throws {
+        URLProtocol.registerClass(SyncURLProtocolStub.self)
+        defer { URLProtocol.unregisterClass(SyncURLProtocolStub.self) }
+        try await assertHTTPFailureKeepsCapture(statusCode: 408)
+    }
+
+    @MainActor
+    func testNonAllowlistedClientErrorsKeepCaptureLocalOnly() async throws {
+        URLProtocol.registerClass(SyncURLProtocolStub.self)
+        defer { URLProtocol.unregisterClass(SyncURLProtocolStub.self) }
+
+        try await assertHTTPFailureKeepsCapture(statusCode: 400)
+        try await assertHTTPFailureKeepsCapture(statusCode: 409)
     }
 
     @MainActor
@@ -158,6 +198,31 @@ final class TaskCaptureServiceTests: XCTestCase {
 
         XCTAssertEqual(task.syncState, .failed,
             "An explicit semantic 4xx rejection is the only rollback case.")
+    }
+
+    func testEdgeClientPreservesHTTPStatusAndBody() async throws {
+        URLProtocol.registerClass(SyncURLProtocolStub.self)
+        defer { URLProtocol.unregisterClass(SyncURLProtocolStub.self) }
+        SyncURLProtocolStub.outcome = .response(status: 403, body: Data("forbidden".utf8))
+
+        struct Request: Encodable { let value: String }
+        struct Response: Decodable { let success: Bool }
+
+        let config = makeSyncConfig(supabaseURL: URL(string: "https://stub.local")!)
+        let client = SupabaseEdgeFunctionClient(configuration: config)
+
+        do {
+            let _: Response = try await client.invoke(
+                path: config.syncFunctionPath,
+                body: Request(value: "test")
+            )
+            XCTFail("Expected the edge client to throw for HTTP 403.")
+        } catch BackendClientError.httpError(let statusCode, let responseBody) {
+            XCTAssertEqual(statusCode, 403)
+            XCTAssertEqual(responseBody, "forbidden")
+        } catch {
+            XCTFail("Expected BackendClientError.httpError, got \(error).")
+        }
     }
 
     @MainActor

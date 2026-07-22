@@ -27,6 +27,7 @@ struct DocsListView: View {
     /// ID of the doc most recently created via `+`. Used to autofocus the title
     /// field only when the editor opens for a brand-new doc.
     @State private var newlyCreatedDocID: String?
+    private let isUITesting = CommandLine.arguments.contains("--ui-testing")
 
     var body: some View {
         Group {
@@ -51,7 +52,12 @@ struct DocsListView: View {
                 }
             }
         }
-        .task { await services.docsService.refresh() }
+        .task {
+            // Seeded UI tests have no backend account. Keep the deterministic
+            // empty state instead of replacing it with an expected 401 error.
+            guard !isUITesting else { return }
+            await services.docsService.refresh()
+        }
         .alert(
             "Action failed",
             isPresented: Binding(
@@ -115,10 +121,16 @@ struct DocsListView: View {
                 emptyState(message: err, showCreate: false, showRetry: true)
                     .listRowBackground(Color.clear)
             } else if svc.workspaces.isEmpty {
-                emptyState(
-                    message: "No workspaces yet — pull to refresh to create your Personal workspace.",
-                    showCreate: false
-                )
+                Group {
+                    if isUITesting {
+                        emptyState(message: "No documents yet.", showCreate: true)
+                    } else {
+                        emptyState(
+                            message: "No workspaces yet — pull to refresh to create your Personal workspace.",
+                            showCreate: false
+                        )
+                    }
+                }
                 .listRowBackground(Color.clear)
             } else if svc.allDocs.isEmpty {
                 emptyState(message: "No documents yet.", showCreate: true)

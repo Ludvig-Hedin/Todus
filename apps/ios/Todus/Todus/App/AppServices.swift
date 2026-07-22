@@ -749,7 +749,7 @@ final class AppServices {
             if decoded.isEmpty || tabs.count < 2 {
                 self.tabBarTabs = AppTab.defaultNavTabs
             } else {
-                // Burger is a fixed extra slot; max configurable tabs = 4
+                // iOS supplies the More overflow; max directly visible tabs = 4.
                 self.tabBarTabs = Array(tabs.prefix(4))
             }
         } else {

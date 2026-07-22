@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 /// Offline-capable queue for folder create/update/delete mutations.
 /// Mutations are enqueued immediately and flushed via the tRPC `folders.sync` endpoint
@@ -48,10 +49,12 @@ final class FolderSyncService {
     private var inFlightIDs: Set<String> = []
     private var inFlightBatch: [Mutation] = []
     private var processingGeneration: Int?
+    private var processingTask: Task<Void, Never>?
     private let apiClient: TodosAPIClient
     private var activeQueueKey: String?
     private var scopeGeneration = 0
     private var isChangingScope = false
+    private var queueKeysByContainerID: [ObjectIdentifier: String] = [:]
     private static let legacyQueueKey = "TodusMac.folderMutationQueue"
 
     // MARK: - Init
@@ -63,15 +66,19 @@ final class FolderSyncService {
     // MARK: - Public API
 
     /// Append a mutation to the queue and immediately attempt to flush.
-    func enqueue(_ mutation: Mutation) async {
-        guard activeQueueKey != nil else { return }
+    func enqueue(_ mutation: Mutation, in context: ModelContext) async {
+        guard let targetQueueKey = queueKey(for: context) else { return }
+        guard targetQueueKey == activeQueueKey else {
+            appendToDeferredJournal(mutation, queueKey: targetQueueKey)
+            return
+        }
         queue.append(mutation)
         await processQueue()
     }
 
     /// Re-attempt any pending mutations — call this on network reconnect.
-    func retryPending() async {
-        guard activeQueueKey != nil else { return }
+    func retryPending(in context: ModelContext) async {
+        guard queueKey(for: context) == activeQueueKey, activeQueueKey != nil else { return }
         await processQueue()
     }
 
@@ -85,36 +92,49 @@ final class FolderSyncService {
 
     /// Switches to an account-owned journal. The legacy unscoped journal stays
     /// quarantined because automatically assigning it could cross an account boundary.
-    func activateScope(_ scopeID: String) {
+    @discardableResult
+    func activateScope(_ scopeID: String, context: ModelContext) -> Bool {
         let nextKey = "\(Self.legacyQueueKey).\(scopeID)"
-        guard activeQueueKey != nextKey else { return }
+        queueKeysByContainerID[ObjectIdentifier(context.container)] = nextKey
+        guard activeQueueKey != nextKey else { return true }
 
         scopeGeneration += 1
         persistQueue()
+        processingTask?.cancel()
+        processingTask = nil
+        processingGeneration = nil
         isChangingScope = true
         inFlightBatch.removeAll()
         inFlightIDs.removeAll()
         queue.removeAll()
-        activeQueueKey = nextKey
 
         let defaults = UserDefaults.standard
-        if let data = defaults.data(forKey: nextKey),
-           let restored = try? JSONDecoder().decode([Mutation].self, from: data) {
-            queue = restored
+        let deferredKey = deferredQueueKey(for: nextKey)
+        guard let restored = decodeJournal(forKey: nextKey, defaults: defaults),
+              let deferred = decodeJournal(forKey: deferredKey, defaults: defaults) else {
+            activeQueueKey = nil
+            isChangingScope = false
+            return false
         }
+        activeQueueKey = nextKey
+        queue = restored + deferred
         isChangingScope = false
         persistQueue()
+        defaults.removeObject(forKey: deferredKey)
+        return true
     }
 
     func deactivateScope() {
         scopeGeneration += 1
         persistQueue()
+        processingTask?.cancel()
         isChangingScope = true
         inFlightBatch.removeAll()
         inFlightIDs.removeAll()
         queue.removeAll()
         activeQueueKey = nil
         isChangingScope = false
+        processingTask = nil
         processingGeneration = nil
     }
 
@@ -128,13 +148,32 @@ final class FolderSyncService {
 
     private func processQueue() async {
         let processGeneration = scopeGeneration
-        guard activeQueueKey != nil,
-              processingGeneration != processGeneration,
+        guard let processQueueKey = activeQueueKey,
               !queue.isEmpty else { return }
+
+        if processingGeneration == processGeneration, let processingTask {
+            await processingTask.value
+            return
+        }
+
         processingGeneration = processGeneration
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.drainQueue(generation: processGeneration, queueKey: processQueueKey)
+        }
+        processingTask = task
+        await task.value
+        if processingGeneration == processGeneration {
+            processingTask = nil
+            processingGeneration = nil
+        }
+    }
+
+    private func drainQueue(generation processGeneration: Int, queueKey processQueueKey: String) async {
         defer {
             if processingGeneration == processGeneration {
-                processingGeneration = nil
+                inFlightBatch.removeAll()
+                inFlightIDs.removeAll()
             }
         }
 
@@ -143,8 +182,10 @@ final class FolderSyncService {
         // healthy network would see a stale folder until they triggered another
         // event. Mirrors the iOS FolderSyncService loop.
         while !queue.isEmpty {
+            guard !Task.isCancelled,
+                  scopeGeneration == processGeneration,
+                  activeQueueKey == processQueueKey else { return }
             let batch = queue
-            let batchGeneration = scopeGeneration
             inFlightBatch = batch
             queue.removeAll()
             inFlightIDs = Set(batch.map(\.folderID))
@@ -177,7 +218,9 @@ final class FolderSyncService {
                     "folders.sync",
                     input: FolderSyncRequest(mutations: payloads)
                 )
-                guard batchGeneration == scopeGeneration, activeQueueKey != nil else { return }
+                guard !Task.isCancelled,
+                      processGeneration == scopeGeneration,
+                      activeQueueKey == processQueueKey else { return }
 
                 // Mirror TaskSyncService: the server only confirms what it actually
                 // accepted via `syncedIds`. Anything the server *didn't* echo back
@@ -200,7 +243,9 @@ final class FolderSyncService {
                 inFlightBatch.removeAll()
                 persistQueue()
             } catch {
-                guard batchGeneration == scopeGeneration, activeQueueKey != nil else { return }
+                guard !Task.isCancelled,
+                      processGeneration == scopeGeneration,
+                      activeQueueKey == processQueueKey else { return }
                 // Network / server error — requeue the batch so retryPending() can replay it.
                 inFlightBatch.removeAll()
                 queue.insert(contentsOf: batch, at: 0)
@@ -212,7 +257,6 @@ final class FolderSyncService {
             }
         }
 
-        inFlightIDs.removeAll()
     }
 
     private func persistQueue() {
@@ -222,6 +266,33 @@ final class FolderSyncService {
             UserDefaults.standard.removeObject(forKey: activeQueueKey)
         } else if let data = try? JSONEncoder().encode(pending) {
             UserDefaults.standard.set(data, forKey: activeQueueKey)
+        }
+    }
+
+    private func queueKey(for context: ModelContext) -> String? {
+        queueKeysByContainerID[ObjectIdentifier(context.container)]
+    }
+
+    private func deferredQueueKey(for queueKey: String) -> String {
+        "\(queueKey).deferred"
+    }
+
+    private func decodeJournal(forKey key: String, defaults: UserDefaults) -> [Mutation]? {
+        guard let data = defaults.data(forKey: key) else { return [] }
+        guard let mutations = try? JSONDecoder().decode([Mutation].self, from: data) else {
+            AppLogger.shared.log("[FolderSyncService] Refusing to overwrite unreadable journal \(key)")
+            return nil
+        }
+        return mutations
+    }
+
+    private func appendToDeferredJournal(_ mutation: Mutation, queueKey: String) {
+        let defaults = UserDefaults.standard
+        let key = deferredQueueKey(for: queueKey)
+        guard var pending = decodeJournal(forKey: key, defaults: defaults) else { return }
+        pending.append(mutation)
+        if let data = try? JSONEncoder().encode(pending) {
+            defaults.set(data, forKey: key)
         }
     }
 }

@@ -37,10 +37,12 @@ final class TaskSyncService {
     }
     private var inFlightBatch: [TaskMutation] = []
     private var processingGeneration: Int?
+    private var processingTask: Task<Void, Never>?
     private let apiClient: TodosAPIClient
     private var activeQueueKey: String?
     private var scopeGeneration = 0
     private var isChangingScope = false
+    private var queueKeysByContainerID: [ObjectIdentifier: String] = [:]
     private static let legacyQueueKey = "TodusMac.taskMutationQueue"
 
     private static let iso8601: ISO8601DateFormatter = {
@@ -57,7 +59,7 @@ final class TaskSyncService {
 
     /// Marks `task` as pending upload, enqueues an upsert mutation, and flushes the queue.
     func enqueueUpsert(_ task: TaskRecord, in context: ModelContext) async {
-        guard activeQueueKey != nil else { return }
+        guard let targetQueueKey = queueKey(for: context) else { return }
         task.syncStateRawValue = SyncState.pendingUpload.rawValue
         try? context.save()
         let mutation = TaskMutation(
@@ -72,14 +74,22 @@ final class TaskSyncService {
                 dueDate: task.dueDate.map { Self.iso8601.string(from: $0) }
             )
         )
+        guard targetQueueKey == activeQueueKey else {
+            appendToDeferredJournal(mutation, queueKey: targetQueueKey)
+            return
+        }
         queue.append(mutation)
         await processQueue(in: context)
     }
 
     /// Enqueues a delete mutation for the given task ID and flushes the queue.
     func enqueueDelete(taskID: UUID, in context: ModelContext) async {
-        guard activeQueueKey != nil else { return }
+        guard let targetQueueKey = queueKey(for: context) else { return }
         let mutation = TaskMutation(type: "delete", id: taskID.uuidString, payload: nil)
+        guard targetQueueKey == activeQueueKey else {
+            appendToDeferredJournal(mutation, queueKey: targetQueueKey)
+            return
+        }
         queue.append(mutation)
         await processQueue(in: context)
     }
@@ -87,7 +97,7 @@ final class TaskSyncService {
     /// Re-enqueues all tasks in `pendingUpload` or `failed` state and flushes.
     /// Called on network reconnect so locally-created tasks eventually reach the server.
     func retryUnsyncedTasks(in context: ModelContext) async {
-        guard activeQueueKey != nil else { return }
+        guard queueKey(for: context) == activeQueueKey, activeQueueKey != nil else { return }
         // Replay persisted tombstones before rebuilding upserts from SwiftData.
         // Deleted rows no longer exist locally, so this queue is their only source.
         if !queue.isEmpty {
@@ -132,24 +142,35 @@ final class TaskSyncService {
 
     /// Switches the durable mutation journal to the authenticated account.
     /// The legacy unscoped journal stays quarantined because it has no trustworthy owner.
-    func activateScope(_ scopeID: String) {
+    @discardableResult
+    func activateScope(_ scopeID: String, context: ModelContext) -> Bool {
         let nextKey = "\(Self.legacyQueueKey).\(scopeID)"
-        guard activeQueueKey != nextKey else { return }
+        queueKeysByContainerID[ObjectIdentifier(context.container)] = nextKey
+        guard activeQueueKey != nextKey else { return true }
 
         scopeGeneration += 1
         persistQueue()
+        processingTask?.cancel()
+        processingTask = nil
+        processingGeneration = nil
         isChangingScope = true
         inFlightBatch.removeAll()
         queue.removeAll()
-        activeQueueKey = nextKey
 
         let defaults = UserDefaults.standard
-        if let data = defaults.data(forKey: nextKey),
-           let restored = try? JSONDecoder().decode([TaskMutation].self, from: data) {
-            queue = restored
+        let deferredKey = deferredQueueKey(for: nextKey)
+        guard let restored = decodeJournal(forKey: nextKey, defaults: defaults),
+              let deferred = decodeJournal(forKey: deferredKey, defaults: defaults) else {
+            activeQueueKey = nil
+            isChangingScope = false
+            return false
         }
+        activeQueueKey = nextKey
+        queue = restored + deferred
         isChangingScope = false
         persistQueue()
+        defaults.removeObject(forKey: deferredKey)
+        return true
     }
 
     /// Stops the signed-out app from flushing an account journal while keeping
@@ -157,11 +178,13 @@ final class TaskSyncService {
     func deactivateScope() {
         scopeGeneration += 1
         persistQueue()
+        processingTask?.cancel()
         isChangingScope = true
         inFlightBatch.removeAll()
         queue.removeAll()
         activeQueueKey = nil
         isChangingScope = false
+        processingTask = nil
         processingGeneration = nil
     }
 
@@ -169,21 +192,50 @@ final class TaskSyncService {
 
     private func processQueue(in context: ModelContext) async {
         let processGeneration = scopeGeneration
-        guard activeQueueKey != nil,
-              processingGeneration != processGeneration,
+        guard let processQueueKey = activeQueueKey,
+              queueKey(for: context) == processQueueKey,
               !queue.isEmpty else { return }
+
+        if processingGeneration == processGeneration, let processingTask {
+            await processingTask.value
+            return
+        }
+
         processingGeneration = processGeneration
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.drainQueue(
+                in: context,
+                generation: processGeneration,
+                queueKey: processQueueKey
+            )
+        }
+        processingTask = task
+        await task.value
+        if processingGeneration == processGeneration {
+            processingTask = nil
+            processingGeneration = nil
+        }
+    }
+
+    private func drainQueue(
+        in context: ModelContext,
+        generation processGeneration: Int,
+        queueKey processQueueKey: String
+    ) async {
         defer {
             if processingGeneration == processGeneration {
-                processingGeneration = nil
+                inFlightBatch.removeAll()
             }
         }
 
         // Drain the queue. New mutations enqueued while a batch is in flight
         // would otherwise sit until the next enqueue or reconnect.
         while !queue.isEmpty {
+            guard !Task.isCancelled,
+                  scopeGeneration == processGeneration,
+                  activeQueueKey == processQueueKey else { return }
             let batch = queue
-            let batchGeneration = scopeGeneration
             inFlightBatch = batch
             queue.removeAll()
 
@@ -192,7 +244,9 @@ final class TaskSyncService {
                     "tasks.sync",
                     input: SyncInput(mutations: batch)
                 )
-                guard batchGeneration == scopeGeneration, activeQueueKey != nil else { return }
+                guard !Task.isCancelled,
+                      processGeneration == scopeGeneration,
+                      activeQueueKey == processQueueKey else { return }
                 let syncedIDs = Set(output.syncedIds)
                 for idStr in syncedIDs {
                     guard let uuid = UUID(uuidString: idStr) else { continue }
@@ -211,7 +265,9 @@ final class TaskSyncService {
                 }
                 persistQueue()
             } catch {
-                guard batchGeneration == scopeGeneration, activeQueueKey != nil else { return }
+                guard !Task.isCancelled,
+                      processGeneration == scopeGeneration,
+                      activeQueueKey == processQueueKey else { return }
                 // Only the backend's explicit semantic validation response is
                 // permanent. Auth/config/conflict failures may recover and must
                 // not discard edits or delete tombstones.
@@ -263,6 +319,36 @@ final class TaskSyncService {
             UserDefaults.standard.removeObject(forKey: activeQueueKey)
         } else if let data = try? JSONEncoder().encode(pending) {
             UserDefaults.standard.set(data, forKey: activeQueueKey)
+        }
+    }
+
+    private func queueKey(for context: ModelContext) -> String? {
+        queueKeysByContainerID[ObjectIdentifier(context.container)]
+    }
+
+    private func deferredQueueKey(for queueKey: String) -> String {
+        "\(queueKey).deferred"
+    }
+
+    private func decodeJournal(
+        forKey key: String,
+        defaults: UserDefaults
+    ) -> [TaskMutation]? {
+        guard let data = defaults.data(forKey: key) else { return [] }
+        guard let mutations = try? JSONDecoder().decode([TaskMutation].self, from: data) else {
+            AppLogger.shared.log("[TaskSyncService] Refusing to overwrite unreadable journal \(key)")
+            return nil
+        }
+        return mutations
+    }
+
+    private func appendToDeferredJournal(_ mutation: TaskMutation, queueKey: String) {
+        let defaults = UserDefaults.standard
+        let key = deferredQueueKey(for: queueKey)
+        guard var pending = decodeJournal(forKey: key, defaults: defaults) else { return }
+        pending.append(mutation)
+        if let data = try? JSONEncoder().encode(pending) {
+            defaults.set(data, forKey: key)
         }
     }
 }

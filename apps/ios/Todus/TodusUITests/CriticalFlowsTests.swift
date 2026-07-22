@@ -135,12 +135,13 @@ final class CriticalFlowsTests: XCTestCase {
                       "Calendar tab should be available after calendar-auth-changed")
         calendarTab.tap()
 
-        // Either the CalendarKit container or the permission view will render;
-        // both indicate the calendar surface responded to the notification.
+        // Either the permission view or the calendar root will render. The
+        // custom AppTopHeader is not a UIKit navigation bar, so query the
+        // explicit surface identifier instead of relying on nav-bar semantics.
         let permissionHeader = app.staticTexts["Calendar Access Required"]
-        let calendarTitle = app.navigationBars["Calendar"]
+        let calendarSurface = app.otherElements["calendar.surface"]
         let surfaceReady = permissionHeader.waitForExistence(timeout: 5)
-            || calendarTitle.waitForExistence(timeout: 1)
+            || calendarSurface.waitForExistence(timeout: 1)
         XCTAssertTrue(surfaceReady,
                       "Calendar tab should render either the permission view or the events list")
     }

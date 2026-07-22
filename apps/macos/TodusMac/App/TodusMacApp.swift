@@ -67,13 +67,20 @@ struct TodusMacApp: App {
                             }
                         }
                         .onChange(of: ObjectIdentifier(modelContainer)) { _, _ in
-                            // Account activation swaps the bootstrap container for
-                            // the authenticated user's isolated store. Rewire every
-                            // consumer before replaying deferred local actions.
-                            appDelegate.modelContainer = modelContainer
-                            services.voiceCoordinator.modelContext = modelContainer.mainContext
-                            appDelegate.replayPendingNotificationResponses()
-                            services.applyVoiceAssistantState()
+                            if services.hasActiveLocalDataScope {
+                                // Account activation swaps the guest container for
+                                // the authenticated user's isolated store. Rewire every
+                                // consumer before replaying deferred local actions.
+                                appDelegate.modelContainer = modelContainer
+                                services.voiceCoordinator.modelContext = modelContainer.mainContext
+                                appDelegate.replayPendingNotificationResponses()
+                                services.applyVoiceAssistantState()
+                            } else {
+                                // Sign-out returns the shell to Guest.store. Keep account
+                                // notification and voice actions detached from that context.
+                                appDelegate.modelContainer = nil
+                                services.voiceCoordinator.modelContext = nil
+                            }
                         }
                         .onChange(of: scenePhase) { oldPhase, newPhase in
                             // Refresh widgets on .inactive too — a windowed macOS
@@ -234,7 +241,7 @@ struct TodusMacApp: App {
 
         switch result {
         case .success(let container):
-            services.modelContainer = container
+            services.installGuestModelContainer(container)
             services.setupNetworkSync()
             // This is an isolated guest store. Per-user task/folder/draft work is deferred until
             // MacRootView verifies the authenticated account and switches to

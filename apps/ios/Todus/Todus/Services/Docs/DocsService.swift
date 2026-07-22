@@ -15,7 +15,9 @@ final class DocsService {
     private weak var apiClient: TodosAPIClient?
 
     private(set) var workspaces: [DocWorkspaceDTO] = []
-    private(set) var allDocs: [DocRecordDTO] = []
+    private(set) var allDocs: [DocRecordDTO] = [] {
+        didSet { rebuildHierarchyIndex() }
+    }
     private(set) var isLoading = false
     private(set) var lastError: String?
     /// Timestamp of the most recent successful `refresh()`. Mirrors
@@ -28,6 +30,17 @@ final class DocsService {
     private var didAttemptCreatePersonal = false
     /// Suppress repeated log spam when the backend hasn't been migrated yet.
     private var didLogDocsUnavailable = false
+
+    private struct HierarchyKey: Hashable {
+        let workspaceId: String?
+        let parentId: String?
+    }
+
+    /// Pre-sorted direct children keyed by workspace + parent. Building this
+    /// once per data mutation avoids filtering and sorting the entire docs list
+    /// once for every rendered tree node (O(n²) on large workspaces).
+    @ObservationIgnored
+    private var docsByParent: [HierarchyKey: [DocRecordDTO]] = [:]
 
     init(apiClient: TodosAPIClient) {
         self.apiClient = apiClient
@@ -127,12 +140,12 @@ final class DocsService {
 
     /// Top-level docs (no parent) within a workspace.
     func rootDocs(forWorkspaceId workspaceId: String) -> [DocRecordDTO] {
-        listDocs(forWorkspaceId: workspaceId).filter { $0.parentId == nil }
+        docsByParent[HierarchyKey(workspaceId: workspaceId, parentId: nil)] ?? []
     }
 
     /// Direct children of a doc inside a workspace.
     func children(ofParentId parentId: String, workspaceId: String) -> [DocRecordDTO] {
-        listDocs(forWorkspaceId: workspaceId).filter { $0.parentId == parentId }
+        docsByParent[HierarchyKey(workspaceId: workspaceId, parentId: parentId)] ?? []
     }
 
     /// Starred docs across all workspaces — newest update first.
@@ -254,6 +267,19 @@ final class DocsService {
         } else {
             allDocs.append(d)
         }
+    }
+
+    private func rebuildHierarchyIndex() {
+        var rebuilt = Dictionary(grouping: allDocs) {
+            HierarchyKey(workspaceId: $0.workspaceId, parentId: $0.parentId)
+        }
+        for key in rebuilt.keys {
+            rebuilt[key]?.sort { a, b in
+                if a.order != b.order { return a.order < b.order }
+                return a.createdAt < b.createdAt
+            }
+        }
+        docsByParent = rebuilt
     }
 
     /// SwiftUI tears down `.task` modifiers on dismiss, which surfaces as URLError.cancelled

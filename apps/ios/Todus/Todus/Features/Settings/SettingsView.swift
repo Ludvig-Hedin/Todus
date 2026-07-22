@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct SettingsView: View {
+    var showsDone = true
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(AppServices.self) private var services
@@ -122,11 +123,13 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .accessibilityIdentifier("settings.list")
             .scrollContentBackground(.hidden)
             .background(AppTheme.sheetBackground)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
+            .toolbar {
+                if showsDone {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Done") {
                             didSaveAIProfileOnDone = true
@@ -136,6 +139,7 @@ struct SettingsView: View {
                         .fontWeight(.semibold)
                     }
                 }
+            }
         }
         .presentationDragIndicator(.visible)
         .modifier(SettingsSyncModifier(services: services))
@@ -951,6 +955,7 @@ struct SettingsView: View {
             } label: {
                 Label("Voice Assistant", systemImage: "waveform")
             }
+            .accessibilityIdentifier("settings.ai.voiceAssistant")
         } header: {
             Text("AI Assistant")
         } footer: {
@@ -1071,6 +1076,7 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .accessibilityIdentifier("settings.email.automationPolicy")
         } header: {
             Text("Email")
         }

@@ -52,7 +52,7 @@ final class NetworkMonitorTests: XCTestCase {
         let provider = FakeProvider()
         let monitor = NetworkMonitor(provider: provider)
         // The fake reports offline initially, so reconnect must NOT fire on init.
-        let fireCount = await CallCount()
+        let fireCount = CallCount()
         monitor.onReconnect = { Task { await fireCount.increment() } }
 
         // false → false (still offline).
@@ -80,4 +80,3 @@ actor CallCount {
     private(set) var value = 0
     func increment() { value += 1 }
 }
-

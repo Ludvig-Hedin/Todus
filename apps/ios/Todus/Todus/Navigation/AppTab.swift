@@ -12,8 +12,7 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable, Codable {
     case create
     /// AI/search tab — pinned to the trailing side via `Tab(role: .search)`.
     case ai
-    /// Overflow tab — lists content pages not currently in the tab bar plus the
-    /// tab-bar customization entry. Always the last bar slot; not user-editable.
+    /// Settings destination listed inside the system-provided More overflow.
     case more
 
     var id: String { rawValue }
@@ -29,7 +28,7 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable, Codable {
         case .docs:     return "Docs"
         case .create:   return "New"
         case .ai:       return "AI"
-        case .more:     return "More"
+        case .more:     return "Settings"
         }
     }
 
@@ -44,7 +43,7 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable, Codable {
         case .docs:     return "Documents and notes"
         case .create:   return "Create a new item"
         case .ai:       return "AI assistant"
-        case .more:     return "Pages not in the tab bar"
+        case .more:     return "Account and app preferences"
         }
     }
 
@@ -52,12 +51,12 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable, Codable {
     var isRequired: Bool { self == .home }
 
     /// Tabs shown in the tab bar by default (first launch).
-    /// Max 4 — the fixed More tab adds a 5th visual slot so the bar isn't cramped.
-    /// Meetings/Docs stay reachable via the More tab and the Home "More" section.
+    /// Max 4. Remaining destinations and Settings are surfaced by iOS in its
+    /// native More overflow; Meetings/Docs also remain reachable from Home.
     static let defaultNavTabs: [AppTab] = [.home, .tasks, .email, .calendar]
 
-    /// Content tabs that can appear in the bar or the More overflow.
-    /// (`create`/`ai` are FAB actions; `more` is the fixed overflow slot.)
+    /// Content tabs that can appear in the bar or the native More overflow.
+    /// (`create`/`ai` are FAB actions; `more` is the Settings destination.)
     static let contentTabs: [AppTab] = [.home, .tasks, .email, .calendar, .meetings, .docs]
 
     /// SF Symbol shown when this tab is selected.
@@ -71,7 +70,7 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable, Codable {
         case .docs:     return "doc.text.fill"
         case .create:   return "plus.circle.fill"
         case .ai:       return "sparkles"
-        case .more:     return "ellipsis.circle.fill"
+        case .more:     return "gearshape.fill"
         }
     }
 
@@ -87,7 +86,7 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable, Codable {
         case .docs:     return "doc.text"
         case .create:   return "plus.circle.fill"
         case .ai:       return "sparkles"
-        case .more:     return "ellipsis.circle"
+        case .more:     return "gearshape"
         }
     }
 

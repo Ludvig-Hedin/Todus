@@ -220,6 +220,7 @@ struct CalendarTabView: View {
             }
         }
         .toolbar(isShowingEventDetail ? .hidden : .automatic, for: .tabBar)
+        .accessibilityIdentifier("calendar.surface")
         .animation(AppTheme.Motion.slow, value: showGoToTodayControl)
         .animation(AppTheme.Motion.base, value: isShowingEventDetail)
         // `.simultaneousGesture` (not `.highPriorityGesture`) so the multi-day

@@ -1237,13 +1237,13 @@ private struct ComposeAttachmentPickers: ViewModifier {
             }
             .fullScreenCover(isPresented: $isShowingCamera) {
                 CameraPicker { image in
-                    // TODO(perf): saveImage (JPEG encode + disk write) runs synchronously
-                    // on this main-thread UIKit callback and briefly hitches the UI. Moving
-                    // it off-main needs the UIImage boxed across the Task boundary (not
-                    // Sendable); the common photo-library path below is already off-main.
-                    if let image,
-                       let filename = AttachmentService.shared.saveImage(image) {
-                        onImported(filename)
+                    guard let image else { return }
+                    let boxedImage = SendableImageBox(image: image)
+                    Task { @MainActor in
+                        let filename = await Task.detached(priority: .userInitiated) {
+                            AttachmentService.shared.saveImage(boxedImage.image)
+                        }.value
+                        if let filename { onImported(filename) }
                     }
                 }
                 .ignoresSafeArea()
@@ -1268,4 +1268,11 @@ private struct ComposeAttachmentPickers: ViewModifier {
                 }
             }
     }
+}
+
+/// UIKit camera callbacks deliver `UIImage` on the main thread. The image is
+/// immutable after capture, so boxing it is safe while JPEG encoding and disk
+/// I/O run in a detached task.
+private struct SendableImageBox: @unchecked Sendable {
+    let image: UIImage
 }
