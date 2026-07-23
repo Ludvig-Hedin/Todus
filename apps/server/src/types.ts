@@ -244,6 +244,9 @@ export enum Tools {
   CompleteTask = 'completeTask',
   ListTasks = 'listTasks',
   CreateEvent = 'createEvent',
+  GetPersonContext = 'getPersonContext',
+  GetWorkstreamContext = 'getWorkstreamContext',
+  GetOpenLoops = 'getOpenLoops',
 }
 
 export type AppContext = Context<{ Bindings: Env }>;

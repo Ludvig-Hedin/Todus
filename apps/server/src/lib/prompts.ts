@@ -351,6 +351,9 @@ export const AiChatPrompt = (options?: { generativeUI?: boolean }) =>
           - Bulk operations: Use bulkArchive, bulkDelete, markThreadsRead, markThreadsUnread tools
           - External information: Use webSearch tool
           - Email composition: Use composeEmail, sendEmail tools
+          - Questions about a person or relationship ("what did I promise X?"): Use getPersonContext FIRST, then search threads only if needed
+          - Questions about a project/topic status: Use getWorkstreamContext
+          - "What needs my attention / am I waiting on / did I drop?": Use getOpenLoops
         </when_to_use_tools>
 
         <when_to_respond_directly>
@@ -454,6 +457,22 @@ export const AiChatPrompt = (options?: { generativeUI?: boolean }) =>
         <tool name="${Tools.SendEmail}">
           <purpose>Send new email</purpose>
           <example>sendEmail({ to: [{ email: "user@example.com" }], subject: "Hello", message: "Body" })</example>
+        </tool>
+
+        <tool name="${Tools.GetPersonContext}">
+          <purpose>Relationship memory for a contact: summary, promises made, their unresolved asks</purpose>
+          <usage>Prefer over inbox search for person-history questions; falls back to inboxRag if empty</usage>
+          <example>getPersonContext({ person: "anna" })</example>
+        </tool>
+
+        <tool name="${Tools.GetWorkstreamContext}">
+          <purpose>Project/topic memory: summary, pending decisions, risks, next milestone</purpose>
+          <example>getWorkstreamContext({ query: "website redesign" })</example>
+        </tool>
+
+        <tool name="${Tools.GetOpenLoops}">
+          <purpose>Open commitments and threads needing attention, by queue</purpose>
+          <example>getOpenLoops({ queue: "needs_you" })</example>
         </tool>
       </tools>
 

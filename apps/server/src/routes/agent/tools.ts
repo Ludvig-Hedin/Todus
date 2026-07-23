@@ -4,9 +4,17 @@ import { getThread, getZeroAgent, getZeroDB } from '../../lib/server-utils';
 import type { IGetThreadResponse } from '../../lib/driver/types';
 import { composeEmail } from '../../trpc/routes/ai/compose';
 import { buildAuthClient, calendarFetchJSON } from '../../trpc/routes/calendar';
-import { meeting, meetingTranscript, connection, task } from '../../db/schema';
+import {
+  meeting,
+  meetingTranscript,
+  connection,
+  task,
+  assistantPersonMemory,
+  assistantWorkstreamMemory,
+  assistantOpenLoop,
+} from '../../db/schema';
 import { perplexity } from '@ai-sdk/perplexity';
-import { eq, desc, and, like, inArray } from 'drizzle-orm';
+import { eq, desc, and, like, ilike, or, inArray } from 'drizzle-orm';
 import { colors } from '../../lib/prompts';
 import { resolveModel } from '../../lib/ai-model-resolver';
 import { generateText, tool } from 'ai';
@@ -827,6 +835,158 @@ const createEventTool = (connectionId: string) =>
     },
   });
 
+// ── Second-brain context tools — read-only access to the assistant's derived
+// memory (person/workstream/open-loop tables populated by the briefing sync in
+// trpc/routes/assistant.ts). Lets chat answer "what did I promise Anna?" or
+// "where is project X?" without a live inbox search. Summaries are LLM-derived
+// from the user's own emails — same trust level as thread bodies.
+
+/** Strip SQL LIKE wildcards from user-supplied search fragments. */
+const sanitizeLike = (q: string) => q.replace(/[%_]/g, ' ').trim();
+
+const getPersonContextTool = (userId: string) =>
+  tool({
+    description:
+      "Get the user's relationship memory for a contact: relationship summary, promises the user made to them, their unresolved asks, and recent thread ids. Use FIRST for questions about a person ('what did I promise Anna?', 'where are we with John?') before searching the inbox. Match by email or name.",
+    parameters: z.object({
+      person: z.string().describe('Email address or name (fragment ok) of the contact'),
+    }),
+    execute: async ({ person }) => {
+      const q = sanitizeLike(person);
+      if (!q) return { people: [] };
+      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+      try {
+        const rows = await db
+          .select()
+          .from(assistantPersonMemory)
+          .where(
+            and(
+              eq(assistantPersonMemory.userId, userId),
+              or(
+                ilike(assistantPersonMemory.email, `%${q}%`),
+                ilike(assistantPersonMemory.displayName, `%${q}%`),
+              ),
+            ),
+          )
+          .orderBy(desc(assistantPersonMemory.lastInteractionAt))
+          .limit(3);
+        return {
+          people: rows.map((r) => ({
+            email: r.email,
+            displayName: r.displayName,
+            company: r.company,
+            relationshipSummary: r.relationshipSummary,
+            promisesIMade: r.promises.slice(0, 8),
+            theirUnresolvedAsks: r.unresolvedAsks.slice(0, 8),
+            lastInteractionAt: r.lastInteractionAt,
+            recentThreadIds: r.recentThreadIds.slice(0, 5),
+          })),
+        };
+      } finally {
+        await conn.end();
+      }
+    },
+  });
+
+const getWorkstreamContextTool = (userId: string) =>
+  tool({
+    description:
+      "Get the user's project/topic memory ('workstreams'): summary, pending decisions, risks, people involved, next milestone. Use for questions about a project or topic ('where is the redesign?', 'what's blocked?'). Omit query to list active workstreams.",
+    parameters: z.object({
+      query: z
+        .string()
+        .optional()
+        .describe('Project/topic name fragment to match; omit to list active workstreams'),
+    }),
+    execute: async ({ query }) => {
+      const q = query ? sanitizeLike(query) : '';
+      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+      try {
+        const rows = await db
+          .select()
+          .from(assistantWorkstreamMemory)
+          .where(
+            and(
+              eq(assistantWorkstreamMemory.userId, userId),
+              q
+                ? or(
+                    ilike(assistantWorkstreamMemory.key, `%${q}%`),
+                    ilike(assistantWorkstreamMemory.title, `%${q}%`),
+                    ilike(assistantWorkstreamMemory.summary, `%${q}%`),
+                  )
+                : eq(assistantWorkstreamMemory.status, 'active'),
+            ),
+          )
+          .orderBy(desc(assistantWorkstreamMemory.updatedAt))
+          .limit(q ? 5 : 10);
+        return {
+          workstreams: rows.map((r) => ({
+            key: r.key,
+            title: r.title,
+            status: r.status,
+            summary: r.summary,
+            pendingDecisions: r.pendingDecisions.slice(0, 8),
+            risks: r.risks.slice(0, 8),
+            relatedPeople: r.relatedPeople.slice(0, 10),
+            nextMilestone: r.nextMilestone,
+            relatedThreadIds: r.relatedThreadIds.slice(0, 5),
+            updatedAt: r.updatedAt,
+          })),
+        };
+      } finally {
+        await conn.end();
+      }
+    },
+  });
+
+const getOpenLoopsTool = (userId: string) =>
+  tool({
+    description:
+      "List the user's open loops — commitments and threads needing attention (needs_reply, waiting_on_other, deadline_risk, meeting_follow_up, decision_needed). Use for 'what needs my attention?', 'what am I waiting on?', 'anything I dropped?'. Filter by queue or person when asked about a specific slice.",
+    parameters: z.object({
+      queue: z
+        .enum(['needs_you', 'waiting_on', 'scheduling', 'drafts_ready', 'likely_dropped'])
+        .optional()
+        .describe('Filter to one queue'),
+      personEmail: z.string().optional().describe('Filter to loops involving this contact email'),
+      limit: z.number().min(1).max(30).default(15).describe('Max loops to return'),
+    }),
+    execute: async ({ queue, personEmail, limit }) => {
+      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+      try {
+        const conditions = [
+          eq(assistantOpenLoop.userId, userId),
+          eq(assistantOpenLoop.status, 'open'),
+        ];
+        if (queue) conditions.push(eq(assistantOpenLoop.queue, queue));
+        if (personEmail) {
+          const p = sanitizeLike(personEmail);
+          if (p) conditions.push(ilike(assistantOpenLoop.personEmail, `%${p}%`));
+        }
+        const rows = await db
+          .select({
+            type: assistantOpenLoop.type,
+            queue: assistantOpenLoop.queue,
+            title: assistantOpenLoop.title,
+            summary: assistantOpenLoop.summary,
+            actionLine: assistantOpenLoop.actionLine,
+            personEmail: assistantOpenLoop.personEmail,
+            workstreamKey: assistantOpenLoop.workstreamKey,
+            confidencePct: assistantOpenLoop.confidencePct,
+            sourceThreadId: assistantOpenLoop.sourceThreadId,
+            updatedAt: assistantOpenLoop.updatedAt,
+          })
+          .from(assistantOpenLoop)
+          .where(and(...conditions))
+          .orderBy(desc(assistantOpenLoop.updatedAt))
+          .limit(limit);
+        return { openLoops: rows };
+      } finally {
+        await conn.end();
+      }
+    },
+  });
+
 export const tools = async (connectionId: string, ragEffect: boolean = false) => {
   // Resolve userId from connectionId for meeting tools
   let userId: string | null = null;
@@ -853,6 +1013,12 @@ export const tools = async (connectionId: string, ragEffect: boolean = false) =>
     meetingTools[Tools.ListMeetings] = listMeetingsTool(userId);
     meetingTools[Tools.GetMeetingSummary] = getMeetingSummaryTool(userId);
     meetingTools[Tools.SearchMeetingTranscript] = searchMeetingTranscriptTool(userId);
+
+    // Second-brain memory reads (person/workstream/open-loop) — read-only,
+    // always available like other read tools.
+    meetingTools[Tools.GetPersonContext] = getPersonContextTool(userId);
+    meetingTools[Tools.GetWorkstreamContext] = getWorkstreamContextTool(userId);
+    meetingTools[Tools.GetOpenLoops] = getOpenLoopsTool(userId);
 
     // Task tools. Reads are always available; writes respect the user's
     // `aiCanWriteTasks` permission (Settings → AI → Permissions), which was
