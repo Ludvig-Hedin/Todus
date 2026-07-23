@@ -138,7 +138,7 @@ plus in-flight pulls are invalidated across account changes.
 Scheduled-email consumers also stop retrying
 stale missing payloads after the retained send window, closing the cancelled-message retry loop.
 
-Verification: iOS `TodusTests` passed 124/124, focused server tests passed 11/11,
+Verification: iOS `TodusTests` passed 127/127, focused server tests passed 11/11,
 file-scoped server ESLint and formatting passed, the iOS Release simulator build succeeded,
 and all 10 seeded UI tests passed on a dedicated clean
 iPhone simulator. Real Gmail/Calendar account behavior still requires the existing physical-device

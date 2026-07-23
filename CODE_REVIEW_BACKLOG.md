@@ -22,7 +22,7 @@ The iOS-focused follow-up closed the remaining safe, code-proven native findings
 - cross-device task deletions now use explicit server tombstones, stale offline upserts cannot resurrect them,
   and reminder/notification mirrors are cleaned only after the local deletion commits.
 
-Verified with 124 iOS unit tests, focused server pagination/scheduled-mail/task-sync tests, file-scoped ESLint,
+Verified with 127 iOS unit tests, focused server pagination/scheduled-mail/task-sync tests, file-scoped ESLint,
 an iOS simulator build, and all 10 native UI tests on a dedicated simulator. Historical finding tables below
 are retained as audit evidence; their iOS rows are superseded by this resolution note.
 
@@ -1173,11 +1173,11 @@ Surfaced during the lag/freeze/crash bug-hunt; source-verified but deferred (low
 
 | ID | File | Issue | Fix direction | Why deferred |
 |----|------|-------|---------------|--------------|
-| PERF-1 | `Features/Docs/DocsListView.swift:332-389` + `Services/Docs/DocsService.swift:115-136` | `listDocs`/`children` filter+sort over ALL docs once per tree node → O(n²) render, redone every body eval | Build a `Dictionary(grouping:by: parentId)` index once per `allDocs` change, cache in `@State`/`@Observable` | Needs a caching layer; Docs is a secondary surface |
+| ~~PERF-1~~ | `Features/Docs/DocsListView.swift` + `Services/Docs/DocsService.swift` | ~~`listDocs`/`children` filtered and sorted all docs once per tree node~~ | **Resolved 2026-07-22** — `DocsService` rebuilds a parent/workspace index only when `allDocs` changes; tree lookups are direct and already sorted | — |
 | ~~PERF-2~~ | `Features/Folders/AddToFolderSheet.swift` | ~~Per-keystroke SwiftData `.fetch()` in the three `existing*IDs` computeds~~ | **Resolved 2026-07-21** — shared `fetchExistingItemIDs` helper; all three pickers cache the set in `@State` populated once in `.task` (membership can't change while the picker is up) | — |
 | ~~PERF-3~~ | `Features/Calendar/CalendarTimeGridView.swift` | ~~60s now-line tick mutated grid-level `@State now` → full-grid relayout every minute~~ | **Resolved 2026-07-21** — now-line extracted into `NowIndicatorView` with `TimelineView(.periodic)` aligned to minute boundaries; top-level `now` state, Combine timer + import removed. Visually re-verify line/dot position on day + multi-day. | — |
 | ~~PERF-4~~ | `Features/Search/GlobalSearchView.swift` | ~~`taskResults`/`emailResults`/`peopleResults` each computed twice per body~~ | **Resolved 2026-07-21** — computed once into locals at the top of `body`; `resultsList` now takes them as params, `hasResults` derived from the locals | — |
-| PERF-5 | `Features/Email/EmailComposeView.swift` (camera path `:1239-1244`) | `AttachmentService.saveImage` (JPEG encode + disk write) runs on the main-thread camera callback | Move off-main; requires boxing the non-`Sendable` `UIImage` across the `Task` boundary | Camera-to-email is infrequent; photo-library path already fixed. Inline `TODO(perf)` left. |
+| ~~PERF-5~~ | `Services/Tasks/AttachmentService.swift` + attachment views | ~~JPEG encoding and disk writes blocked camera, picker, and paste callbacks~~ | **Resolved 2026-07-23** — centralized Sendable boxing/data helpers persist off-main across Create, task detail, AI chat, and mail compose | — |
 | PERF-6 | `Features/Tasks/InboxView.swift:147-160`, `Features/Tasks/BoardView.swift:68-78` | `tasksChangeDigest`/`boardChangeDigest` walk `allTasks` O(n) on every body eval (they're the `.onChange` comparison value) | Cache digest in `@State`, bump it from `TaskCaptureService`/`SyncService` write sites instead of walking in `body` | Knowingly-accepted tradeoff (documented inline); only bites at hundreds+ tasks |
 | PERF-7 | `Services/AI/AIChatService.swift:1164` + `Features/AI/MarkdownView.swift:29-38` | Per-SSE-line `Task.detached` decode (hundreds of hops/reply) and full-markdown reparse on every ~80ms token flush (O(N²) over a long reply) | Decode on one reused background queue for the whole stream; make markdown parse incremental (diff-append) | Both sit on deliberate, documented tradeoffs; off-main already, so no hang |
 

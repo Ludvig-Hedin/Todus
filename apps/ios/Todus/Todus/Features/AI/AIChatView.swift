@@ -309,11 +309,7 @@ struct AIChatView: View {
                 onOpenCamera: { isShowingCamera = true },
                 onOpenPhotoLibrary: { isShowingPhotoPicker = true },
                 onOpenFilePicker: { isShowingFilePicker = true },
-                onAttachImage: { uiImage in
-                    if let filename = AttachmentService.shared.saveImage(uiImage) {
-                        pendingAttachments.append(filename)
-                    }
-                }
+                onAttachImage: persistImage
             )
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
@@ -339,9 +335,8 @@ struct AIChatView: View {
         }
         .fullScreenCover(isPresented: $isShowingCamera) {
             CameraPicker { image in
-                if let image, let filename = AttachmentService.shared.saveImage(image) {
-                    pendingAttachments.append(filename)
-                }
+                guard let image else { return }
+                persistImage(image)
             }
             .ignoresSafeArea()
             .preferredColorScheme(services.appearancePreference.colorScheme)
@@ -391,8 +386,7 @@ struct AIChatView: View {
             guard let newItem else { return }
             Task {
                 if let data = try? await newItem.loadTransferable(type: Data.self),
-                   let uiImage = UIImage(data: data),
-                   let filename = AttachmentService.shared.saveImage(uiImage) {
+                   let filename = await AttachmentService.shared.saveImageDataOffMain(data) {
                     pendingAttachments.append(filename)
                 }
             }
@@ -1497,14 +1491,15 @@ struct AIChatView: View {
                 mentionOptions: mentionOptions,
                 isFocused: isInputFocused,
                 maxHeight: 120,
-                onPasteImage: { image in
-                    if let filename = AttachmentService.shared.saveImage(image) {
-                        pendingAttachments.append(filename)
-                    }
-                },
+                onPasteImage: persistImage,
                 onPasteFileData: { data, ext in
-                    if let filename = AttachmentService.shared.saveData(data, fileExtension: ext) {
-                        pendingAttachments.append(filename)
+                    Task { @MainActor in
+                        if let filename = await AttachmentService.shared.saveDataOffMain(
+                            data,
+                            fileExtension: ext
+                        ) {
+                            pendingAttachments.append(filename)
+                        }
                     }
                 },
                 onCommand: { _ in },
@@ -1628,6 +1623,14 @@ struct AIChatView: View {
         .simultaneousGesture(
             TapGesture().onEnded { isInputFocused = true }
         )
+    }
+
+    private func persistImage(_ image: UIImage) {
+        Task { @MainActor in
+            if let filename = await AttachmentService.shared.saveImageOffMain(image) {
+                pendingAttachments.append(filename)
+            }
+        }
     }
 
     /// Attachment thumbnail — adapts to context:

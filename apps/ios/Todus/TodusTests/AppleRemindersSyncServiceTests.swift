@@ -8,6 +8,14 @@ import SwiftData
 @MainActor
 final class AppleRemindersSyncServiceTests: XCTestCase {
 
+    func testDefaultDirectionDescribesItsActualImportAndPushSemantics() {
+        XCTAssertEqual(RemindersSyncDirection.twoWay.title, "Both Apps")
+        XCTAssertEqual(
+            RemindersSyncDirection.twoWay.subtitle,
+            "Push Todus changes and import new reminders"
+        )
+    }
+
     // MARK: - maxCoalescedRetries cap (H10)
 
     func testCoalescedRetryCountIsBoundedToThreeAttempts() async throws {

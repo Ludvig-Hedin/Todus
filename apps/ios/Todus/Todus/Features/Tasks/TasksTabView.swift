@@ -23,6 +23,7 @@ struct TasksTabView: View {
     @State private var showOrganizeSheet = false
     @State private var showClearCompletedConfirm = false
     @State private var folderToDelete: FolderRecord?
+    @State private var showFolderDeleteError = false
     @Namespace private var taskViewModeSegmentNamespace
 
     @State private var headerHeight: CGFloat = 100
@@ -217,12 +218,19 @@ struct TasksTabView: View {
         ) {
             Button("Delete", role: .destructive) {
                 guard let folder = folderToDelete else { return }
-                services.captureService.deleteFolder(folder, in: modelContext)
+                if !services.captureService.deleteFolder(folder, in: modelContext) {
+                    showFolderDeleteError = true
+                }
                 folderToDelete = nil
             }
             Button("Cancel", role: .cancel) {
                 folderToDelete = nil
             }
+        }
+        .alert("Couldn’t Delete Folder", isPresented: $showFolderDeleteError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The folder is still available. Try again.")
         }
     }
 

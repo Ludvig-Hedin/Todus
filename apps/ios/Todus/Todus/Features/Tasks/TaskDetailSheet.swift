@@ -134,11 +134,8 @@ struct TaskDetailSheet: View {
         }
         .fullScreenCover(isPresented: $isShowingCamera) {
             TaskDetailCameraPicker { image in
-                // Save the actual captured image to disk
-                if let image = image,
-                   let filename = AttachmentService.shared.saveImage(image) {
-                    appendAttachments([filename])
-                }
+                guard let image else { return }
+                persistImage(image)
             }
             .ignoresSafeArea()
             .preferredColorScheme(services.appearancePreference.colorScheme)
@@ -148,8 +145,7 @@ struct TaskDetailSheet: View {
             // Load actual image data and save to disk
             Task {
                 if let data = try? await newItem.loadTransferable(type: Data.self),
-                   let uiImage = UIImage(data: data),
-                   let filename = AttachmentService.shared.saveImage(uiImage) {
+                   let filename = await AttachmentService.shared.saveImageDataOffMain(data) {
                     appendAttachments([filename])
                 }
             }
@@ -429,6 +425,14 @@ struct TaskDetailSheet: View {
 
     private func appendAttachments(_ names: [String]) {
         attachmentNames.append(contentsOf: names)
+    }
+
+    private func persistImage(_ image: UIImage) {
+        Task { @MainActor in
+            if let filename = await AttachmentService.shared.saveImageOffMain(image) {
+                appendAttachments([filename])
+            }
+        }
     }
 
     private func saveTask() {

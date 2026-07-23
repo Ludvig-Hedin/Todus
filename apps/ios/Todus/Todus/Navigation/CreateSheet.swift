@@ -204,10 +204,8 @@ struct CreateSheet: View {
         }
         .fullScreenCover(isPresented: $isShowingCamera) {
             CameraPicker { image in
-                if let image = image,
-                   let filename = AttachmentService.shared.saveImage(image) {
-                    pendingAttachments.append(filename)
-                }
+                guard let image else { return }
+                persistImage(image)
             }
             .ignoresSafeArea()
         }
@@ -215,8 +213,7 @@ struct CreateSheet: View {
             guard let newItem else { return }
             Task {
                 if let data = try? await newItem.loadTransferable(type: Data.self),
-                   let uiImage = UIImage(data: data),
-                   let filename = AttachmentService.shared.saveImage(uiImage) {
+                   let filename = await AttachmentService.shared.saveImageDataOffMain(data) {
                     pendingAttachments.append(filename)
                 }
             }
@@ -1361,8 +1358,14 @@ struct CreateSheet: View {
     // MARK: - Image Paste Handler
 
     private func handlePastedImage(_ image: UIImage) {
-        if let filename = AttachmentService.shared.saveImage(image) {
-            pendingAttachments.append(filename)
+        persistImage(image)
+    }
+
+    private func persistImage(_ image: UIImage) {
+        Task { @MainActor in
+            if let filename = await AttachmentService.shared.saveImageOffMain(image) {
+                pendingAttachments.append(filename)
+            }
         }
     }
 }

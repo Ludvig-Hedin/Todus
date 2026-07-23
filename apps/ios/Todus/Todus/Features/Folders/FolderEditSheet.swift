@@ -179,17 +179,40 @@ struct FolderEditSheet: View {
                 saveError = "Enter a folder name."
                 AppHaptic.error.play()
                 return
+            case .saveFailed:
+                saveError = "The folder could not be saved. Try again."
+                AppHaptic.error.play()
+                return
             }
         case .edit(let folder):
             if folder.name != cleaned {
-                service.renameFolder(folder, to: cleaned, in: modelContext)
+                switch service.renameFolder(folder, to: cleaned, in: modelContext) {
+                case .renamed:
+                    break
+                case .duplicate:
+                    saveError = "A folder named \"\(cleaned)\" already exists."
+                    AppHaptic.error.play()
+                    return
+                case .invalidName:
+                    saveError = "Enter a folder name."
+                    AppHaptic.error.play()
+                    return
+                case .saveFailed:
+                    saveError = "The folder name could not be saved. Try again."
+                    AppHaptic.error.play()
+                    return
+                }
             }
-            service.updateFolderAppearance(
+            guard service.updateFolderAppearance(
                 folder,
                 colorHex: .some(selectedColor),
                 iconName: .some(selectedIcon),
                 in: modelContext
-            )
+            ) else {
+                saveError = "The folder appearance could not be saved. Try again."
+                AppHaptic.error.play()
+                return
+            }
             onSaved?(folder)
         }
         AppHaptic.success.play()

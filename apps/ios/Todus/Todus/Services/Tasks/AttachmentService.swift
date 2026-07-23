@@ -3,6 +3,13 @@ import ImageIO
 import UIKit
 import UniformTypeIdentifiers
 
+/// UIKit owns `UIImage`, but captured/picked instances are immutable once they
+/// reach attachment persistence. The box makes that ownership transfer explicit
+/// while JPEG encoding and disk I/O run outside the main actor.
+private struct SendableAttachmentImage: @unchecked Sendable {
+    let image: UIImage
+}
+
 /// Manages local file storage for task attachments.
 /// Saves images and files to the app's Documents/Attachments directory
 /// and returns unique filenames that can be stored in TaskRecord.attachmentNames.
@@ -158,6 +165,30 @@ final class AttachmentService: @unchecked Sendable {
         } catch {
             return nil
         }
+    }
+
+    /// Persists a camera or paste image without blocking SwiftUI/UIKit callbacks.
+    @MainActor
+    func saveImageOffMain(_ image: UIImage, quality: CGFloat = 0.85) async -> String? {
+        let boxedImage = SendableAttachmentImage(image: image)
+        return await Task.detached(priority: .userInitiated) { [boxedImage, quality] in
+            AttachmentService.shared.saveImage(boxedImage.image, quality: quality)
+        }.value
+    }
+
+    /// Decodes and persists a PhotosPicker payload away from the main actor.
+    func saveImageDataOffMain(_ data: Data, quality: CGFloat = 0.85) async -> String? {
+        await Task.detached(priority: .userInitiated) { [data, quality] in
+            guard let image = UIImage(data: data) else { return String?.none }
+            return AttachmentService.shared.saveImage(image, quality: quality)
+        }.value
+    }
+
+    /// Persists pasted file data away from the main actor.
+    func saveDataOffMain(_ data: Data, fileExtension: String) async -> String? {
+        await Task.detached(priority: .userInitiated) { [data, fileExtension] in
+            AttachmentService.shared.saveData(data, fileExtension: fileExtension)
+        }.value
     }
 
     /// Saves raw data to disk with a given extension, returns the unique filename

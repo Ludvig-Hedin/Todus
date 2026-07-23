@@ -18,6 +18,7 @@ struct FolderDetailView: View {
     @State private var showEditSheet = false
     @State private var showAddSheet = false
     @State private var showDeleteConfirm = false
+    @State private var showDeleteError = false
     @State private var isInboxDropTargeted = false
 
     private var accent: Color {
@@ -85,12 +86,20 @@ struct FolderDetailView: View {
             titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) {
-                services.captureService.deleteFolder(folder, in: modelContext)
-                dismiss()
+                if services.captureService.deleteFolder(folder, in: modelContext) {
+                    dismiss()
+                } else {
+                    showDeleteError = true
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Tasks in this folder will move back to the inbox. Saved emails, events, and chats will be removed from the folder.")
+        }
+        .alert("Couldn’t Delete Folder", isPresented: $showDeleteError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The folder is still available. Try again.")
         }
         .task { await load() }
         .refreshable { await load() }

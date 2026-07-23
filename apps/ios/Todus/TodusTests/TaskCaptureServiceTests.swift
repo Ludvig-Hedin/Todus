@@ -1,5 +1,6 @@
 import XCTest
 import SwiftData
+import UIKit
 @testable import Todus
 
 final class TaskCaptureServiceTests: XCTestCase {
@@ -22,6 +23,40 @@ final class TaskCaptureServiceTests: XCTestCase {
 
     func testInstantTitleKeepsOriginalInput() {
         XCTAssertEqual(TaskCaptureService.instantTitle(from: "  Review QA checklist "), "Review QA checklist")
+    }
+
+    @MainActor
+    func testFolderRenameRejectsCaseInsensitiveCollisionButAllowsCurrentFolder() {
+        let current = FolderRecord(name: "Work")
+        let other = FolderRecord(name: "Personal")
+
+        XCTAssertTrue(
+            TaskCaptureService.folderNameExists("PERSONAL", excluding: current.id, in: [current, other])
+        )
+        XCTAssertFalse(
+            TaskCaptureService.folderNameExists("work", excluding: current.id, in: [current, other])
+        )
+    }
+
+    @MainActor
+    func testAttachmentImagePersistenceHelpersCreateReadableJPEGs() async throws {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
+
+        let capturedResult = await AttachmentService.shared.saveImageOffMain(image)
+        let capturedName = try XCTUnwrap(capturedResult)
+        defer { AttachmentService.shared.delete(filename: capturedName) }
+        let capturedData = try Data(contentsOf: AttachmentService.shared.url(for: capturedName))
+        XCTAssertTrue(capturedData.starts(with: [0xFF, 0xD8, 0xFF]))
+
+        let pickedData = try XCTUnwrap(image.pngData())
+        let pickedResult = await AttachmentService.shared.saveImageDataOffMain(pickedData)
+        let pickedName = try XCTUnwrap(pickedResult)
+        defer { AttachmentService.shared.delete(filename: pickedName) }
+        let persistedPickedData = try Data(contentsOf: AttachmentService.shared.url(for: pickedName))
+        XCTAssertTrue(persistedPickedData.starts(with: [0xFF, 0xD8, 0xFF]))
     }
 
     // MARK: - Capture sync safety (IOS-0608-1)

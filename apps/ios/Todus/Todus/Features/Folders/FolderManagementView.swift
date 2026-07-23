@@ -19,6 +19,7 @@ struct FolderManagementView: View {
     @State private var showCreateSheet = false
     @State private var openingFolder: FolderRecord?
     @State private var folderToDelete: FolderRecord?
+    @State private var showDeleteError = false
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
@@ -107,11 +108,18 @@ struct FolderManagementView: View {
             }
             Button("Delete", role: .destructive) {
                 guard let folder = folderToDelete else { return }
-                services.captureService.deleteFolder(folder, in: modelContext)
+                if !services.captureService.deleteFolder(folder, in: modelContext) {
+                    showDeleteError = true
+                }
                 folderToDelete = nil
             }
         } message: {
             Text("This action cannot be undone.")
+        }
+        .alert("Couldn’t Delete Folder", isPresented: $showDeleteError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The folder is still available. Try again.")
         }
     }
 }

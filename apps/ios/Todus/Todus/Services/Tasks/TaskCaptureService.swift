@@ -107,6 +107,7 @@ final class TaskCaptureService {
         }
 
         var mutations: [SyncMutation] = []
+        var createdTasks: [TaskRecord] = []
         // Capture (taskID, rawInput) pairs so enrichment can only run for the
         // tasks that survive the initial sync round-trip. (Bug H8 — previously
         // queueEnrichment was fired inline in this loop, racing the rollback
@@ -135,8 +136,7 @@ final class TaskCaptureService {
                 syncState: .pendingUpload
             )
             context.insert(task)
-            syncReminder(task, in: context)
-            scheduleNotificationIfNeeded(task)
+            createdTasks.append(task)
             mutations.append(SyncMutation(action: .upsert, task: task.asPayload(), taskID: task.id))
             enrichmentInputs.append((taskID: task.id, rawInput: line))
         }
@@ -151,6 +151,13 @@ final class TaskCaptureService {
             lastRollbackCount = mutations.count
             lastRollbackAt = .now
             return
+        }
+
+        // Only create external side effects after SwiftData has durably accepted the
+        // tasks. Otherwise a failed save can leave orphaned Reminders/notifications.
+        for task in createdTasks {
+            syncReminder(task, in: context)
+            scheduleNotificationIfNeeded(task)
         }
 
         Task { @MainActor [weak self, syncService] in
@@ -197,9 +204,20 @@ final class TaskCaptureService {
             syncState: .pendingUpload
         )
         context.insert(task)
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            AppLogger.shared.log(
+                "TaskCaptureService.captureInStatus: save failed: \(error.localizedDescription)"
+            )
+            lastRollbackCount = 1
+            lastRollbackAt = .now
+            return
+        }
+
         syncReminder(task, in: context)
         scheduleNotificationIfNeeded(task)
-        try? context.save()
 
         Task { @MainActor [syncService] in
             await syncService.enqueue([SyncMutation(action: .upsert, task: task.asPayload(), taskID: task.id)], in: context)
@@ -214,7 +232,7 @@ final class TaskCaptureService {
         task.status = status
         task.updatedAt = .now
         task.syncState = .pendingUpload
-        persist(task: task, in: context)
+        guard persist(task: task, in: context) else { return }
         syncReminder(task, in: context)
         if status == .done {
             // Cancel notification when task is completed
@@ -232,7 +250,7 @@ final class TaskCaptureService {
         task.updatedAt = .now
         task.parseState = .parsed
         task.syncState = .pendingUpload
-        persist(task: task, in: context)
+        guard persist(task: task, in: context) else { return }
         syncReminder(task, in: context)
     }
 
@@ -241,7 +259,7 @@ final class TaskCaptureService {
         task.priority = priority
         task.updatedAt = .now
         task.syncState = .pendingUpload
-        persist(task: task, in: context)
+        guard persist(task: task, in: context) else { return }
         syncReminder(task, in: context)
     }
 
@@ -269,7 +287,7 @@ final class TaskCaptureService {
         task.updatedAt = .now
         task.parseState = .parsed
         task.syncState = .pendingUpload
-        persist(task: task, in: context)
+        guard persist(task: task, in: context) else { return }
         syncReminder(task, in: context)
         // Cancel notification when marking done via detail sheet, then reschedule if still active
         if status == .done {
@@ -285,7 +303,7 @@ final class TaskCaptureService {
         task.dueDate = date
         task.updatedAt = .now
         task.syncState = .pendingUpload
-        persist(task: task, in: context)
+        guard persist(task: task, in: context) else { return }
         syncReminder(task, in: context)
         scheduleNotificationIfNeeded(task)
     }
@@ -294,7 +312,7 @@ final class TaskCaptureService {
         task.folder = folder
         task.updatedAt = .now
         task.syncState = .pendingUpload
-        persist(task: task, in: context)
+        guard persist(task: task, in: context) else { return }
         syncReminder(task, in: context)
     }
 
@@ -370,6 +388,14 @@ final class TaskCaptureService {
         case created(FolderRecord)
         case duplicate(FolderRecord)
         case invalidName
+        case saveFailed
+    }
+
+    enum RenameFolderOutcome {
+        case renamed
+        case duplicate
+        case invalidName
+        case saveFailed
     }
 
     /// Get-or-create semantics: a name collision returns the existing folder.
@@ -384,7 +410,7 @@ final class TaskCaptureService {
         switch createFolderExclusive(named: name, colorHex: colorHex, iconName: iconName, in: context) {
         case .created(let folder), .duplicate(let folder):
             return folder
-        case .invalidName:
+        case .invalidName, .saveFailed:
             return nil
         }
     }
@@ -400,7 +426,9 @@ final class TaskCaptureService {
 
         let existing = (try? context.fetch(FetchDescriptor<FolderRecord>())) ?? []
 
-        if let existingFolder = existing.first(where: { $0.name.compare(cleanedName, options: .caseInsensitive) == .orderedSame }) {
+        if let existingFolder = existing.first(where: {
+            $0.name.compare(cleanedName, options: .caseInsensitive) == .orderedSame
+        }) {
             return .duplicate(existingFolder)
         }
 
@@ -412,7 +440,15 @@ final class TaskCaptureService {
             position: nextPosition
         )
         context.insert(folder)
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            AppLogger.shared.log(
+                "TaskCaptureService.createFolderExclusive: save failed: \(error.localizedDescription)"
+            )
+            return .saveFailed
+        }
         Task {
             await folderSyncService.enqueue(
                 .upsert(
@@ -427,13 +463,29 @@ final class TaskCaptureService {
         return .created(folder)
     }
 
-    func renameFolder(_ folder: FolderRecord, to name: String, in context: ModelContext) {
+    func renameFolder(
+        _ folder: FolderRecord,
+        to name: String,
+        in context: ModelContext
+    ) -> RenameFolderOutcome {
         let cleanedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanedName.isEmpty else { return }
+        guard !cleanedName.isEmpty else { return .invalidName }
+        let existing = (try? context.fetch(FetchDescriptor<FolderRecord>())) ?? []
+        guard !Self.folderNameExists(cleanedName, excluding: folder.id, in: existing) else {
+            return .duplicate
+        }
 
         folder.name = cleanedName
         folder.updatedAt = .now
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            AppLogger.shared.log(
+                "TaskCaptureService.renameFolder: save failed: \(error.localizedDescription)"
+            )
+            return .saveFailed
+        }
         Task {
             await folderSyncService.enqueue(
                 .upsert(
@@ -445,19 +497,29 @@ final class TaskCaptureService {
                 )
             )
         }
+        return .renamed
     }
 
     /// Update color and/or icon. Pass nil to clear, or omit to leave unchanged.
+    @discardableResult
     func updateFolderAppearance(
         _ folder: FolderRecord,
         colorHex: String?? = nil,
         iconName: String?? = nil,
         in context: ModelContext
-    ) {
+    ) -> Bool {
         if case let .some(value) = colorHex { folder.colorHex = value }
         if case let .some(value) = iconName { folder.iconName = value }
         folder.updatedAt = .now
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            AppLogger.shared.log(
+                "TaskCaptureService.updateFolderAppearance: save failed: \(error.localizedDescription)"
+            )
+            return false
+        }
         Task {
             await folderSyncService.enqueue(
                 .upsert(
@@ -469,18 +531,28 @@ final class TaskCaptureService {
                 )
             )
         }
+        return true
     }
 
     /// Persist a new ordering. Updates the `position` field of each folder
     /// to match its index in the array, then syncs to the backend.
-    func reorderFolders(_ orderedFolders: [FolderRecord], in context: ModelContext) {
+    @discardableResult
+    func reorderFolders(_ orderedFolders: [FolderRecord], in context: ModelContext) -> Bool {
         for (index, folder) in orderedFolders.enumerated() {
             if folder.position != index {
                 folder.position = index
                 folder.updatedAt = .now
             }
         }
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            AppLogger.shared.log(
+                "TaskCaptureService.reorderFolders: save failed: \(error.localizedDescription)"
+            )
+            return false
+        }
         // Encode each repositioned folder as an upsert mutation so position changes
         // are durable across reconnects (the legacy reorder endpoint had no offline queue).
         let snapshots = orderedFolders.map { f in
@@ -497,9 +569,11 @@ final class TaskCaptureService {
                 await folderSyncService.enqueue(mutation)
             }
         }
+        return true
     }
 
-    func deleteFolder(_ folder: FolderRecord, in context: ModelContext) {
+    @discardableResult
+    func deleteFolder(_ folder: FolderRecord, in context: ModelContext) -> Bool {
         let folderId = folder.id.uuidString
         // Use in-memory filtering: folderID is a computed property on TaskRecord,
         // so it cannot be used in a SwiftData #Predicate (runtime crash).
@@ -512,13 +586,22 @@ final class TaskCaptureService {
             return SyncMutation(action: .upsert, task: task.asPayload(), taskID: task.id)
         }
         context.delete(folder)
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            AppLogger.shared.log(
+                "TaskCaptureService.deleteFolder: save failed: \(error.localizedDescription)"
+            )
+            return false
+        }
         Task { @MainActor [syncService, folderSyncService] in
             if !mutations.isEmpty {
                 await syncService.enqueue(mutations, in: context)
             }
             await folderSyncService.enqueue(.delete(id: folderId))
         }
+        return true
     }
 
     func syncSharedFolders(in context: ModelContext) async {
@@ -633,12 +716,37 @@ final class TaskCaptureService {
         return trimmed.isEmpty ? "New task" : trimmed
     }
 
-    private func persist(task: TaskRecord, in context: ModelContext) {
+    static func folderNameExists(
+        _ name: String,
+        excluding folderID: UUID?,
+        in folders: [FolderRecord]
+    ) -> Bool {
+        folders.contains {
+            $0.id != folderID
+                && $0.name.compare(name, options: .caseInsensitive) == .orderedSame
+        }
+    }
+
+    @discardableResult
+    private func persist(task: TaskRecord, in context: ModelContext) -> Bool {
         let trace = PerformanceTrace.beginInterval(
             PerformanceTrace.saveContext,
             message: "TaskCaptureService.persist begin task=\(task.id.uuidString)"
         )
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            PerformanceTrace.endInterval(
+                PerformanceTrace.saveContext,
+                trace,
+                message: "TaskCaptureService.persist failed task=\(task.id.uuidString)"
+            )
+            AppLogger.shared.log(
+                "TaskCaptureService.persist: save failed for task \(task.id): \(error.localizedDescription)"
+            )
+            return false
+        }
         PerformanceTrace.endInterval(
             PerformanceTrace.saveContext,
             trace,
@@ -648,6 +756,7 @@ final class TaskCaptureService {
         Task { @MainActor [syncService] in
             await syncService.enqueue([mutation], in: context)
         }
+        return true
     }
 
     private func queueEnrichment(
@@ -701,7 +810,15 @@ final class TaskCaptureService {
             task.parseState = .parsed
             task.updatedAt = .now
             task.syncState = .pendingUpload
-            try? context.save()
+            do {
+                try context.save()
+            } catch {
+                context.rollback()
+                AppLogger.shared.log(
+                    "TaskCaptureService.queueEnrichment: save failed for task \(taskID): \(error.localizedDescription)"
+                )
+                return
+            }
             syncReminder(task, in: context)
             // Schedule notification if enrichment applied a new due date
             if appliedNewDueDate {
@@ -921,7 +1038,15 @@ final class TaskCaptureService {
         context.insert(item)
         folder.cachedItemCount += 1
         folder.updatedAt = .now
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            AppLogger.shared.log(
+                "TaskCaptureService.addItemToFolder: save failed: \(error.localizedDescription)"
+            )
+            return
+        }
 
         // Optimistic count was bumped above. Roll back on sync failure so the local
         // mirror doesn't drift from the server over time. fetchFolderSummary still
@@ -970,7 +1095,15 @@ final class TaskCaptureService {
             folder.cachedItemCount = max(0, folder.cachedItemCount - matching.count)
             folder.updatedAt = .now
         }
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            AppLogger.shared.log(
+                "TaskCaptureService.removeItemFromFolder: save failed: \(error.localizedDescription)"
+            )
+            return
+        }
 
         Task {
             await syncFolderItemRemove(
