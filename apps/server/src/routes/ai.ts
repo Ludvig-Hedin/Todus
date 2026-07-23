@@ -16,6 +16,7 @@ import { resolveModel, isLocalInference } from '../lib/ai-model-resolver';
 import { systemPrompt } from '../services/call-service/system-prompt';
 import { GENERATIVE_UI_PROMPT } from '../lib/generative-ui-contract';
 import { getSharedAIProfilePromptForUser } from '../lib/ai-profile';
+import { getSecondBrainDigest } from '../lib/assistant-digest';
 import { hasAiCredits, trackAiUsage } from '../lib/billing';
 import { serializedFileSchema } from '../lib/schemas';
 import { perplexity } from '@ai-sdk/perplexity';
@@ -594,6 +595,29 @@ aiRouter.post('/chat', async (c) => {
     }
   } catch (error) {
     console.warn('[AIProfile] Failed to inject AI profile into /ai/chat for user:', user.id, error);
+  }
+
+  // ── Second-brain digest: open loops + active workstreams ─────────────────
+  // Native clients execute tools locally, so they can't reach the ZeroAgent
+  // memory tools (getPersonContext etc.). Inject a compact ambient digest
+  // instead. Empty (and skipped) until the briefing sync has populated the
+  // assistant_* tables. Failure must never block the chat flow.
+  try {
+    const digest = await getSecondBrainDigest(user.id);
+    if (digest) {
+      const systemIdx = enrichedMessages.findIndex((m) => m.role === 'system');
+      if (systemIdx >= 0) {
+        enrichedMessages = [...enrichedMessages];
+        enrichedMessages[systemIdx] = {
+          ...enrichedMessages[systemIdx],
+          content: `${enrichedMessages[systemIdx].content}\n\n${digest}`,
+        };
+      } else {
+        enrichedMessages = [{ role: 'system', content: digest }, ...enrichedMessages];
+      }
+    }
+  } catch (error) {
+    console.warn('[SecondBrain] Failed to inject digest into /ai/chat for user:', user.id, error);
   }
 
   // Inject the generative-UI catalog so the AI knows which inline cards it can render
