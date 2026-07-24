@@ -598,10 +598,10 @@ aiRouter.post('/chat', async (c) => {
   }
 
   // ── Second-brain digest: open loops + active workstreams ─────────────────
-  // Native clients execute tools locally, so they can't reach the ZeroAgent
-  // memory tools (getPersonContext etc.). Inject a compact ambient digest
-  // instead. Empty (and skipped) until the briefing sync has populated the
-  // assistant_* tables. Failure must never block the chat flow.
+  // Ambient context complementing the on-demand memory tools (getPersonContext
+  // etc., proxied by native clients via /api/ai/do/*). Empty (and skipped)
+  // until the briefing sync has populated the assistant_* tables. Failure must
+  // never block the chat flow.
   try {
     const digest = await getSecondBrainDigest(user.id);
     if (digest) {
@@ -797,6 +797,70 @@ aiRouter.post('/chat', async (c) => {
               },
             },
             required: ['to', 'subject', 'body'],
+          },
+        },
+      },
+      // ── Second-brain memory (read-only; executed client-side via /api/ai/do/*) ──
+      {
+        type: 'function',
+        function: {
+          name: 'getPersonContext',
+          description:
+            "Get the user's relationship memory for a contact: relationship summary, promises the user made to them, their unresolved asks, and recent thread ids. Use FIRST for questions about a person ('what did I promise Anna?', 'where are we with John?') before searching the inbox. Match by email or name.",
+          parameters: {
+            type: 'object',
+            properties: {
+              person: {
+                type: 'string',
+                description: 'Email address or name (fragment ok) of the contact',
+              },
+            },
+            required: ['person'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'getWorkstreamContext',
+          description:
+            "Get the user's project/topic memory ('workstreams'): summary, pending decisions, risks, people involved, next milestone. Use for questions about a project or topic ('where is the redesign?', 'what's blocked?'). Omit query to list active workstreams.",
+          parameters: {
+            type: 'object',
+            properties: {
+              query: {
+                type: 'string',
+                description: 'Project/topic name fragment to match; omit to list active workstreams',
+              },
+            },
+            required: [],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'getOpenLoops',
+          description:
+            "List the user's open loops — commitments and threads needing attention (needs_reply, waiting_on_other, deadline_risk, meeting_follow_up, decision_needed). Use for 'what needs my attention?', 'what am I waiting on?', 'anything I dropped?'. Filter by queue or person when asked about a specific slice.",
+          parameters: {
+            type: 'object',
+            properties: {
+              queue: {
+                type: 'string',
+                enum: ['needs_you', 'waiting_on', 'scheduling', 'drafts_ready', 'likely_dropped'],
+                description: 'Filter to one queue',
+              },
+              personEmail: {
+                type: 'string',
+                description: 'Filter to loops involving this contact email',
+              },
+              limit: {
+                type: 'number',
+                description: 'Max loops to return (1-30, default 15)',
+              },
+            },
+            required: [],
           },
         },
       },

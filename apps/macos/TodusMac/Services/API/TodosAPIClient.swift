@@ -122,6 +122,24 @@ final class TodosAPIClient {
         return try JSONDecoder.apiDecoder.decode(T.self, from: data)
     }
 
+    /// Send a pre-encoded request body to any backend path and return the raw response
+    /// `Data`. Reuses the same auth header + silent-refresh + backoff pipeline as the
+    /// other helpers so non-tRPC endpoints (e.g. `/api/ai/do/*`) don't have to hand-roll
+    /// their own URLSession plumbing.
+    func sendRawData(
+        path: String,
+        method: String = "POST",
+        body: Data?
+    ) async throws -> Data {
+        let url = baseURL.appending(path: path)
+        let isMutation = method.uppercased() != "GET" && method.uppercased() != "HEAD"
+
+        let (data, _) = try await executeURLRequest(isMutation: isMutation) { [self] in
+            self.makeRequest(url: url, method: method, body: body)
+        }
+        return data
+    }
+
     // MARK: - Account
 
     /// Delete the current user's account and all associated data on the backend.

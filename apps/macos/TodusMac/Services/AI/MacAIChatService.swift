@@ -815,8 +815,29 @@ final class MacAIChatService {
                 return Self.encodeToolResult(success: false, message: "Failed to send email")
             }
 
+        case "getPersonContext", "getWorkstreamContext", "getOpenLoops":
+            // Read-only second-brain memory lookups — no permission gate, no
+            // mutation chip. Executed server-side; result JSON goes back to the model.
+            return await executeMemoryTool(named: call.name, argsData: argsData)
+
         default:
             return Self.encodeToolResult(success: false, message: "Unknown tool '\(call.name)'")
+        }
+    }
+
+    /// Proxies a second-brain memory tool call to the backend's `/api/ai/do/<tool>`
+    /// endpoint (the same executor the web/voice flows use) and returns the raw
+    /// JSON result for the model.
+    private func executeMemoryTool(named name: String, argsData: Data) async -> String {
+        do {
+            // Models may stream empty arguments for optional-param tools; the
+            // endpoint requires a JSON body, so substitute `{}`.
+            let body = argsData.isEmpty ? Data("{}".utf8) : argsData
+            let data = try await apiClient.sendRawData(path: "api/ai/do/\(name)", body: body)
+            return String(data: data, encoding: .utf8)
+                ?? Self.encodeToolResult(success: false, message: "Unreadable memory result")
+        } catch {
+            return Self.encodeToolResult(success: false, message: "Memory lookup failed: \(error.localizedDescription)")
         }
     }
 

@@ -952,6 +952,9 @@ const getOpenLoopsTool = (userId: string) =>
       limit: z.number().min(1).max(30).default(15).describe('Max loops to return'),
     }),
     execute: async ({ queue, personEmail, limit }) => {
+      // /api/ai/do/* calls execute() directly, bypassing zod defaults/bounds —
+      // clamp here so a missing or wild `limit` can't go unbounded.
+      const take = Math.min(Math.max(Math.trunc(Number(limit) || 15), 1), 30);
       const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
       try {
         const conditions = [
@@ -979,7 +982,7 @@ const getOpenLoopsTool = (userId: string) =>
           .from(assistantOpenLoop)
           .where(and(...conditions))
           .orderBy(desc(assistantOpenLoop.updatedAt))
-          .limit(limit);
+          .limit(take);
         return { openLoops: rows };
       } finally {
         await conn.end();

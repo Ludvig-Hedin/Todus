@@ -6,11 +6,10 @@ import { env } from '../env';
 /**
  * Compact second-brain digest for native-client chat (/api/ai/chat).
  *
- * The web chat (ZeroAgent) reads the same tables on demand via the
- * getPersonContext / getWorkstreamContext / getOpenLoops tools. The native
- * clients (iOS/macOS) execute their tool calls locally, so instead of new
- * remote tools we inject a small ambient digest into the system prompt:
- * top open loops + active workstreams. Returns '' when the user has no
+ * Both chat surfaces also expose the getPersonContext / getWorkstreamContext /
+ * getOpenLoops tools for on-demand reads (native clients proxy them via
+ * /api/ai/do/*). This digest is the ambient complement injected into the
+ * system prompt: top open loops + active workstreams. Returns '' when the user has no
  * derived memory yet (briefing sync never ran) so callers can skip cleanly.
  *
  * Size is capped (8 loops, 5 workstreams, trimmed summaries) to keep the
@@ -68,6 +67,7 @@ export const getSecondBrainDigest = async (userId: string): Promise<string> => {
 
     const sections: string[] = [
       '## Assistant memory (auto-derived from the user\'s email and meetings; may be incomplete or stale — verify before acting on it)',
+      'For deeper detail use the getPersonContext, getWorkstreamContext, and getOpenLoops tools.',
     ];
 
     if (loops.length > 0) {
