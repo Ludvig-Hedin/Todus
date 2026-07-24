@@ -31,6 +31,9 @@ struct TaskRowView: View {
                     Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
                         .scaledFont(size: 20, weight: .medium)
                         .foregroundStyle(task.completed ? task.status.tintColor : AppTheme.subtleText)
+                        // Bounce the glyph on toggle to pair with the completion haptic.
+                        // Feed a constant when reduce-motion is on so the effect never fires.
+                        .symbolEffect(.bounce, value: reduceMotion ? false : task.completed)
                 }
                 .buttonStyle(.plain)
                 .frame(width: 40, height: 40)
