@@ -140,6 +140,13 @@ struct RootView: View {
             await services.syncService.reconcileRemoteTasks(in: modelContext)
             await services.aiChatService.reloadForAuthenticatedUser()
             await services.loadSharedAIProfile()
+            // Warm the Home surface so it renders populated instead of spinning the
+            // first time the user opens it: prefetch the inbox threads and the
+            // assistant briefing into their caches. Both are cache-first and
+            // failure-tolerant (no-op offline / on error), so this never blocks or
+            // breaks the shell — it just means the data is usually ready on arrival.
+            await services.emailService.ensureInitialInboxLoaded()
+            _ = await services.emailService.loadAssistantBriefing()
         }
         .task(id: services.authService.showsOnboarding) {
             // Guests never authenticate, so the auth-keyed task above never captures

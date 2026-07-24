@@ -80,6 +80,7 @@ final class TaskCaptureService {
     /// a manually selected folder, and an override due date.
     /// Attachments are only applied to the first task when multi-line input is used,
     /// since they logically belong to the first captured thought.
+    @discardableResult
     func capture(
         rawComposerText: String,
         attachmentNames: [String] = [],
@@ -88,9 +89,9 @@ final class TaskCaptureService {
         in context: ModelContext,
         locale: Locale = .current,
         timeZone: TimeZone = .current
-    ) {
+    ) -> Bool {
         let lines = Self.splitInputLines(rawComposerText)
-        guard !lines.isEmpty else { return }
+        guard !lines.isEmpty else { return false }
 
         // Surface truncation to observers so the UI can tell the user some lines were
         // dropped instead of silently accepting only the first `maxBulkCaptureLines`.
@@ -150,7 +151,7 @@ final class TaskCaptureService {
             AppLogger.shared.log("TaskCaptureService.capture: save failed: \(error.localizedDescription)")
             lastRollbackCount = mutations.count
             lastRollbackAt = .now
-            return
+            return false
         }
 
         // Only create external side effects after SwiftData has durably accepted the
@@ -175,6 +176,7 @@ final class TaskCaptureService {
                 )
             }
         }
+        return true
     }
 
     /// Quick-capture a single task into a specific status column (used by board view inline add)
@@ -263,6 +265,7 @@ final class TaskCaptureService {
         syncReminder(task, in: context)
     }
 
+    @discardableResult
     func updateTaskDetails(
         _ task: TaskRecord,
         title: String,
@@ -273,9 +276,9 @@ final class TaskCaptureService {
         folder: FolderRecord?,
         attachmentNames: [String],
         in context: ModelContext
-    ) {
+    ) -> Bool {
         let cleanedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanedTitle.isEmpty else { return }
+        guard !cleanedTitle.isEmpty else { return false }
 
         task.title = cleanedTitle
         task.taskDescription = taskDescription.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -287,7 +290,7 @@ final class TaskCaptureService {
         task.updatedAt = .now
         task.parseState = .parsed
         task.syncState = .pendingUpload
-        guard persist(task: task, in: context) else { return }
+        guard persist(task: task, in: context) else { return false }
         syncReminder(task, in: context)
         // Cancel notification when marking done via detail sheet, then reschedule if still active
         if status == .done {
@@ -295,6 +298,7 @@ final class TaskCaptureService {
         } else {
             scheduleNotificationIfNeeded(task)
         }
+        return true
     }
 
     /// Defer this task by setting the due date to a later moment.

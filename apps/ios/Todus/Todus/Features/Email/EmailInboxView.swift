@@ -822,6 +822,7 @@ struct EmailInboxView: View {
                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
                     if thread.unread {
                         Button {
+                            AppHaptic.light.play()
                             Task { await emailService.markAsRead(ids: [thread.id]) }
                         } label: {
                             Label("Read", systemImage: "envelope.open")
@@ -829,6 +830,7 @@ struct EmailInboxView: View {
                         .tint(Color(UIColor.systemGray3))
                     } else {
                         Button {
+                            AppHaptic.light.play()
                             Task { await emailService.markAsUnread(ids: [thread.id]) }
                         } label: {
                             Label("Unread", systemImage: "envelope.badge")
@@ -837,6 +839,7 @@ struct EmailInboxView: View {
                     }
 
                     Button {
+                        AppHaptic.light.play()
                         Task { await emailService.toggleStar(ids: [thread.id]) }
                     } label: {
                         // Reflect current state like SenderThreadsView's row —
@@ -1192,8 +1195,8 @@ struct EmailInboxView: View {
     private var searchBar: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .scaledFont(size: 13, weight: .medium)
-                .foregroundStyle(AppTheme.mutedText)
+                .scaledFont(size: 13, weight: .semibold)
+                .foregroundStyle(AppTheme.subtleText)
 
             TextField("Search…", text: $searchText)
                 .scaledFont(size: 14)
@@ -1237,10 +1240,10 @@ struct EmailInboxView: View {
                 Color.clear
             } else {
                 Capsule(style: .continuous)
-                    .fill(AppTheme.surfaceSecondary.opacity(0.6))
+                    .fill(AppTheme.surfacePrimary)
                     .overlay(
                         Capsule(style: .continuous)
-                            .stroke(AppTheme.cardBorder, lineWidth: 0.5)
+                            .stroke(AppTheme.strongBorder, lineWidth: 1)
                     )
             }
         }
@@ -1757,6 +1760,7 @@ struct SenderThreadsView: View {
                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
                     if thread.unread {
                         Button {
+                            AppHaptic.light.play()
                             Task { await emailService.markAsRead(ids: [thread.id]) }
                         } label: {
                             Label("Read", systemImage: "envelope.open")
@@ -1764,6 +1768,7 @@ struct SenderThreadsView: View {
                         .tint(Color(UIColor.systemGray3))
                     } else {
                         Button {
+                            AppHaptic.light.play()
                             Task { await emailService.markAsUnread(ids: [thread.id]) }
                         } label: {
                             Label("Unread", systemImage: "envelope.badge")
@@ -1772,6 +1777,7 @@ struct SenderThreadsView: View {
                     }
 
                     Button {
+                        AppHaptic.light.play()
                         Task { await emailService.toggleStar(ids: [thread.id]) }
                     } label: {
                         Label(

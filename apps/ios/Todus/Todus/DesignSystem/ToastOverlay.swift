@@ -135,6 +135,15 @@ private struct ToastModifier: ViewModifier {
                 // failure toasts are silent to screen-reader users (TD-12).
                 if let message {
                     AccessibilityNotification.Announcement(message.text).post()
+                    // One central haptic keyed to the toast style gives every
+                    // capture flow (task/event added, archived, failures) a
+                    // matching buzz without each call site wiring its own.
+                    // `.info` stays silent — it's the passive/catch-all tier.
+                    switch message.style {
+                    case .success: AppHaptic.success.play()
+                    case .failure: AppHaptic.error.play()
+                    case .info: break
+                    }
                 }
                 dismissTask = Task { @MainActor in
                     try? await Task.sleep(for: .seconds(duration))

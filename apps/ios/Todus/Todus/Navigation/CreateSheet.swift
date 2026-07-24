@@ -58,6 +58,7 @@ struct CreateSheet: View {
     /// the user can choose between saving as a task and dismissing — instead
     /// of having a phantom task silently appear.
     @State private var eventSaveFallbackPrompt: EventSaveFallback? = nil
+    @State private var captureSaveErrorMessage: String? = nil
 
     /// Guards the send button from double-fires while `handleCreate`'s async work is in
     /// flight — without this, a double-tap during the create Task could create duplicate
@@ -252,6 +253,17 @@ struct CreateSheet: View {
                 },
                 secondaryButton: .cancel(Text("Dismiss"))
             )
+        }
+        .alert(
+            "Task couldn't be saved",
+            isPresented: Binding(
+                get: { captureSaveErrorMessage != nil },
+                set: { if !$0 { captureSaveErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(captureSaveErrorMessage ?? "Your draft is still here. Please try again.")
         }
         .confirmationDialog(
             "Remove attachment?",
@@ -779,18 +791,24 @@ struct CreateSheet: View {
             // downstream in ComposeEmail with nothing to address the message to.
             let missingRecipient = selectedType == .email
                 && recipientText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            let sendDisabled = (text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pendingAttachments.isEmpty)
-                || missingRecipient
+            let hasText = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let requiresTitle = selectedType != .email
+            let sendDisabled = (!hasText && (pendingAttachments.isEmpty || requiresTitle)) || missingRecipient
+            // Solid high-contrast send button (black in light / white in dark) with
+            // an inverted glyph — reads clearly as an enabled primary action instead
+            // of the pale accent tint, which looked disabled. Greys out only when
+            // actually disabled.
             Button(action: handleCreate) {
                 Image(systemName: "arrow.up")
-                    .scaledFont(size: 14, weight: .bold)
-                    .foregroundStyle(.white)
-                    .frame(width: 28, height: 28)
+                    .scaledFont(size: 15, weight: .bold)
+                    .foregroundStyle(Color(UIColor.systemBackground))
+                    .frame(width: 34, height: 34)
+                    .background(
+                        Circle().fill(sendDisabled ? AppTheme.subtleText.opacity(0.35) : Color.primary)
+                    )
             }
-            .buttonStyle(AppPrimaryButtonStyle())
-            .clipShape(Circle())
+            .buttonStyle(.plain)
             .disabled(sendDisabled || isSending)
-            .opacity(sendDisabled ? 0.4 : 1)
             .animation(.easeOut(duration: 0.12), value: sendDisabled)
         }
         .padding(.horizontal, 8)
@@ -1056,6 +1074,7 @@ struct CreateSheet: View {
         guard !isSending else { return }
         let input = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty || !pendingAttachments.isEmpty else { return }
+        guard !input.isEmpty || selectedType == .email else { return }
 
         // Small confirmation haptic on send — matches AI chat send + the iOS Mail
         // send affordance so the action feels like a deliberate dispatch rather
@@ -1081,8 +1100,6 @@ struct CreateSheet: View {
         }
 
         let attachments = pendingAttachments
-        pendingAttachments = []
-        text = ""
         isSending = true
 
         Task {
@@ -1109,7 +1126,14 @@ struct CreateSheet: View {
                                 return
                             }
                         case .task:
-                            createTask(intent.title, dueDate: intent.date ?? selectedDate, attachments: itemAttachments)
+                            guard createTask(
+                                intent.title,
+                                dueDate: intent.date ?? selectedDate,
+                                attachments: itemAttachments
+                            ) else {
+                                handleTaskCaptureFailure()
+                                return
+                            }
                         case .email:
                             if !services.showsComposeEmail {
                                 services.composeEmailSeedBody = intent.title
@@ -1123,6 +1147,7 @@ struct CreateSheet: View {
                     // created with no other visible feedback.
                     let createdCount = intents.count
                     services.captureSuccessMessage = "Added \(createdCount) items"
+                    clearConsumedDraft()
                     close()
                     return
                 }
@@ -1137,7 +1162,10 @@ struct CreateSheet: View {
 
             switch resolvedType {
             case .task:
-                createTask(input, attachments: attachments)
+                guard createTask(input, attachments: attachments) else {
+                    handleTaskCaptureFailure()
+                    return
+                }
                 // A dateless task lands in Tasks → Inbox, which is invisible from
                 // Home — without this the core capture flow gave no confirmation.
                 services.captureSuccessMessage = "Task added to \(selectedFolder?.name ?? "Inbox")"
@@ -1167,14 +1195,19 @@ struct CreateSheet: View {
                 services.composeEmailSeedFromConnectionId = fromConnectionId
                 services.showsComposeEmail = true
             case .auto:
-                createTask(input, attachments: attachments)
+                guard createTask(input, attachments: attachments) else {
+                    handleTaskCaptureFailure()
+                    return
+                }
                 services.captureSuccessMessage = "Task added to \(selectedFolder?.name ?? "Inbox")"
             }
+            clearConsumedDraft()
             close()
         }
     }
 
-    private func createTask(_ input: String, dueDate: Date? = nil, attachments: [String] = []) {
+    @discardableResult
+    private func createTask(_ input: String, dueDate: Date? = nil, attachments: [String] = []) -> Bool {
         services.captureService.capture(
             rawComposerText: input,
             attachmentNames: attachments,
@@ -1182,6 +1215,16 @@ struct CreateSheet: View {
             overrideDueDate: dueDate ?? selectedDate,
             in: modelContext
         )
+    }
+
+    private func clearConsumedDraft() {
+        pendingAttachments = []
+        text = ""
+    }
+
+    private func handleTaskCaptureFailure() {
+        isSending = false
+        captureSaveErrorMessage = "Your task couldn't be saved. Your draft and attachments are still here."
     }
 
     private func createEvent(_ input: String, startDate: Date?, attachments: [String]) async {
@@ -1200,7 +1243,15 @@ struct CreateSheet: View {
             eventSaveFallbackPrompt = EventSaveFallback(
                 title: "Calendar access denied",
                 message: "Todus can't add calendar events without permission. You can save this as a task instead, or grant access in Settings.",
-                saveAsTask: { createTask(input, attachments: attachments) }
+                saveAsTask: {
+                    if createTask(input, attachments: attachments) {
+                        services.captureSuccessMessage = "Task added to \(selectedFolder?.name ?? "Inbox")"
+                        clearConsumedDraft()
+                        close()
+                    } else {
+                        handleTaskCaptureFailure()
+                    }
+                }
             )
             return
         }
@@ -1219,7 +1270,15 @@ struct CreateSheet: View {
             eventSaveFallbackPrompt = EventSaveFallback(
                 title: "Couldn't save event",
                 message: (error as NSError).localizedDescription,
-                saveAsTask: { createTask(input, attachments: attachments) }
+                saveAsTask: {
+                    if createTask(input, attachments: attachments) {
+                        services.captureSuccessMessage = "Task added to \(selectedFolder?.name ?? "Inbox")"
+                        clearConsumedDraft()
+                        close()
+                    } else {
+                        handleTaskCaptureFailure()
+                    }
+                }
             )
         }
     }

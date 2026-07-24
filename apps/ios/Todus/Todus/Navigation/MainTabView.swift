@@ -157,7 +157,9 @@ struct MainTabView: View {
         // real screen bottom, not the keyboard-adjusted bottom, so FABs stay fixed
         // in place when the keyboard is shown (e.g. email search bar focused).
         .overlay {
-            if !services.hideTabBar && !showCreateSheet {
+            // FABs stay pinned while scrolling — only the tab bar hides on scroll.
+            // (Previously gated on `hideTabBar`, which made both FABs vanish mid-scroll.)
+            if !showCreateSheet {
                 VStack {
                     Spacer()
                     HStack(alignment: .bottom) {
@@ -247,7 +249,6 @@ struct MainTabView: View {
             services.showsAIChat = false
         }) {
             AIChatView(currentTab: previousNavigationTab)
-                .presentationDetents([.medium, .large])
                 .presentationBackgroundInteraction(.enabled(upThrough: .medium))
                 .presentationDragIndicator(.visible)
                 .appSheetBackground()

@@ -390,10 +390,12 @@ private struct MultiDayPageView: View {
             .padding(.vertical, 2)
             .frame(height: 22)
             .background(
+                // Match AppTheme.backgroundTop so the all-day strip blends with the
+                // rest of the calendar surface instead of reading as a white band.
                 Color(UIColor { trait in
                     trait.userInterfaceStyle == .dark
-                        ? UIColor(white: 0.115, alpha: 1)
-                        : UIColor(white: 0.965, alpha: 1)
+                        ? UIColor(white: 0.109, alpha: 1)
+                        : UIColor(white: 0.94, alpha: 1)
                 })
             )
         }

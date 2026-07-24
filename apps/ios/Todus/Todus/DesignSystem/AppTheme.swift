@@ -495,17 +495,26 @@ struct AppTopHeader<CustomTitle: View>: View {
             Button {
                 showNotifications = true
             } label: {
-                // Always render the plain `bell` glyph for now — the previous
-                // `bell.badge` variant made VoiceOver announce "Notifications, with badge"
-                // even when there were zero unread items, which read as a phantom alert.
-                // When we wire a real unread-count signal here, switch back to
-                // `bell.badge` only when the count is > 0.
-                Image(systemName: "bell")
+                // Show `bell.badge` + a numeric count only when there are unread items,
+                // so the badge reflects a real signal instead of a phantom alert.
+                let count = notificationBadgeCount
+                Image(systemName: count > 0 ? "bell.badge" : "bell")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.primary)
                     .frame(width: 44, height: 40)
+                    .overlay(alignment: .topTrailing) {
+                        if count > 0 {
+                            Text(count > 99 ? "99+" : "\(count)")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, count > 9 ? 4 : 0)
+                                .frame(minWidth: 15, minHeight: 15)
+                                .background(Capsule().fill(AppTheme.danger))
+                                .offset(x: -3, y: 5)
+                        }
+                    }
                     .interactiveHitTarget(expansion: 4)
-                    .accessibilityLabel("Notifications")
+                    .accessibilityLabel(count > 0 ? "Notifications, \(count) unread" : "Notifications")
             }
             .buttonStyle(.plain)
 
@@ -528,6 +537,13 @@ struct AppTopHeader<CustomTitle: View>: View {
             }
         }
         .glassActionPill()
+    }
+
+    /// Unread inbox count driving the notification bell badge. Cheap in-memory read
+    /// over already-loaded threads — no extra network work. Doubles as the "you have
+    /// notifications" signal since the notification digest is dominated by inbox items.
+    private var notificationBadgeCount: Int {
+        services.emailService.threads.reduce(0) { $0 + ($1.unread ? 1 : 0) }
     }
 
     /// Whether the current tab exposes any contextual actions. When false, the entire

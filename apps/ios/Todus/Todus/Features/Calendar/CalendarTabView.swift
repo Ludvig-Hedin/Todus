@@ -159,6 +159,11 @@ struct CalendarTabView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
+            // Base app background so the (transparent) calendar grid matches the
+            // rest of the app instead of rendering on a bare white surface.
+            AppTheme.backgroundTop
+                .ignoresSafeArea()
+
             // Scale only the calendar content — header stays fixed while the
             // content gently breathes during a pinch.
             contentView

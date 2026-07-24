@@ -128,10 +128,6 @@ struct TasksTabView: View {
                         if services.captureService.isSyncingSharedFolders {
                             InlineRefreshBadge(label: "Syncing")
                         }
-                        // Live "what matters now" chips so the user gets a
-                        // one-glance read of their day right from the header.
-                        // Empty state is "Clear" — celebrates the inbox-zero moment.
-                        todayHeaderChips
                         Spacer()
                     }
                 }
@@ -142,6 +138,9 @@ struct TasksTabView: View {
                     .padding(.horizontal, 16)
 
                 searchSortBar
+                    .padding(.horizontal, 16)
+
+                organizeBar
                     .padding(.horizontal, 16)
                     .padding(.bottom, 4)
             }
@@ -360,15 +359,15 @@ struct TasksTabView: View {
                         services.selectedViewMode = mode
                     }
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 5) {
                         Image(systemName: mode.systemImage)
-                            .font(.system(size: 15, weight: isSelected ? .semibold : .regular))
-                        Text(mode.shortTitle)
                             .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                        Text(mode.shortTitle)
+                            .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
                     }
                     .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 11)
+                    .padding(.vertical, 7)
                     .padding(.horizontal, 8)
                     .background {
                         if isSelected {
@@ -393,7 +392,7 @@ struct TasksTabView: View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(AppTheme.mutedText)
+                .foregroundStyle(AppTheme.subtleText)
                 .padding(.leading, 2)
 
             TextField("Search tasks…", text: $searchText)
@@ -406,33 +405,13 @@ struct TasksTabView: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 12))
-                        .foregroundStyle(AppTheme.mutedText)
+                        .foregroundStyle(AppTheme.subtleText)
                 }
                 .buttonStyle(.plain)
                 .minTouchTarget()
             }
 
             Divider().frame(height: 10)
-
-            // AI + rules inbox cleanup. Opens a review sheet — nothing moves
-            // without an explicit Apply. (Tasks UX overhaul.)
-            Button {
-                showOrganizeSheet = true
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text("Organize")
-                        .font(.system(size: 12, weight: .semibold))
-                }
-                .foregroundStyle(AppTheme.secondaryAccent)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(AppTheme.secondaryAccent.opacity(0.10), in: Capsule())
-                .minTouchTarget()
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Auto-organize tasks into folders")
 
             Menu {
                 ForEach(TaskSortOrder.allCases) { order in
@@ -464,6 +443,34 @@ struct TasksTabView: View {
             Capsule()
                 .stroke(AppTheme.strongBorder, lineWidth: 1)
         )
+    }
+
+    // MARK: - Organize Bar
+
+    /// Organize action lifted out of the search field and placed directly above
+    /// the task list. AI + rules inbox cleanup — opens a review sheet; nothing
+    /// moves without an explicit Apply.
+    private var organizeBar: some View {
+        HStack {
+            Button {
+                showOrganizeSheet = true
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Organize")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundStyle(AppTheme.secondaryAccent)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(AppTheme.secondaryAccent.opacity(0.10), in: Capsule())
+                .overlay(Capsule().stroke(AppTheme.secondaryAccent.opacity(0.18), lineWidth: 0.5))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Auto-organize tasks into folders")
+            Spacer()
+        }
     }
 
     // MARK: - Folders Footer

@@ -75,6 +75,9 @@ struct AIChatView: View {
     @State private var showsAICloudProcessingDisclosure = false
     @State private var pendingAICloudDisclosureAction: AICloudDisclosureAction? = nil
 
+    // Sheet detent — opens at medium, expands to large when the input is focused so
+    // the composer + its button row clear the keyboard instead of hiding behind it.
+    @State private var sheetDetent: PresentationDetent = .medium
     // Full-screen compose overlay — expands input into a dedicated sheet for long prompts
     @State private var showsFullScreenInput = false
     // True when the text input has grown to its maxHeight cap (120pt); shows expand button
@@ -159,6 +162,16 @@ struct AIChatView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
+            // Own the sheet detents here (rather than at each call site) so focusing
+            // the input can push the sheet to .large — at .medium the keyboard covers
+            // the composer's button row. Applied on the inner content (not the outer
+            // body chain) to keep that already-huge chain under the type-checker limit.
+            .presentationDetents([.medium, .large], selection: $sheetDetent)
+            .onChange(of: isInputFocused) { _, focused in
+                if focused {
+                    withAnimation(.snappy(duration: 0.25)) { sheetDetent = .large }
+                }
+            }
         }
         .sheet(isPresented: $showsHistory) {
             ChatHistoryView()
@@ -666,37 +679,12 @@ struct AIChatView: View {
                     // Sparkles icon — animated gradient with subtle glow
                     AnimatedSparkleIcon(size: 20)
 
-                    HStack(spacing: 8) {
-                        Text("How can I help you today?")
-                            .scaledFont(size: 20, weight: .semibold)
-                            .tracking(-0.3)
-                        Spacer(minLength: 0)
-                        // Always-visible shuffle button — taps reshuffle the
-                        // suggestion pool whether expanded or collapsed (P6).
-                        Button {
-                            withAnimation(.snappy(duration: 0.15)) {
-                                suggestionSeed += 1
-                            }
-                            UISelectionFeedbackGenerator().selectionChanged()
-                        } label: {
-                            Image(systemName: "shuffle")
-                                .scaledFont(size: 13, weight: .semibold)
-                                .foregroundStyle(AppTheme.mutedText)
-                                .frame(width: 28, height: 28)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Shuffle suggestions")
-                    }
-
-
+                    Text("How can I help you today?")
+                        .scaledFont(size: 20, weight: .semibold)
+                        .tracking(-0.3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.horizontal, 16)
-
-                // Model + data-access pills — the at-a-glance trust signal
-                // (which model answers, whether Gmail/Calendar are in scope)
-                // per its own P9 comment. Built but never placed until now.
-                statusPillsRow
 
                 // Suggestions — 3 default, up to 10 when expanded
                 VStack(alignment: .leading, spacing: 0) {
@@ -784,7 +772,7 @@ struct AIChatView: View {
             inputSection
                 .padding(.horizontal, 8)
                 .padding(.top, 8)
-                .padding(.bottom, 12)
+                .padding(.bottom, 20)
                 .background {
                     VStack(spacing: 0) {
                         LinearGradient(
@@ -958,55 +946,6 @@ struct AIChatView: View {
     }
 
     /// Compact pills row shown above the suggestions in the empty state.
-    /// Surfaces the active model + which integrations the AI has access to
-    /// (Gmail / Calendar) so users know what to expect before sending. (P9)
-    private var statusPillsRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                statusPill(icon: "cpu", label: shortModelLabel(chatService.selectedModel))
-                statusPill(
-                    icon: "envelope.fill",
-                    label: emailConnected ? "Gmail on" : "Gmail off",
-                    dim: !emailConnected
-                )
-                statusPill(
-                    icon: "calendar",
-                    label: calendarConnected ? "Calendar on" : "Calendar off",
-                    dim: !calendarConnected
-                )
-            }
-        }
-    }
-
-    private func statusPill(icon: String, label: String, dim: Bool = false) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .scaledFont(size: 10, weight: .semibold, relativeTo: .caption2)
-            Text(label)
-                .scaledFont(size: 11, weight: .medium, relativeTo: .caption2)
-                .lineLimit(1)
-        }
-        .foregroundStyle(dim ? AppTheme.subtleText : AppTheme.mutedText)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(AppTheme.surfacePrimary, in: Capsule())
-        .overlay(Capsule().stroke(AppTheme.cardBorder, lineWidth: 0.5))
-    }
-
-    /// Trim provider prefix + variant suffix from a model id so the pill stays
-    /// short — e.g. "openai/gpt-5.4-mini" → "GPT-5.4 Mini".
-    private func shortModelLabel(_ raw: String) -> String {
-        let trailing = raw.split(separator: "/").last.map(String.init) ?? raw
-        // Capitalize first letter; replace hyphens with spaces so it reads as a title.
-        return trailing
-            .replacingOccurrences(of: "-", with: " ")
-            .split(separator: " ")
-            .map { word -> String in
-                guard let first = word.first else { return String(word) }
-                return first.uppercased() + word.dropFirst()
-            }
-            .joined(separator: " ")
-    }
 
     /// Compact connect-service buttons shown when the active tab's service pool is empty.
     private var connectServicesPrompt: some View {
@@ -1594,13 +1533,12 @@ struct AIChatView: View {
                     Button(action: requestSendMessage) {
                         Image(systemName: "arrow.up")
                             .scaledFont(size: 15, weight: .bold)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(isEmpty ? AppTheme.subtleText : .white)
                             .frame(width: 30, height: 30)
-                            .background(Color.accentColor, in: Circle())
+                            .background(isEmpty ? AppTheme.surfaceSecondary : Color.accentColor, in: Circle())
                     }
                     .buttonStyle(.plain)
                     .disabled(isEmpty)
-                    .opacity(isEmpty ? 0.4 : 1)
                     .accessibilityIdentifier("ai.chat.sendButton")
                     .accessibilityLabel("Send message")
                     .transition(.scale.combined(with: .opacity))
@@ -1749,6 +1687,10 @@ struct AIChatView: View {
 
         // Allow sending if there's text OR attachments (file-only send supported)
         guard !text.isEmpty || hasAttachments else { return }
+
+        // Light tap on send — the most frequent action in chat. Editing a
+        // message already buzzes; sending shouldn't be the silent exception.
+        AppHaptic.light.play()
 
         // When user sends attachments with no text, auto-prompt to view the attachment
         let messageText: String
@@ -3329,9 +3271,26 @@ struct ChatHistoryView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 13)
             .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous).stroke(AppTheme.strongBorder, lineWidth: 1))
+            // Lift the pill off the list rows behind it — the flat fill blended into
+            // the scrolling content and was hard to see.
+            .shadow(color: .black.opacity(0.18), radius: 16, x: 0, y: 4)
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
+            // Scrim: fade the list content out behind the bar so the input reads as a
+            // distinct pinned control rather than sitting on top of the rows.
+            .background {
+                VStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [AppTheme.sheetBackground.opacity(0), AppTheme.sheetBackground.opacity(0.98)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 56)
+                    AppTheme.sheetBackground
+                }
+                .ignoresSafeArea(edges: .bottom)
+            }
         }
         .task {
             await services.captureService.syncSharedFolders(in: modelContext)

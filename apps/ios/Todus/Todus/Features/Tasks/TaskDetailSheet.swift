@@ -440,7 +440,7 @@ struct TaskDetailSheet: View {
         // can delete removed files from disk only after the save succeeds.
         let originalAttachments = task.attachmentNames
         let folder = folders.first(where: { $0.id == selectedFolderID })
-        services.captureService.updateTaskDetails(
+        let didSave = services.captureService.updateTaskDetails(
             task,
             title: trimmedTitle,
             taskDescription: taskDescription.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -451,24 +451,19 @@ struct TaskDetailSheet: View {
             attachmentNames: attachmentNames,
             in: modelContext
         )
-        // `updateTaskDetails` persists internally but swallows save errors. Re-save here
-        // so a disk-full / corrupt-store failure surfaces to the user instead of the sheet
-        // silently closing with unsaved edits. If the internal save already succeeded this
-        // is a harmless no-op (nothing left pending to flush).
-        do {
-            try modelContext.save()
-            // Save landed — now it's safe to delete files the user removed.
-            for name in originalAttachments where !attachmentNames.contains(name) {
-                AttachmentService.shared.delete(filename: name)
-            }
-            isSaving = false
-            dismiss()
-        } catch {
-            AppLogger.shared.log("TaskDetailSheet.saveTask: save failed: \(error.localizedDescription)")
+        guard didSave else {
             isSaving = false
             saveErrorMessage = "Your changes couldn't be saved. Please try again."
             showSaveErrorAlert = true
+            return
         }
+
+        // Save landed — now it's safe to delete files the user removed.
+        for name in originalAttachments where !attachmentNames.contains(name) {
+            AttachmentService.shared.delete(filename: name)
+        }
+        isSaving = false
+        dismiss()
     }
 }
 

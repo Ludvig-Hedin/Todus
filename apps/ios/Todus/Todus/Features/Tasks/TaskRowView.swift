@@ -29,7 +29,7 @@ struct TaskRowView: View {
                 // changes.
                 Button(action: { toggleCheckbox() }) {
                     Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
-                        .scaledFont(size: 23, weight: .medium)
+                        .scaledFont(size: 20, weight: .medium)
                         .foregroundStyle(task.completed ? task.status.tintColor : AppTheme.subtleText)
                 }
                 .buttonStyle(.plain)
@@ -42,7 +42,7 @@ struct TaskRowView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(alignment: .firstTextBaseline, spacing: 5) {
                                 Text(task.title)
-                                    .scaledFont(size: 16, weight: .medium)
+                                    .scaledFont(size: 15, weight: .medium)
                                     .tracking(-0.2)
                                     .lineLimit(2)
                                     .multilineTextAlignment(.leading)
@@ -85,16 +85,14 @@ struct TaskRowView: View {
                     suggestionChipRow
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(AppTheme.rowFill, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
-                .stroke(AppTheme.rowStroke, lineWidth: 0.5)
-        )
+        // Flat list row: no per-row card fill or stroke — the List draws a subtle
+        // separator between items instead, and the whole row is the tap target.
         .contentShape(Rectangle())
         // Long-press-and-move drags the task onto a folder card (Tasks tab
         // footer) or the Inbox strip (folder detail). Payload is the task UUID
