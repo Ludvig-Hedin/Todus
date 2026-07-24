@@ -5,7 +5,7 @@ This guide covers running Todus locally for development or self-hosting your own
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/en/download) (v18 or higher)
-- [pnpm](https://pnpm.io) (v10 or higher)
+- [Bun](https://bun.sh) 1.3.10
 - [Docker](https://docs.docker.com/engine/install/) (v20 or higher)
 
 ## Setup Options
@@ -18,22 +18,22 @@ This guide covers running Todus locally for development or self-hosting your own
    git clone https://github.com/Ludvig-Hedin/Todus.git
    cd Todus
 
-   pnpm install
+   bun install
 
    # Start local database
-   pnpm docker:db:up
+   bun docker:db:up
    ```
 
 2. **Set Up Environment**
 
-   - Run `pnpm nizzy env` to set up your environment variables
-   - Run `pnpm nizzy sync` to sync env vars and types
-   - Initialize the database: `pnpm db:push`
+   - Run `bun nizzy env` to set up your environment variables
+   - Run `bun nizzy sync` to sync env vars and types
+   - Initialize the database: `bun db:push`
 
 3. **Start the App**
 
    ```bash
-   pnpm dev
+   bun dev
    ```
 
 4. **Open in Browser**
@@ -52,20 +52,20 @@ This guide covers running Todus locally for development or self-hosting your own
    Open the project in your devcontainer, then:
 
    ```bash
-   pnpm install
-   pnpm docker:db:up
+   bun install
+   bun docker:db:up
    ```
 
 2. **Set Up Environment**
 
-   - Run `pnpm nizzy env`
-   - Run `pnpm nizzy sync`
-   - Initialize the database: `pnpm db:push`
+   - Run `bun nizzy env`
+   - Run `bun nizzy sync`
+   - Initialize the database: `bun db:push`
 
 3. **Start the App**
 
    ```bash
-   pnpm dev
+   bun dev
    ```
 
    Visit [http://localhost:3000](http://localhost:3000)
@@ -127,7 +127,7 @@ BETTER_AUTH_SECRET=your_secret_key
 
 ## Environment Variables
 
-Run `pnpm nizzy env` to bootstrap environment variables — it copies `.env.example` to `.env` and fills in the variables for you. A local connection string example lives in `.env.example`.
+Run `bun nizzy env` to bootstrap environment variables — it copies `.env.example` to `.env` and fills in the variables for you. A local connection string example lives in `.env.example`.
 
 ## Database
 
@@ -136,7 +136,7 @@ Todus uses PostgreSQL.
 1. **Start the database**
 
    ```bash
-   pnpm docker:db:up
+   bun docker:db:up
    ```
 
    Defaults:
@@ -154,10 +154,10 @@ Todus uses PostgreSQL.
 
 3. **Common commands**
 
-   - `pnpm db:push` — set up database tables
-   - `pnpm db:generate` — create migration files after schema changes
-   - `pnpm db:migrate` — apply migrations
-   - `pnpm db:studio` — open Drizzle Studio
+   - `bun db:push` — set up database tables
+   - `bun db:generate` — create migration files after schema changes
+   - `bun db:migrate` — apply migrations
+   - `bun db:studio` — open Drizzle Studio
 
 ## Sync (Durable Objects + R2)
 

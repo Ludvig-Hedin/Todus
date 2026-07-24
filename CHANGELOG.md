@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### Changed — Bun workspace migration and release hardening, 2026-07-24
+
+- Migrated the monorepo from pnpm to Bun 1.3.10 across workspace metadata, the lockfile, CI, Docker, scripts, and current operational docs. The Bun lockfile was generated from the prior pnpm lock so the migration preserves resolved dependency versions.
+- Fixed Bun workspace filters, pinned Bun in container images, and corrected the Nizzy postinstall to recognize the Todus root and generate types for the active `apps/web` frontend.
+- Removed the stale tracked `.claude/worktrees` gitlink from the parent repository while preserving the registered local worktree and its dirty state.
+
+### Fixed — native AI and task-save review follow-up, 2026-07-24
+
+- iOS task creation and task-detail editing now keep drafts, attachments, and sheets open when SwiftData persistence fails. Removed attachment files are deleted only after the task update commits.
+- Kept the one-time cloud-processing disclosure before the first AI message or voice session.
+- Native iOS/macOS AI chat now exposes the read-only second-brain tools `getPersonContext`, `getWorkstreamContext`, and `getOpenLoops`; backend limits are integer-normalized before database queries.
+
+### Fixed — iOS AI chat sheet composer/layout, 2026-07-23
+
+- AI chat sheet (`AIChatView`): removed the model/Gmail/Calendar status pills and the shuffle button from the empty state to de-clutter; the send button now reads as an intentional quiet button when empty (neutral fill + muted glyph) instead of a washed-out disabled accent; added bottom breathing room under the composer in the collapsed state; and focusing the input now expands the sheet from `.medium` to `.large` so the composer's button row clears the keyboard instead of hiding behind it (multi-line input grows upward, not down). Sheet detents are now owned by `AIChatView` rather than each call site.
+- Chat history sheet search bar is now legible: added a gradient scrim that fades the list rows out behind the pinned pill, a drop shadow, and a stronger border (it previously blended into the scrolling rows).
+
+### Added — second-brain memory tools in native chat, 2026-07-23
+
+- iOS/macOS AI chat (`POST /api/ai/chat`) now exposes the three read-only second-brain memory tools previously available only to the web chat. Native clients proxy execution to `POST /api/ai/do/<tool>` with Bearer auth and return the JSON result to the model.
+
 ### Fixed — iOS performance and reliability follow-up, 2026-07-22
 
 - iOS task create/update/delete sync now uses the authenticated `tasks.sync` tRPC backend instead of the unconfigured legacy Supabase transport. Signed-in and pull-to-refresh flows hydrate paginated `tasks.list` results after folders, preserving pending local edits; explicit `tasks.deleted` tombstones remove cross-device deletions without inferring from page absence, stale offline upserts cannot resurrect them, and reminder/notification mirrors are cleaned only after SwiftData commits. Pending journals and in-flight pulls are invalidated on account changes. Priority changes sync from every task surface, and network/backend failures retain local work instead of deleting it.

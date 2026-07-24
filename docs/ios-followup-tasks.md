@@ -95,7 +95,7 @@
 
 The audit added a **`clientSendId` idempotency key** to `mail.send` (KV-deduped on both immediate and scheduled paths, `apps/server/src/trpc/routes/mail.ts`). iOS `DraftService` sends the draft's stable id and now auto-retries drafts stuck in `"sending"` — that retry is only duplicate-safe once the server is deployed (pre-deploy, zod strips the unknown key and behavior matches the old semantics).
 
-- Deploy: `pnpm deploy:backend` (needs CF auth for account `7e953f…` — see memory note `cloudflare-deploy-auth`; local wrangler OAuth may hit error 10000; `wrangler deploy --dry-run` is the safe check).
+- Deploy: `bun deploy:backend` (needs CF auth for account `7e953f…` — see memory note `cloudflare-deploy-auth`; local wrangler OAuth may hit error 10000; `wrangler deploy --dry-run` is the safe check).
 - Order: server first, then ship the iOS build.
 
 ---

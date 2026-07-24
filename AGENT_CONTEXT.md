@@ -13,7 +13,7 @@
 - Web: `todus.app` (production)
 - iOS: native SwiftUI app (Bundle ID `com.ludvighedin.todus`)
 - macOS: native SwiftUI app (DMG distributed via Cloudflare R2)
-- Android: scaffolded only (Expo `pnpm android`); not actively shipped
+- Android: scaffolded only (Expo `bun android`); not actively shipped
 - Backend: single Cloudflare Worker (`todus-server-v1`)
 
 It is NOT three separate apps stitched together. Email threads, calendar events, tasks, and docs share the same Postgres model and the same tRPC API. The AI assistant operates across all of them via tool calls.
@@ -23,7 +23,7 @@ It is NOT three separate apps stitched together. Email threads, calendar events,
 ## 2. Repo layout — the 90 % you need
 
 ```
-mail/                                  ← monorepo root (pnpm + Turborepo)
+mail/                                  ← monorepo root (bun + Turborepo)
 ├── apps/
 │   ├── web/                           ← ACTIVE frontend (React Router v7 + Vite + CF Workers)
 │   ├── mail/                          ← LEGACY frontend — READ-ONLY ARCHIVE, do not edit
@@ -56,14 +56,14 @@ There are **two** React Router v7 apps in the repo. This trips up every new agen
 | | `apps/web` | `apps/mail` |
 |---|---|---|
 | Status | **Active** — all current frontend work | **READ-ONLY archive** — do not edit |
-| pnpm filter | `@zero/web` | `@zero/mail` |
-| `pnpm dev` / `pnpm web` | ✅ runs this | ❌ |
-| `pnpm mail` | ❌ | ✅ runs this (for reference only) |
-| `pnpm build:frontend` | ❌ | ⚠️ **still builds `@zero/mail`** (stale script — see below) |
-| `pnpm deploy:frontend` | ❌ | ⚠️ **still deploys `@zero/mail`** (stale script — see below) |
+| bun filter | `@zero/web` | `@zero/mail` |
+| `bun dev` / `bun web` | ✅ runs this | ❌ |
+| `bun mail` | ❌ | ✅ runs this (for reference only) |
+| `bun build:frontend` | ❌ | ⚠️ **still builds `@zero/mail`** (stale script — see below) |
+| `bun deploy:frontend` | ❌ | ⚠️ **still deploys `@zero/mail`** (stale script — see below) |
 | Routes | Marketing + auth + `/mail/*` product + `/settings/*` + `/blog/*` etc. | Mail product only |
 
-**⚠️ Known inconsistency:** `pnpm build:frontend` and `pnpm deploy:frontend` in root `package.json` still target `@zero/mail`. Both wrangler configs deploy to the same Cloudflare Worker name (`todus`), so the result depends on which one was deployed last. When you actually need to ship `apps/web` to production, run `pnpm --filter=@zero/web build && pnpm --filter=@zero/web deploy` directly until those scripts are fixed.
+**⚠️ Known inconsistency:** `bun build:frontend` and `bun deploy:frontend` in root `package.json` still target `@zero/mail`. Both wrangler configs deploy to the same Cloudflare Worker name (`todus`), so the result depends on which one was deployed last. When you actually need to ship `apps/web` to production, run `bun run --filter=@zero/web build && bun run --filter=@zero/web deploy` directly until those scripts are fixed.
 
 **For agents: only edit files under `apps/web/`. Never edit anything under `apps/mail/`.**
 
@@ -254,44 +254,44 @@ Current cross-platform spacing scale (mirrors iOS/macOS):
 
 ```bash
 # Daily dev
-pnpm go                         # docker DB + apps/web + backend (full stack)
-pnpm dev                        # apps/web + backend (DB already running)
-pnpm web                        # alias for pnpm dev
-pnpm ios                        # open iOS Xcode project (lightest)
-pnpm ios:simulator              # build + boot iOS simulator
-pnpm macos                      # run native macOS app
+bun go                         # docker DB + apps/web + backend (full stack)
+bun dev                        # apps/web + backend (DB already running)
+bun web                        # alias for bun dev
+bun ios                        # open iOS Xcode project (lightest)
+bun ios:simulator              # build + boot iOS simulator
+bun macos                      # run native macOS app
 
 # Database (Drizzle)
-pnpm db:generate                # generate migration from schema diff
-pnpm db:migrate                 # apply pending migrations
-pnpm db:push                    # push schema directly (dev)
-pnpm db:studio                  # Drizzle Studio GUI
+bun db:generate                # generate migration from schema diff
+bun db:migrate                 # apply pending migrations
+bun db:push                    # push schema directly (dev)
+bun db:studio                  # Drizzle Studio GUI
 
 # Build + deploy
-pnpm build                                      # turbo build all
-pnpm --filter=@zero/web build                   # build apps/web specifically
-pnpm --filter=@zero/web deploy                  # deploy apps/web (preferred)
-pnpm deploy:backend                             # deploy apps/server
-pnpm ios:build:preview                          # iOS preview .ipa
-pnpm ios:build:production                       # iOS App Store / TestFlight .ipa
+bun run build                                      # turbo build all
+bun run --filter=@zero/web build                   # build apps/web specifically
+bun run --filter=@zero/web deploy                  # deploy apps/web (preferred)
+bun deploy:backend                             # deploy apps/server
+bun ios:build:preview                          # iOS preview .ipa
+bun ios:build:production                       # iOS App Store / TestFlight .ipa
 ./scripts/build-mac-dmg.sh                      # macOS DMG (archives, signs, uploads to R2)
 
 # Parity screenshots
-pnpm parity:screenshots:check                   # presence check across web/ios/macos
-pnpm parity:screenshots:capture:web             # Playwright web capture
-pnpm parity:screenshots:capture:ios             # interactive iOS sim capture
-pnpm parity:screenshots:capture:ios:auto        # deeplink-driven (no interaction)
-pnpm parity:screenshots:capture:macos:auto      # native macOS app capture
-pnpm parity:screenshots:capture:android:auto    # Android emulator capture
+bun parity:screenshots:check                   # presence check across web/ios/macos
+bun parity:screenshots:capture:web             # Playwright web capture
+bun parity:screenshots:capture:ios             # interactive iOS sim capture
+bun parity:screenshots:capture:ios:auto        # deeplink-driven (no interaction)
+bun parity:screenshots:capture:macos:auto      # native macOS app capture
+bun parity:screenshots:capture:android:auto    # Android emulator capture
 
 # AI evals / tests
-pnpm test                       # run vitest suite in packages/testing
-pnpm test:ai                    # backend AI tests
-pnpm eval                       # run backend AI evals
-pnpm eval:ci                    # CI-mode evals
+bun run test                       # run vitest suite in packages/testing
+bun test:ai                    # backend AI tests
+bun eval                       # run backend AI evals
+bun eval:ci                    # CI-mode evals
 ```
 
-**Never run `pnpm check`, `pnpm lint`, or `pnpm format` project-wide** — they sweep the whole monorepo. Lint/format only the files you touched (e.g. `npx eslint apps/web/components/foo.tsx`, `npx prettier --write apps/server/src/lib/schemas.ts`).
+**Never run `bun check`, `bun lint`, or `bun format` project-wide** — they sweep the whole monorepo. Lint/format only the files you touched (e.g. `npx eslint apps/web/components/foo.tsx`, `npx prettier --write apps/server/src/lib/schemas.ts`).
 
 ---
 

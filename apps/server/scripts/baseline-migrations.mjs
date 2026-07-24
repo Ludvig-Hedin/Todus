@@ -169,7 +169,7 @@ async function main() {
   const last = toBaseline[toBaseline.length - 1];
   console.log(`\nBaselined up to ${last.tag} (idx ${last.idx}).`);
   if (firstNew) console.log(`First migration to apply: ${firstNew.tag}`);
-  console.log('\nRun: pnpm db:migrate');
+  console.log('\nRun: bun db:migrate');
 
   await sql.end();
 }

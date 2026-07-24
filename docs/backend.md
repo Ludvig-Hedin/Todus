@@ -68,4 +68,4 @@ Typed in `src/env.ts`; non-secret values in `wrangler.jsonc` `vars`; secrets via
 
 ## Deploy
 
-`pnpm deploy:backend` → `wrangler deploy --env production` (staging via the `deploy:staging` script in `apps/server`). DB migrations: see [deployment.md](deployment.md).
+`bun deploy:backend` → `wrangler deploy --env production` (staging via the `deploy:staging` script in `apps/server`). DB migrations: see [deployment.md](deployment.md).

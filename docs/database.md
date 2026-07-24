@@ -5,7 +5,7 @@
 ## Connection
 
 - Production/staging: Postgres origin reached through the `HYPERDRIVE` binding in `apps/server/wrangler.jsonc`. Direct origin URL (for migrations) is `DATABASE_URL` / `PRODUCTION_DATABASE_URL`.
-- Local dev: Docker Postgres 17 on `:5433`, database `todus` (`docker-compose.db.yaml`, started by `pnpm docker:db:up` / `pnpm go`).
+- Local dev: Docker Postgres 17 on `:5433`, database `todus` (`docker-compose.db.yaml`, started by `bun docker:db:up` / `bun go`).
 
 ## Tables (38)
 
@@ -50,11 +50,11 @@ Grouped by domain. Names below are the logical Drizzle table names.
 ## Migration workflow (Drizzle)
 
 ```bash
-pnpm db:generate    # generate a migration from schema.ts changes
+bun db:generate    # generate a migration from schema.ts changes
 # → review the generated SQL in apps/server/src/db/migrations/
-pnpm db:migrate     # apply migrations
-pnpm db:push        # push schema directly (dev only)
-pnpm db:studio      # Drizzle Studio GUI
+bun db:migrate     # apply migrations
+bun db:push        # push schema directly (dev only)
+bun db:studio      # Drizzle Studio GUI
 ```
 
 Order is always **generate → review → migrate/push**. Production migrations run via the `db-migrate-production.yml` GitHub Action (push to `main` touching `apps/server/src/db/migrations/**` or `drizzle.config.ts`, or manual dispatch) against `PRODUCTION_DATABASE_URL`. See [deployment.md](deployment.md).

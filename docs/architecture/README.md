@@ -24,10 +24,10 @@ Detailed structure and organization of active applications with:
 
 | App | Type | Command | Purpose |
 |-----|------|---------|---------|
-| iOS | SwiftUI | `pnpm ios:simulator` | Primary mobile app |
+| iOS | SwiftUI | `bun ios:simulator` | Primary mobile app |
 | macOS | SwiftUI | `cd apps/macos && xcodegen generate && open TodusMac.xcodeproj` | Desktop shell |
-| Web | React Router + Vite | `pnpm dev` | Main web app |
-| Backend | Cloudflare Worker | `pnpm deploy:backend` | API & auth |
+| Web | React Router + Vite | `bun dev` | Main web app |
+| Backend | Cloudflare Worker | `bun deploy:backend` | API & auth |
 
 ## 🚫 Important
 

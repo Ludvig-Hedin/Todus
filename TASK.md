@@ -2,6 +2,12 @@
 
 Last updated: 2026-07-08
 
+## 2026-07-24 — Bun migration and native AI release
+
+- `DONE` Migrated the active workspace, CI, Docker, and deploy scripts from pnpm to Bun 1.3.10 while preserving prior lockfile resolutions.
+- `DONE` Added native second-brain tools and fixed review-found iOS persistence/disclosure regressions.
+- `MANUAL` Confirm Apple key ID `ZJC3UFF6WX` is revoked. The old key path remains in Git history but the key file is not present locally.
+
 ## 📋 2026-07-08 — iOS follow-up tasks (ready for pickup)
 
 The iOS triple audit (UX assessment + polish + bug hunt, 2026-07-07/08) fixed ~75 verified findings across 4 commits; all fixes adversarially re-verified and simulator builds green. The remaining feature/ops work is specced as self-contained, agent-ready tasks in **[docs/ios-followup-tasks.md](docs/ios-followup-tasks.md)**:

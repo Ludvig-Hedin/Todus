@@ -45,14 +45,14 @@ Referenced: `VITE_PUBLIC_BACKEND_URL`, `VITE_PUBLIC_APP_URL`, `VITE_PUBLIC_APP_N
 ## Dev / build / deploy
 
 ```bash
-pnpm dev          # apps/web + backend (react-router dev --port 3000); proxies /api,/sse,/agents → :8787
-pnpm go           # docker DB + apps/web + backend (full local stack)
+bun dev          # apps/web + backend (react-router dev --port 3000); proxies /api,/sse,/agents → :8787
+bun go           # docker DB + apps/web + backend (full local stack)
 
-pnpm --filter=@zero/web build    # react-router build → build/client/
-pnpm --filter=@zero/web deploy   # wrangler deploy  ← use this to ship apps/web
+bun run --filter=@zero/web build    # react-router build → build/client/
+bun run --filter=@zero/web deploy   # wrangler deploy  ← use this to ship apps/web
 ```
 
-⚠️ Root `pnpm build:frontend` / `pnpm deploy:frontend` still target the **legacy** `@zero/mail`. Ship the active app with the `--filter=@zero/web` commands above. Wrangler app name is `todus` (envs `todus-local` / `-staging` / `-production`); SPA serving via `assets.not_found_handling: single-page-application`.
+⚠️ Root `bun build:frontend` / `bun deploy:frontend` still target the **legacy** `@zero/mail`. Ship the active app with the `--filter=@zero/web` commands above. Wrangler app name is `todus` (envs `todus-local` / `-staging` / `-production`); SPA serving via `assets.not_found_handling: single-page-application`.
 
 ## Design system
 

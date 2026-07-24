@@ -12,16 +12,16 @@ Scripts can be run using the `scripts` command from the project root:
 
 ```bash
 # Run a script from the project root
-pnpm scripts <script-name> [options]
+bun scripts <script-name> [options]
 
 # Example: Run the seed-style script
-pnpm scripts seed-style
+bun scripts seed-style
 ```
 
-This command is defined in the root `package.json` and executes the script runner in the mail app:
+This command is defined in the root `package.json` and executes the root script runner:
 
 ```json
-"scripts": "dotenv -- pnpm run --cwd apps/mail --silent --elide-lines=0 scripts"
+"scripts": "dotenv -- bunx tsx ./scripts/run.ts"
 ```
 
 ## Available Scripts
@@ -34,12 +34,12 @@ Seeds the writing style matrix for a given connection with sample emails of diff
 
 ```bash
 # Interactive mode (will prompt for options)
-pnpm scripts seed-style
+bun scripts seed-style
 
 # With command-line options
-pnpm scripts seed-style seed --connection-id <id> --style <style> --size <number> [--reset]
+bun scripts seed-style seed --connection-id <id> --style <style> --size <number> [--reset]
 # Or reset the style matrix
-pnpm scripts seed-style reset --connection-id <id>
+bun scripts seed-style reset --connection-id <id>
 ```
 
 **Options:**
@@ -115,7 +115,7 @@ process.exit(0);
 You can now run your script using:
 
 ```bash
-pnpm scripts my-script --param1 value
+bun scripts my-script --param1 value
 ```
 
 ## Best Practices
@@ -150,13 +150,13 @@ Today the "check" is **presence-only**: it verifies a baseline file exists for e
 
 | Command | What it does |
 | --- | --- |
-| `pnpm parity:screenshots:check` | Verifies every `{slug, platform}` baseline file exists. Fails CI if any are missing. Supports `--surface <name>`, `--platform <name>`, `--allow-missing`. |
-| `pnpm parity:screenshots:sync` | Regenerates `SCREENSHOT_LOG.md` from filesystem presence. |
-| `pnpm parity:screenshots:capture:web` | Headless Playwright capture against a running web app (default `http://localhost:3000`). Uses Playwright from `packages/testing` — no root dep added. |
-| `pnpm parity:screenshots:capture:ios` | Interactive iOS capture (you navigate the simulator manually, hit Enter to capture). |
-| `pnpm parity:screenshots:capture:ios:auto` | Deep-link driven iOS capture (uses `xcrun simctl openurl todus://…`). |
-| `pnpm parity:screenshots:capture:android:auto` | Deep-link driven Android capture (uses `adb`). |
-| `pnpm parity:screenshots:capture:macos:auto` | Native macOS capture against the SwiftUI `apps/macos/TodusMac` shell (uses `xcodebuild` + `screencapture`). The script filename still says `electron` for backwards-compat of the pnpm script entry; the implementation no longer touches the retired Electron wrapper. |
+| `bun parity:screenshots:check` | Verifies every `{slug, platform}` baseline file exists. Fails CI if any are missing. Supports `--surface <name>`, `--platform <name>`, `--allow-missing`. |
+| `bun parity:screenshots:sync` | Regenerates `SCREENSHOT_LOG.md` from filesystem presence. |
+| `bun parity:screenshots:capture:web` | Headless Playwright capture against a running web app (default `http://localhost:3000`). Uses Playwright from `packages/testing` — no root dep added. |
+| `bun parity:screenshots:capture:ios` | Interactive iOS capture (you navigate the simulator manually, hit Enter to capture). |
+| `bun parity:screenshots:capture:ios:auto` | Deep-link driven iOS capture (uses `xcrun simctl openurl todus://…`). |
+| `bun parity:screenshots:capture:android:auto` | Deep-link driven Android capture (uses `adb`). |
+| `bun parity:screenshots:capture:macos:auto` | Native macOS capture against the SwiftUI `apps/macos/TodusMac` shell (uses `xcodebuild` + `screencapture`). The script filename still says `electron` for backwards-compat of the bun script entry; the implementation no longer touches the retired Electron wrapper. |
 
 All capture scripts accept `--surface <name>` (e.g. `--surface design-system`) to filter the manifest down to a subset.
 
@@ -183,44 +183,44 @@ You must capture while signed in as an allowlisted user, otherwise:
 ```bash
 # Web — full page, signed in as allowlisted user
 #   prerequisites:
-#     - pnpm web   (or pnpm go to also bring up the DB)
+#     - bun web   (or bun go to also bring up the DB)
 #     - PLAYWRIGHT_SESSION_TOKEN + PLAYWRIGHT_SESSION_DATA env set
 #       (see packages/testing/e2e/auth.setup.ts for how to grab these from a
 #       live browser session against localhost)
 PARITY_WEB_BASE_URL=http://localhost:3000 \
 PLAYWRIGHT_SESSION_TOKEN=... \
 PLAYWRIGHT_SESSION_DATA=... \
-pnpm parity:screenshots:capture:web -- --surface design-system
+bun parity:screenshots:capture:web -- --surface design-system
 
 # iOS — the deep-link auto path does NOT work for the DS surface today
 # (the iOS app has no /settings/* deep-link handler; see
 # apps/ios/Todus/Todus/App/TodosApp.swift .onOpenURL). Use the interactive
 # capture flow: boot the simulator, sign in as an allowlisted account, then
 # manually nav Settings → Developer → Design System and press Enter.
-pnpm parity:screenshots:capture:ios -- --surface design-system
+bun parity:screenshots:capture:ios -- --surface design-system
 
 # macOS — builds + launches the native TodusMac shell, then walks
 # Settings → Developer → Design System. The script is interactive for
 # section-specific captures because the macOS DS sheet uses a sidebar
 # selector that isn't deep-linkable yet.
-pnpm parity:screenshots:capture:macos:auto -- --surface design-system --interactive
+bun parity:screenshots:capture:macos:auto -- --surface design-system --interactive
 ```
 
 ### Check baselines exist
 
 ```bash
 # Just the DS surface
-pnpm parity:screenshots:check -- --surface design-system
+bun parity:screenshots:check -- --surface design-system
 
 # Everything
-pnpm parity:screenshots:check
+bun parity:screenshots:check
 ```
 
 ### When the design system changes intentionally
 
 1. Update the underlying token / component (e.g. `apps/web/app/globals.css`, `AppTheme.swift`, `MacTheme.swift`).
 2. Re-capture baselines for the affected platforms with the commands above.
-3. Run `pnpm parity:screenshots:sync` to refresh `SCREENSHOT_LOG.md`.
+3. Run `bun parity:screenshots:sync` to refresh `SCREENSHOT_LOG.md`.
 4. Eyeball the new vs. old PNGs in `git diff parity_screenshots/` (binary diff, but at least you'll see what files moved).
 5. Commit the new baselines together with the source change so reviewers can see the visual delta.
 

@@ -34,7 +34,7 @@ struct TiptapDocEditorWebView: NSViewRepresentable {
             web.loadFileURL(indexURL, allowingReadAccessTo: dir)
         } else {
             AppLogger.shared.log(
-                "[TiptapDocEditor] DocEditor/index.html missing — pnpm --filter @zero/macos-doc-editor build"
+                "[TiptapDocEditor] DocEditor/index.html missing — bun run --filter @zero/macos-doc-editor build"
             )
             // Show a visible failure instead of a permanently blank white pane.
             web.loadHTMLString(Self.editorMissingHTML, baseURL: nil)

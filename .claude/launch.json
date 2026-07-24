@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "web",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@zero/web", "dev"],
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--filter", "@zero/web", "dev"],
       "port": 3000
     }
   ]

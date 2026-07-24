@@ -11,15 +11,15 @@ RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 # Install turbo globally
-RUN npm install -g pnpm
-RUN pnpm install -g turbo
+RUN npm install -g bun@1.3.10
+RUN bun install -g turbo
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY package.json bun.lock turbo.json ./
 RUN mkdir -p apps packages
 COPY apps/*/package.json ./apps/
 COPY packages/ ./packages/
 
-RUN pnpm install --prod --ignore-scripts
+RUN bun install --production --ignore-scripts
 
 
 # ========================================
@@ -28,16 +28,16 @@ RUN pnpm install --prod --ignore-scripts
 FROM base AS builder
 WORKDIR /app
 
-RUN npm install -g pnpm wrangler
+RUN npm install -g bun@1.3.10 wrangler
 
 # Copy workspace configuration and source code
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY package.json bun.lock turbo.json ./
 COPY . .
 
 ENV CI=true
 
 # Install all dependencies (including devDependencies for build)
-RUN pnpm install --frozen-lockfile
+RUN bun install --frozen-lockfile
 
 # Set environment variables for build
 ENV NEXT_TELEMETRY_DISABLED=1 \
@@ -45,7 +45,7 @@ ENV NEXT_TELEMETRY_DISABLED=1 \
     DOCKER_BUILD=true
 
 # Build the application
-RUN cd apps/mail && pnpm run build
+RUN cd apps/mail && bun run build
 
 # ========================================
 # Runner Stage: Production Environment
@@ -53,10 +53,10 @@ RUN cd apps/mail && pnpm run build
 FROM base AS runner
 WORKDIR /app
 
-RUN npm install -g wrangler
+RUN npm install -g bun@1.3.10 wrangler
 
-RUN addgroup -S -g 1001 pnpm && \
-    adduser -S -u 1001 nextjs -G pnpm
+RUN addgroup -S -g 1001 bun && \
+    adduser -S -u 1001 nextjs -G bun
 
 # Set environment variables for build
 ENV NODE_ENV=production \
@@ -69,7 +69,7 @@ COPY scripts/docker/ /app/scripts
 RUN chmod -R +x /app/scripts/*
 
 # Copy the entire built application
-COPY --from=builder --chown=nextjs:pnpm /app ./
+COPY --from=builder --chown=nextjs:bun /app ./
 
 # Switch to non-root user
 USER nextjs

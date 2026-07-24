@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Monorepo Structure
 
-This is a **pnpm + Turborepo** monorepo. The active apps are:
+This is a **bun + Turborepo** monorepo. The active apps are:
 
 | App | Path | Stack | Purpose |
 |-----|------|-------|---------|
@@ -21,7 +21,7 @@ This is a **pnpm + Turborepo** monorepo. The active apps are:
 > **IMPORTANT — `apps/mail/` is READ-ONLY.**
 > All frontend work now lives in `apps/web/`. Never edit any file under `apps/mail/`. Treat it as an archived reference. If you need to make a frontend change, make it in `apps/web/` instead.
 >
-> ⚠️ `pnpm build:frontend` and `pnpm deploy:frontend` in root `package.json` still target `@zero/mail` (the legacy archive). To actually ship `apps/web`, run `pnpm --filter=@zero/web build` and `pnpm --filter=@zero/web deploy` directly until those scripts are fixed.
+> ⚠️ `bun build:frontend` and `bun deploy:frontend` in root `package.json` still target `@zero/mail` (the legacy archive). To actually ship `apps/web`, run `bun run --filter=@zero/web build` and `bun run --filter=@zero/web deploy` directly until those scripts are fixed.
 
 ## Design System
 
@@ -45,69 +45,69 @@ Cross-platform design tokens are documented and tracked. **Update these when you
 
 ```bash
 # Development
-pnpm go                         # Start Docker DB + apps/web + backend (full local stack)
-pnpm dev                        # Start apps/web + backend (DB must already be running)
-pnpm web                        # Alias for pnpm dev
-pnpm mail                       # Start apps/mail (mail product) only
-pnpm docker:db:up               # Start PostgreSQL in Docker
-pnpm docker:db:stop             # Stop PostgreSQL
-pnpm docker:db:down             # Remove PostgreSQL container
-pnpm docker:db:clean            # Remove PostgreSQL container and volumes
-pnpm ios                        # Start the iOS app
-pnpm ios:simulator              # Launch the iOS simulator flow
-pnpm ios:build:preview          # Build iOS preview artifact
-pnpm ios:build:production       # Build iOS production artifact
-pnpm macos                      # Start the macOS app
-pnpm android                    # Start the Android app
-pnpm scripts                    # Run repo scripts via tsx
+bun go                         # Start Docker DB + apps/web + backend (full local stack)
+bun dev                        # Start apps/web + backend (DB must already be running)
+bun web                        # Alias for bun dev
+bun mail                       # Start apps/mail (mail product) only
+bun docker:db:up               # Start PostgreSQL in Docker
+bun docker:db:stop             # Stop PostgreSQL
+bun docker:db:down             # Remove PostgreSQL container
+bun docker:db:clean            # Remove PostgreSQL container and volumes
+bun ios                        # Start the iOS app
+bun ios:simulator              # Launch the iOS simulator flow
+bun ios:build:preview          # Build iOS preview artifact
+bun ios:build:production       # Build iOS production artifact
+bun macos                      # Start the macOS app
+bun android                    # Start the Android app
+bun scripts                    # Run repo scripts via tsx
 
 # Database
-pnpm db:generate                # Generate migration from schema changes
-pnpm db:migrate                 # Apply migrations
-pnpm db:push                    # Push schema changes directly
-pnpm db:studio                  # Drizzle Studio GUI
+bun db:generate                # Generate migration from schema changes
+bun db:migrate                 # Apply migrations
+bun db:push                    # Push schema changes directly
+bun db:studio                  # Drizzle Studio GUI
 
 # Build & Deploy
-pnpm build                      # Build all packages
-pnpm build:frontend             # Build apps/mail (the deployed mail product)
-pnpm deploy:frontend            # Deploy apps/mail to Cloudflare
-pnpm deploy:backend             # Deploy backend to Cloudflare Workers
-pnpm sentry:sourcemaps          # Upload frontend source maps
+bun run build                      # Build all packages
+bun build:frontend             # Build apps/mail (the deployed mail product)
+bun deploy:frontend            # Deploy apps/mail to Cloudflare
+bun deploy:backend             # Deploy backend to Cloudflare Workers
+bun sentry:sourcemaps          # Upload frontend source maps
 
 # Evaluations and parity
-pnpm test:ai                    # Run backend AI tests
-pnpm eval                       # Run backend evals
-pnpm eval:dev                   # Run backend evals in dev mode
-pnpm eval:ci                    # Run backend evals in CI mode
-pnpm parity:screenshots:check   # Compare screenshot parity
-pnpm parity:screenshots:sync    # Sync screenshot logs
-pnpm parity:screenshots:capture:ios
-pnpm parity:screenshots:capture:ios:auto
-pnpm parity:screenshots:capture:android:auto
-pnpm parity:screenshots:capture:macos:auto
+bun test:ai                    # Run backend AI tests
+bun eval                       # Run backend evals
+bun eval:dev                   # Run backend evals in dev mode
+bun eval:ci                    # Run backend evals in CI mode
+bun parity:screenshots:check   # Compare screenshot parity
+bun parity:screenshots:sync    # Sync screenshot logs
+bun parity:screenshots:capture:ios
+bun parity:screenshots:capture:ios:auto
+bun parity:screenshots:capture:android:auto
+bun parity:screenshots:capture:macos:auto
 
 # Quality
-pnpm precommit                 # Run oxlint --deny-warnings on staged files
-pnpm lint                      # ESLint (turbo)
-pnpm format                    # Prettier write for app code
-pnpm check                     # Format check + lint
-pnpm check:format              # Prettier check
-pnpm test                      # Run tests (packages/testing)
-pnpm test:watch                # Watch tests
-pnpm test:coverage             # Coverage run
-pnpm test:ui                   # UI test runner
-pnpm test -- -t "test name"     # Single test
+bun precommit                 # Run oxlint --deny-warnings on staged files
+bun lint                      # ESLint (turbo)
+bun format                    # Prettier write for app code
+bun check                     # Format check + lint
+bun check:format              # Prettier check
+bun run test                      # Run tests (packages/testing)
+bun test:watch                # Watch tests
+bun test:coverage             # Coverage run
+bun test:ui                   # UI test runner
+bun run test -- -t "test name"     # Single test
 ```
 
 ### Important Restrictions
-- **NEVER run project-wide lint/format commands** (`pnpm check`, `pnpm lint`, `pnpm format`) — these touch the entire codebase. Only lint/format specific files you changed.
+- **NEVER run project-wide lint/format commands** (`bun check`, `bun lint`, `bun format`) — these touch the entire codebase. Only lint/format specific files you changed.
 
 ### Current Workflow Notes
-- `pnpm dev` / `pnpm web` starts `apps/web` (marketing + mail + settings — the full frontend) + the backend.
-- `pnpm mail` starts the **legacy** `apps/mail` archive — only use if you need to compare against the old code. Never edit it.
-- Prefer `pnpm go` when you need the full local stack; it brings up Docker Postgres before the app processes.
-- Use `pnpm ios:simulator` for simulator debugging, but `pnpm ios` is the lighter app-start command.
-- Use `pnpm macos` for the native macOS app; the old Electron flow is obsolete.
+- `bun dev` / `bun web` starts `apps/web` (marketing + mail + settings — the full frontend) + the backend.
+- `bun mail` starts the **legacy** `apps/mail` archive — only use if you need to compare against the old code. Never edit it.
+- Prefer `bun go` when you need the full local stack; it brings up Docker Postgres before the app processes.
+- Use `bun ios:simulator` for simulator debugging, but `bun ios` is the lighter app-start command.
+- Use `bun macos` for the native macOS app; the old Electron flow is obsolete.
 - When adding schema changes, keep the order `db:generate` → review migration → `db:migrate` or `db:push` as appropriate.
 - Keep progress docs current: update `CHANGELOG.md`, `TASK.md`, `PLANNING.md`, or `ROADMAP.md` when work changes behavior or architecture.
 
@@ -125,7 +125,7 @@ This is the single React app that serves marketing, auth, the mail product, sett
 - **Auth client**: `apps/web/lib/auth-client.ts` — exports `signIn`, `signUp`, `signOut`, `useSession`
 - **API calls**: tRPC client via `@trpc/tanstack-react-query` against `apps/server`
 - **Env vars**: Vite prefix `VITE_PUBLIC_*`; `VITE_PUBLIC_BACKEND_URL` points to the server
-- **Build/deploy**: `pnpm --filter=@zero/web build`, `pnpm --filter=@zero/web deploy` (see warning above re: stale root scripts)
+- **Build/deploy**: `bun run --filter=@zero/web build`, `bun run --filter=@zero/web deploy` (see warning above re: stale root scripts)
 
 Key route surfaces (from `apps/web/app/routes.ts`):
 - `/` → landing, `/home`, `/about`, `/pricing`, `/terms`, `/privacy`, `/downloads`, `/contact`, `/faq`, `/hr`
@@ -145,8 +145,8 @@ Key route surfaces (from `apps/web/app/routes.ts`):
 - **Durable Objects**: `ZeroDriver`, `ZeroAgent`, `ZeroDB`, `ZeroMCP`, `ShardRegistry`, `WorkflowRunner`, `ThreadSyncWorker`, `ThinkingMCP`
 - **Cloudflare Workflows**: `SyncThreadsWorkflow`, `SyncThreadsCoordinatorWorkflow` — async email sync orchestration
 - **Cloudflare**: KV namespaces, Queues, Workflows; all bindings in `wrangler.jsonc`
-- **Deploy**: `pnpm deploy:backend` → Wrangler (`wrangler.jsonc`)
-- **Dev utilities**: `pnpm test:ai`, `pnpm eval`, `pnpm eval:dev`, `pnpm eval:ci`
+- **Deploy**: `bun deploy:backend` → Wrangler (`wrangler.jsonc`)
+- **Dev utilities**: `bun test:ai`, `bun eval`, `bun eval:dev`, `bun eval:ci`
 
 tRPC router **files** in `src/trpc/routes/` (one per domain): `ai`, `assistant`, `avatar`, `bimi`, `brain`, `calendar`, `categories`, `connections`, `contact`, `cookies`, `docs`, `drafts`, `groups`, `label`, `logging`, `mail`, `mail-assistant`, `meet`, `mentions`, `notes`, `sessions`, `settings`, `sharing`, `shortcut`, `subscription`, `tasks`, `templates`, `user`.
 
@@ -161,7 +161,7 @@ tRPC router **files** in `src/trpc/routes/` (one per domain): `ai`, `assistant`,
 - **Deep link scheme**: `todus://`
 - **SPM Dependencies**: CalendarKit v1.1.7; also `packages/swift-auth` and `packages/swift-widgets` (monorepo SPM packages)
 - **Auth**: Native OAuth flows (Google, Apple) + Email OTP — auth tokens extracted natively, then passed to the backend via Bearer token. **Do not use WKWebView fetch for cross-origin API calls** — use native URLSession instead.
-- **Build commands**: `pnpm ios`, `pnpm ios:simulator`, `pnpm ios:build:preview`, `pnpm ios:build:production`
+- **Build commands**: `bun ios`, `bun ios:simulator`, `bun ios:build:preview`, `bun ios:build:production`
 
 ### iOS Services Layer
 - `AuthService` — Better-Auth client (Apple Sign In, Google OAuth, Email OTP). Bearer token stored in Keychain.

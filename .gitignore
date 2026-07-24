@@ -2,6 +2,7 @@
 
 # Git worktrees
 .worktrees/
+.claude/worktrees/
 
 # dependencies
 node_modules
@@ -34,7 +35,6 @@ dist
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.pnpm-debug.log*
 bun-debug.log*
 **/dev.log
 
@@ -72,6 +72,7 @@ worker-configuration.d.ts
 .react-router
 
 # devcontainer
+.bun-cache
 .pnpm-store
 tsx-0/
 

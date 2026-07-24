@@ -8,7 +8,7 @@
 
 It is not three apps stitched together — the web, iOS, and macOS clients are different front-ends over the same `apps/server` Cloudflare Worker.
 
-## The monorepo (pnpm + Turborepo)
+## The monorepo (bun + Turborepo)
 
 | App / package | Path | Stack | Role |
 |---|---|---|---|

@@ -24,14 +24,14 @@ Comprehensive guide to Todus AI capabilities and agent configuration:
 ### Setting Up for the First Time
 ```bash
 # 1. Install dependencies
-pnpm install
+bun install
 
 # 2. Setup environment
-pnpm nizzy env
-pnpm nizzy sync
+bun nizzy env
+bun nizzy sync
 
 # 3. Start database and servers
-pnpm go
+bun go
 ```
 
 ### Working with AI Features

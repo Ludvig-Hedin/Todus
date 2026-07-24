@@ -29,7 +29,7 @@ codex -a never
 
 # 1. Kill any process using port 5555
 
-# 2. Remove npm/yarn/pnpm lockfiles
+# 2. Remove npm/yarn/bun lockfiles
 
 # 3. Remove node_modules
 
@@ -66,17 +66,17 @@ PORT=3100 npm run dev
 ### Deploy Backend
 
 cd apps/server
-pnpm run deploy
+bun run deploy
 
 Or from root:
 
-pnpm run deploy:backend
+bun run deploy:backend
 
 ### Run on iOS simulator with bypass authentication
 
-EXPO_PUBLIC_AUTH_BYPASS=1 pnpm ios
+EXPO_PUBLIC_AUTH_BYPASS=1 bun ios
 
-pnpm --filter @zero/ios start
+bun run --filter @zero/ios start
 
 rm -rf .expo node_modules/.cache
 rm -rf node_modules
@@ -163,7 +163,7 @@ Press Enter to send the expanded instructions (skip either argument when you don
 npm run dev
 
 # To run the new Unified Web App (@zero/web) specifically:
-pnpm run --filter=@zero/web dev
+bun run --filter=@zero/web dev
 # It is configured to run on Port 0.
 ```
 

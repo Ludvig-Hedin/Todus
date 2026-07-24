@@ -10,31 +10,31 @@ Scope: web (browser e2e), backend (Vitest + integration), iOS (XCTest + simulato
 
 ### Web (browser)
 - **Preview MCP**: `preview_start`, `preview_click`, `preview_fill`, `preview_snapshot`, `preview_console_logs`, `preview_network`, `preview_screenshot`, `preview_resize`. Use for any browser-driven test in this doc.
-- **Unit (Vitest)**: `pnpm test -- -t "<name>"` from repo root; suites live in [packages/testing](packages/testing).
-- **Local stack**: `pnpm go` (Docker Postgres + `apps/web` + backend) or `pnpm web` (assumes Postgres already up). `apps/web` serves the full surface — marketing + auth + `/mail/*` + `/settings/*` — in one app. `pnpm mail` boots the legacy `apps/mail` archive (reference only, do not edit).
+- **Unit (Vitest)**: `bun run test -- -t "<name>"` from repo root; suites live in [packages/testing](packages/testing).
+- **Local stack**: `bun go` (Docker Postgres + `apps/web` + backend) or `bun web` (assumes Postgres already up). `apps/web` serves the full surface — marketing + auth + `/mail/*` + `/settings/*` — in one app. `bun mail` boots the legacy `apps/mail` archive (reference only, do not edit).
 
 ### Backend
-- **Vitest**: `pnpm test`, `pnpm test:ai`, `pnpm eval`, `pnpm eval:dev`, `pnpm eval:ci`.
-- **Local dev**: `pnpm go` (Postgres + worker).
+- **Vitest**: `bun run test`, `bun test:ai`, `bun eval`, `bun eval:dev`, `bun eval:ci`.
+- **Local dev**: `bun go` (Postgres + worker).
 - **Manual API**: `curl` against `http://localhost:8787` or trigger tRPC procedures through the web client.
 
 ### iOS
-- **Simulator**: `pnpm ios:simulator` (interactive); `pnpm ios` (lighter app start).
-- **Builds**: `pnpm ios:build:preview`, `pnpm ios:build:production`.
+- **Simulator**: `bun ios:simulator` (interactive); `bun ios` (lighter app start).
+- **Builds**: `bun ios:build:preview`, `bun ios:build:production`.
 - **XCTest**: open [apps/ios/Todus/Todus.xcodeproj](apps/ios/Todus/Todus.xcodeproj) → `⌘U`.
-- **Parity screenshots**: `pnpm parity:screenshots:capture:ios:auto`, `pnpm parity:screenshots:check`.
+- **Parity screenshots**: `bun parity:screenshots:capture:ios:auto`, `bun parity:screenshots:check`.
 - **Deep link probe**: [scripts/parity/capture-ios-deeplink.mjs](scripts/parity/capture-ios-deeplink.mjs).
 
 ### macOS
-- **Run**: `pnpm macos`.
+- **Run**: `bun macos`.
 - **XCTest**: open the macOS project → `⌘U`.
-- **Parity screenshots**: `pnpm parity:screenshots:capture:macos:auto`, `pnpm parity:screenshots:check`.
+- **Parity screenshots**: `bun parity:screenshots:capture:macos:auto`, `bun parity:screenshots:check`.
 
 ---
 
 ## 1. Web Test Cases
 
-Boot `apps/web` with `pnpm dev` (or `pnpm go` for the full local stack), attach Preview MCP via `preview_start`, then run each test below.
+Boot `apps/web` with `bun dev` (or `bun go` for the full local stack), attach Preview MCP via `preview_start`, then run each test below.
 
 ### 1.1 Marketing & Public Routes
 
@@ -255,7 +255,7 @@ For each row: page renders, form submit hits the right tRPC procedure, persisted
 
 ## 2. Backend Test Cases
 
-Run with `pnpm test`, `pnpm test:ai`, `pnpm eval` (Vitest in [packages/testing](packages/testing)). For end-to-end tRPC verification use the local stack (`pnpm go`).
+Run with `bun run test`, `bun test:ai`, `bun eval` (Vitest in [packages/testing](packages/testing)). For end-to-end tRPC verification use the local stack (`bun go`).
 
 ### 2.1 Auth Endpoints
 
@@ -274,7 +274,7 @@ Run with `pnpm test`, `pnpm test:ai`, `pnpm eval` (Vitest in [packages/testing](
 
 ### 2.2 tRPC — Per Procedure
 
-One row per procedure. Tool: `pnpm test` (Vitest) using `serverTrpc().<procedure>(...)` direct caller, with seeded DB.
+One row per procedure. Tool: `bun run test` (Vitest) using `serverTrpc().<procedure>(...)` direct caller, with seeded DB.
 
 #### `assistant`
 | Procedure | Test | Expected |
@@ -491,7 +491,7 @@ One row per procedure. Tool: `pnpm test` (Vitest) using `serverTrpc().<procedure
 | Migrate apply on existing DB | Idempotent; no errors |
 | User cascade delete | Removing `user` cascades to connection/account/session/settings/hotkeys |
 | `mail0_` prefix | Every table prefixed (verify via `\dt mail0_*`) |
-| Schema → TS types | `pnpm db:generate` produces stable diff or none |
+| Schema → TS types | `bun db:generate` produces stable diff or none |
 
 ### 2.8 External Integrations (mock + contract)
 
@@ -512,7 +512,7 @@ One row per procedure. Tool: `pnpm test` (Vitest) using `serverTrpc().<procedure
 
 ## 3. iOS Test Cases
 
-Open [apps/ios/Todus/Todus.xcodeproj](apps/ios/Todus/Todus.xcodeproj). Run XCTest via `⌘U`. Use `pnpm ios:simulator` for manual UI verification.
+Open [apps/ios/Todus/Todus.xcodeproj](apps/ios/Todus/Todus.xcodeproj). Run XCTest via `⌘U`. Use `bun ios:simulator` for manual UI verification.
 
 ### 3.1 Auth
 
@@ -690,14 +690,14 @@ Test via [scripts/parity/capture-ios-deeplink.mjs](scripts/parity/capture-ios-de
 
 | Command | Validates |
 | --- | --- |
-| `pnpm parity:screenshots:capture:ios:auto` | Captures all tracked iOS surfaces |
-| `pnpm parity:screenshots:check` | Diff vs baseline; flag regressions |
+| `bun parity:screenshots:capture:ios:auto` | Captures all tracked iOS surfaces |
+| `bun parity:screenshots:check` | Diff vs baseline; flag regressions |
 
 ---
 
 ## 4. macOS Test Cases
 
-Open the macOS project. Run XCTest via `⌘U`. Run app via `pnpm macos`.
+Open the macOS project. Run XCTest via `⌘U`. Run app via `bun macos`.
 
 ### 4.1 Sidebar Navigation
 
@@ -813,7 +813,7 @@ Open the macOS project. Run XCTest via `⌘U`. Run app via `pnpm macos`.
 
 ### 4.13 Parity Screenshots
 
-`pnpm parity:screenshots:capture:macos:auto` + `pnpm parity:screenshots:check`.
+`bun parity:screenshots:capture:macos:auto` + `bun parity:screenshots:check`.
 
 ---
 
@@ -821,7 +821,7 @@ Open the macOS project. Run XCTest via `⌘U`. Run app via `pnpm macos`.
 
 | Test | Steps | Expected |
 | --- | --- | --- |
-| Parity screenshots | `pnpm parity:screenshots:check` | Tracked surfaces match baselines (see [parity_screenshots/SCREENSHOT_LOG.md](parity_screenshots/SCREENSHOT_LOG.md)) |
+| Parity screenshots | `bun parity:screenshots:check` | Tracked surfaces match baselines (see [parity_screenshots/SCREENSHOT_LOG.md](parity_screenshots/SCREENSHOT_LOG.md)) |
 | Bearer token portability | sign in on web, copy Bearer, use on iOS | Same user data accessible |
 | Settings sync | change theme on web, re-open iOS | `settings.get` returns same JSON |
 | Mail sync parity | `mail.forceSync` from any surface | New threads visible on all surfaces after workflow completes |
@@ -858,12 +858,12 @@ Items existing infra cannot fully automate — flag for manual QA each release.
 ## 7. Execution Order (recommended)
 
 1. **Backend unit + integration** — cheapest failure mode; catches contract breakage early.
-   - `pnpm test`, `pnpm test:ai`, `pnpm eval`.
+   - `bun run test`, `bun test:ai`, `bun eval`.
 2. **Web smoke tests** — `preview_start` + per-route navigate + `preview_console_logs` check.
 3. **Web e2e top flows** — sign in, send email, change a setting, send AI chat message.
 4. **iOS XCTest** — open Xcode → `⌘U`.
 5. **macOS XCTest** — open Xcode → `⌘U`.
-6. **Parity screenshot diff** — `pnpm parity:screenshots:check`.
+6. **Parity screenshot diff** — `bun parity:screenshots:check`.
 7. **Manual QA gaps** — items from §6.
 
 A "ship-ready" run should clear steps 1–6 and have a fresh §6 manual pass within the last 24 hours.

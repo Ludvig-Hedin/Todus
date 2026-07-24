@@ -7,13 +7,13 @@
 ### 1. `apps/ios` — iPhone Native App (Canonical)
 - Type: Expo React Native app
 - Purpose: Primary iOS app for development, simulator testing, and TestFlight builds
-- Run: `pnpm ios` or `pnpm ios:simulator`
-- Build: `pnpm ios:build:preview` / `pnpm ios:build:production`
+- Run: `bun ios` or `bun ios:simulator`
+- Build: `bun ios:build:preview` / `bun ios:build:production`
 
 ### 2. `apps/macos` — Desktop WebView App (Canonical)
 - Type: Electron wrapper
 - Purpose: Native desktop shell that loads the web app (`apps/mail`)
-- Run: `pnpm macos`
+- Run: `bun macos`
 
 ### 3. `apps/mail` — Web App (Canonical)
 - Type: Next.js app
@@ -36,7 +36,7 @@ These are reference-only and intentionally removed from active root scripts.
 ## Command Policy
 
 Use only:
-- `pnpm ios*` for iPhone app work
-- `pnpm macos` for desktop app work
+- `bun ios*` for iPhone app work
+- `bun macos` for desktop app work
 
 Do not use archived app paths for active development.

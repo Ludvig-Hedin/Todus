@@ -4,6 +4,12 @@ Last updated: 2026-07-22
 
 ---
 
+# Release review follow-up — 2026-07-24
+
+- **P2 — Apple key history:** confirm key ID `ZJC3UFF6WX` is revoked in App Store Connect. The file is absent locally, but its path exists in old Git history.
+- **P2 — notification semantics:** the iOS notification bell opens a mixed AI digest while its badge counts only loaded unread email threads. Replace it with real notification state or label/reroute it as unread mail.
+- **P2 — compound capture retry:** if a later intent fails after earlier intents have persisted, retrying the retained full draft can duplicate the completed prefix. Track completed intents or stage task-only compounds atomically.
+
 # Performance and reliability audit — 2026-07-22
 
 ## iOS follow-up resolution

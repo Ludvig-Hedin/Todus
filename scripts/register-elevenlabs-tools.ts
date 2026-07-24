@@ -14,7 +14,7 @@
  *   ELEVENLABS_AGENT_ID         – ElevenLabs agent ID to update with tools
  *
  * Usage:
- *   pnpm tsx scripts/register-elevenlabs-tools-v2.ts
+ *   bun tsx scripts/register-elevenlabs-tools-v2.ts
  */
 
 import { zodToJsonSchema } from 'zod-to-json-schema';

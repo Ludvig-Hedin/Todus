@@ -34,8 +34,8 @@ Archived apps are for reference only and are not part of the active app surface.
 
 ## Build Entry Points
 
-- iOS: `pnpm ios`, `pnpm ios:simulator`, `pnpm ios:build:*`
+- iOS: `bun ios`, `bun ios:simulator`, `bun ios:build:*`
 - macOS: `cd apps/macos && xcodegen generate && open TodusMac.xcodeproj`
-- Web/backend: standard `pnpm dev`, `pnpm deploy:*`
+- Web/backend: standard `bun dev`, `bun deploy:*`
 
 `native:*` root scripts were removed to enforce a single active iOS and desktop path.

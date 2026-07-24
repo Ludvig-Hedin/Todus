@@ -1,0 +1,3 @@
+[install]
+# Matches the previous .npmrc behaviour: pin exact versions on install.
+exact = true

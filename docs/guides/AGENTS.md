@@ -1,10 +1,10 @@
 # Agent Configuration for Todus
 
-Todus is a unified productivity app built in a pnpm monorepo with native Apple clients, a web client, and a backend API.
+Todus is a unified productivity app built in a bun monorepo with native Apple clients, a web client, and a backend API.
 
 ## Project Structure
 
-This is a pnpm workspace monorepo with the following structure:
+This is a bun workspace monorepo with the following structure:
 
 - `apps/mail/` - React Router + Vite frontend
 - `apps/server/` - Backend server
@@ -19,35 +19,35 @@ This is a pnpm workspace monorepo with the following structure:
 
 ### Development
 
-- `pnpm go` - Quick start: starts database and dev servers
-- `pnpm dev` - Start all development servers (uses Turbo)
-- `pnpm docker:db:up` - Start PostgreSQL database in Docker
-- `pnpm docker:db:down` - Stop and remove database container
+- `bun go` - Quick start: starts database and dev servers
+- `bun dev` - Start all development servers (uses Turbo)
+- `bun docker:db:up` - Start PostgreSQL database in Docker
+- `bun docker:db:down` - Stop and remove database container
 
 ### Build & Deploy
 
-- `pnpm build` - Build all packages (uses Turbo)
-- `pnpm build:frontend` - Build only the mail frontend
-- `pnpm deploy:frontend` - Deploy frontend
-- `pnpm deploy:backend` - Deploy backend
+- `bun run build` - Build all packages (uses Turbo)
+- `bun build:frontend` - Build only the mail frontend
+- `bun deploy:frontend` - Deploy frontend
+- `bun deploy:backend` - Deploy backend
 
 ### Code Quality
 
-- `pnpm check` - Run format check and lint
-- `pnpm lint` - Run ESLint across all packages
-- `pnpm format` - Format code with Prettier
+- `bun check` - Run format check and lint
+- `bun lint` - Run ESLint across all packages
+- `bun format` - Format code with Prettier
 
 ### Database
 
-- `pnpm db:push` - Push schema changes to database
-- `pnpm db:generate` - Generate migration files
-- `pnpm db:migrate` - Apply database migrations
-- `pnpm db:studio` - Open Drizzle Studio
+- `bun db:push` - Push schema changes to database
+- `bun db:generate` - Generate migration files
+- `bun db:migrate` - Apply database migrations
+- `bun db:studio` - Open Drizzle Studio
 
 ### Utilities
 
-- `pnpm nizzy env` - Setup environment variables
-- `pnpm nizzy sync` - Sync environment variables and types
+- `bun nizzy env` - Setup environment variables
+- `bun nizzy sync` - Sync environment variables and types
 
 ## Tech Stack
 
@@ -55,25 +55,25 @@ This is a pnpm workspace monorepo with the following structure:
 - **Backend**: Node.js, tRPC, Drizzle ORM
 - **Database**: PostgreSQL
 - **Authentication**: Better Auth, Google OAuth
-- **Package Manager**: pnpm (v10+)
+- **Package Manager**: Bun 1.3.10
 - **Build Tool**: Turbo
 - **Linting**: ESLint, Oxlint, Prettier
 
 ## Development Setup
 
-1. Install dependencies: `pnpm install`
-2. Setup environment: `pnpm nizzy env`
-3. Sync environment: `pnpm nizzy sync`
-4. Start database: `pnpm docker:db:up`
-5. Initialize database: `pnpm db:push`
-6. Start development: `pnpm dev`
+1. Install dependencies: `bun install`
+2. Setup environment: `bun nizzy env`
+3. Sync environment: `bun nizzy sync`
+4. Start database: `bun docker:db:up`
+5. Initialize database: `bun db:push`
+6. Start development: `bun dev`
 
 ## Common Workflow
 
 1. Run targeted checks only for files you changed before committing
-2. Use `pnpm nizzy sync` after environment variable changes
-3. Run `pnpm db:push` after schema changes
-4. Use `pnpm go` for quick development startup
+2. Use `bun nizzy sync` after environment variable changes
+3. Run `bun db:push` after schema changes
+4. Use `bun go` for quick development startup
 
 ## AI & Automation Features
 
@@ -86,7 +86,7 @@ Todus includes AI capabilities powered by:
 
 ## Important Restrictions
 
-- **NEVER run project-wide lint/format commands** (`pnpm check`, `pnpm lint`, `pnpm format`)
+- **NEVER run project-wide lint/format commands** (`bun check`, `bun lint`, `bun format`)
 - These commands format/lint the entire codebase and cause unnecessary changes
 - Only use targeted linting on specific files when necessary
 - Focus on specific tasks without touching unrelated files

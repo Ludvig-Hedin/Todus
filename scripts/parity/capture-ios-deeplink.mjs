@@ -75,7 +75,7 @@ const routeBySlug = {
   // handler (see `.onOpenURL` in `apps/ios/Todus/Todus/App/TodosApp.swift` —
   // only `auth-callback`, `link-callback`, `share`, `mailto` are routed). The
   // deep-link auto path therefore can't navigate into the DS view; use the
-  // `pnpm parity:screenshots:capture:ios` interactive flow instead, or wire a
+  // `bun parity:screenshots:capture:ios` interactive flow instead, or wire a
   // `todus://settings/<name>` handler in TodosApp.swift to unblock automation.
 };
 
@@ -117,7 +117,7 @@ for (const screen of screens) {
   if (slugsRequiringInteractiveCapture.has(screen.slug)) {
     skipped += 1;
     failures.push(
-      `${screen.slug}: iOS deep-link router has no /settings/* handler — use \`pnpm parity:screenshots:capture:ios\` (interactive) instead`,
+      `${screen.slug}: iOS deep-link router has no /settings/* handler — use \`bun parity:screenshots:capture:ios\` (interactive) instead`,
     );
     continue;
   }

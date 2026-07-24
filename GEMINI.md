@@ -8,7 +8,7 @@
 
 ### Architecture
 
-Todus is a **pnpm + Turborepo** monorepo.
+Todus is a **bun + Turborepo** monorepo.
 
 - **Apps (`apps/`)**:
   - `web`: **Active frontend.** React Router v7 + Vite + Cloudflare Workers + Tailwind CSS v4 + shadcn/ui. Serves marketing, auth, `/mail/*` product, `/settings/*`, `/developer`.
@@ -27,7 +27,7 @@ Todus is a **pnpm + Turborepo** monorepo.
 - **Backend:** Hono, tRPC v11, Better Auth (Google / Apple / Email OTP / phone / email+password), Drizzle ORM, Cloudflare Hyperdrive Postgres, Durable Objects, Cloudflare Workflows, KV, Queues, R2.
 - **iOS / macOS:** Swift 6 strict concurrency, SwiftUI, SwiftData, EventKit, MLX-Swift for local AI (`mlx-swift-examples`).
 - **Database:** PostgreSQL via Drizzle ORM. Local dev runs PostgreSQL in Docker.
-- **Tooling:** pnpm workspaces, Turborepo, TypeScript strict mode, Prettier, ESLint / oxlint.
+- **Tooling:** bun workspaces, Turborepo, TypeScript strict mode, Prettier, ESLint / oxlint.
 
 ---
 
@@ -35,40 +35,40 @@ Todus is a **pnpm + Turborepo** monorepo.
 
 ### Prerequisites
 - Node.js v18+
-- pnpm v10+
+- Bun 1.3.10
 - Docker v20+
 
 ### Setup
 ```bash
-pnpm install
-pnpm nizzy env && pnpm nizzy sync
-pnpm docker:db:up
-pnpm db:push
+bun install
+bun nizzy env && bun nizzy sync
+bun docker:db:up
+bun db:push
 ```
 
 ### Daily dev
 ```bash
-pnpm go                  # docker DB + apps/web + backend
-pnpm dev                 # apps/web + backend (DB already running)
-pnpm ios                 # open iOS Xcode project
-pnpm ios:simulator       # build + boot iOS simulator
-pnpm macos               # run native macOS app
+bun go                  # docker DB + apps/web + backend
+bun dev                 # apps/web + backend (DB already running)
+bun ios                 # open iOS Xcode project
+bun ios:simulator       # build + boot iOS simulator
+bun macos               # run native macOS app
 ```
 
 ### Build + deploy
 ```bash
-pnpm --filter=@zero/web build           # build active frontend
-pnpm --filter=@zero/web deploy          # deploy active frontend (preferred)
-pnpm deploy:backend                     # deploy server
-pnpm ios:build:preview / ios:build:production
+bun run --filter=@zero/web build           # build active frontend
+bun run --filter=@zero/web deploy          # deploy active frontend (preferred)
+bun deploy:backend                     # deploy server
+bun ios:build:preview / ios:build:production
 ./scripts/build-mac-dmg.sh              # signed macOS DMG → R2
 ```
 
-⚠️ `pnpm build:frontend` / `pnpm deploy:frontend` in root `package.json` still target the **legacy** `apps/mail` archive. Always use `--filter=@zero/web` to ship the active frontend.
+⚠️ `bun build:frontend` / `bun deploy:frontend` in root `package.json` still target the **legacy** `apps/mail` archive. Always use `--filter=@zero/web` to ship the active frontend.
 
 ### Database
 ```bash
-pnpm db:generate / db:migrate / db:push / db:studio
+bun db:generate / db:migrate / db:push / db:studio
 ```
 
 ---
@@ -77,7 +77,7 @@ pnpm db:generate / db:migrate / db:push / db:studio
 
 - **Never edit `apps/mail/`** — read-only archive.
 - **Never edit `apps/archived/`** — reference only.
-- **Never run `pnpm check` / `pnpm lint` / `pnpm format` project-wide** — they sweep the entire monorepo. Lint/format only files you touched.
+- **Never run `bun check` / `bun lint` / `bun format` project-wide** — they sweep the entire monorepo. Lint/format only files you touched.
 - **Never create git branches** unless explicitly asked.
 - **Update the design system in all three sources together** — `apps/web/app/globals.css`, `apps/ios/.../AppTheme.swift`, `apps/macos/.../MacTheme.swift`, plus `DESIGN_SYSTEM.md`.
 - **Native API calls use `URLSession`** — never `WKWebView` fetch (the security origin is `null` for `loadHTMLString`).
@@ -87,11 +87,11 @@ pnpm db:generate / db:migrate / db:push / db:studio
 
 ## Development Conventions
 
-- **Monorepo workflow:** use `pnpm` and respect workspace boundaries (`pnpm-workspace.yaml`). Add dependencies with `--filter`.
+- **Monorepo workflow:** use `bun` and respect workspace boundaries (`package.json (workspaces)`). Add dependencies with `--filter`.
 - **Typing:** strict TypeScript. Configs shared from `packages/tsconfig`.
 - **Styling:** Tailwind CSS v4 (CSS-first `@theme` directive). Cross-platform tokens in `packages/design-tokens` and the three platform source files.
 - **Formatting / linting:** Prettier + oxlint + ESLint. File-scoped only.
-- **Database migrations:** `pnpm db:generate` → review SQL → `pnpm db:migrate` or `pnpm db:push`.
+- **Database migrations:** `bun db:generate` → review SQL → `bun db:migrate` or `bun db:push`.
 - **External integrations:** Gmail API (Google OAuth scopes `gmail.modify` + `gmail.readonly` + `gmail.send`), Resend (email OTP), Twilio (phone OTP), Apple Sign In, OpenRouter + Anthropic + local MLX for AI.
 
 ---

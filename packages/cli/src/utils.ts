@@ -8,9 +8,9 @@ export const getProjectRoot = async () => {
   const packageJson = await readFile(join(cwd, 'package.json'), 'utf8').catch(() => '{}');
   const packageJsonObject = JSON.parse(packageJson);
   const rootName = packageJsonObject.name;
-  if (!rootName || rootName !== 'zero') {
+  if (!rootName || rootName !== 'todus') {
     log.error(`Please run this command from the root of the project.`);
-    process.exit(0);
+    process.exit(1);
   }
   return cwd;
 };
@@ -29,7 +29,17 @@ export const runCommand = async (command: string, args: string[], options: Spawn
   const child = spawn(finalCommand, finalArgs, spawnOptions);
 
   await new Promise<void>((resolve, reject) => {
-    child.once('close', () => resolve());
+    child.once('close', (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(
+        new Error(
+          `${command} exited ${code === null ? `after signal ${signal ?? 'unknown'}` : `with code ${code}`}`
+        )
+      );
+    });
     child.once('error', (err) => reject(err));
   });
 };

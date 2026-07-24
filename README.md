@@ -43,11 +43,11 @@ Quick start:
 ```bash
 git clone https://github.com/Ludvig-Hedin/Todus.git
 cd Todus
-pnpm install
-pnpm docker:db:up
-pnpm nizzy env && pnpm nizzy sync
-pnpm db:push
-pnpm dev
+bun install
+bun docker:db:up
+bun nizzy env && bun nizzy sync
+bun db:push
+bun dev
 ```
 
 Visit [http://localhost:3000](http://localhost:3000).

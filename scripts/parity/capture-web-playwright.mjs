@@ -6,7 +6,7 @@
  * Uses the Playwright install already vendored at `packages/testing` — no new
  * dependency added at the root. Run from repo root:
  *
- *   pnpm parity:screenshots:capture:web
+ *   bun parity:screenshots:capture:web
  *
  * Env vars
  *   PARITY_WEB_BASE_URL          Base URL of running app. Default http://localhost:3000
@@ -53,7 +53,7 @@ try {
   ({ chromium } = require('@playwright/test'));
 } catch (err) {
   console.error(
-    'Failed to load @playwright/test from packages/testing. Run `pnpm install` first.',
+    'Failed to load @playwright/test from packages/testing. Run `bun install` first.',
   );
   console.error(String(err));
   process.exit(1);
@@ -158,7 +158,7 @@ async function main() {
 
     try {
       await page.goto(url, { waitUntil: 'networkidle', timeout: 30_000 });
-    } catch (err) {
+    } catch {
       // networkidle can time out on long-lived connections; fall back to dom.
       try {
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });

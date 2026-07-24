@@ -220,8 +220,8 @@ Code source:
 Use this pattern when launching iOS/macOS locally against staging:
 
 ```bash
-ZERO_PUBLIC_BACKEND_URL=https://sapi.todus.app pnpm --filter @zero/native ios
-ZERO_PUBLIC_BACKEND_URL=https://sapi.todus.app pnpm --filter @zero/native macos
+ZERO_PUBLIC_BACKEND_URL=https://sapi.todus.app bun run --filter @zero/native ios
+ZERO_PUBLIC_BACKEND_URL=https://sapi.todus.app bun run --filter @zero/native macos
 ```
 
 ## 7. Internal Build Packaging Inputs
@@ -307,7 +307,7 @@ Fix:
 ```bash
 cd /Users/ludvighedin/Programming/personal/mail/apps/native
 bundle install
-pnpm --filter @zero/native pod-install
+bun run --filter @zero/native pod-install
 ```
 
 ## 10. Final Manual Signoff Template

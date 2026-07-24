@@ -7,14 +7,14 @@
 ## Canonical Runtime Targets
 
 ### Web (active frontend)
-- **App:** `apps/web` (pnpm filter `@zero/web`)
+- **App:** `apps/web` (bun filter `@zero/web`)
 - **Stack:** React Router v7 + Vite + Cloudflare Workers (SSR)
 - **Routes:** marketing pages, auth, `/mail/*` product, `/settings/*`, `/developer`, `/blog/*`, `/compare/*`, `/share/*`, `/g/*`
 - **URL:** todus.app
 - **Status:** Active — all current frontend work goes here.
 
 ### Backend
-- **App:** `apps/server` (pnpm filter `@zero/server`)
+- **App:** `apps/server` (bun filter `@zero/server`)
 - **Stack:** Cloudflare Worker (Hono + tRPC + Drizzle ORM + Hyperdrive PostgreSQL + Durable Objects + Workflows + KV + R2 + Queues)
 - **Worker name:** `todus-server-v1` (`apps/server/wrangler.jsonc`)
 - **Status:** Active
@@ -33,14 +33,14 @@
 - **Status:** Active — feature parity with iOS across Home, Tasks, Email, Calendar, AI (with local MLX), Docs, Meetings, Settings
 
 ### Android (scaffolded only)
-- **App:** Expo scaffold reachable via `pnpm android`
-- **Status:** Not actively shipped. Parity capture script exists (`pnpm parity:screenshots:capture:android:auto`).
+- **App:** Expo scaffold reachable via `bun android`
+- **Status:** Not actively shipped. Parity capture script exists (`bun parity:screenshots:capture:android:auto`).
 
 ## Read-only / Archived
 
 | Path | Note |
 |---|---|
-| `apps/mail/` | Legacy React Router frontend. Superseded by `apps/web/`. **Do not edit.** Root scripts `pnpm build:frontend` / `pnpm deploy:frontend` still target this — use `pnpm --filter=@zero/web build|deploy` to ship the active app. |
+| `apps/mail/` | Legacy React Router frontend. Superseded by `apps/web/`. **Do not edit.** Root scripts `bun build:frontend` / `bun deploy:frontend` still target this — use `bun run --filter=@zero/web build|deploy` to ship the active app. |
 | `apps/archived/native` | Old React Native CLI iOS/macOS/Android app |
 | `apps/archived/webview-swift` | Old SwiftUI WebView wrapper |
 | `apps/archived/apple` | Stale project remnants |
@@ -52,11 +52,11 @@
 
 | Target | Command(s) |
 |---|---|
-| iOS | `pnpm ios` (open Xcode project), `pnpm ios:simulator`, `pnpm ios:build:preview`, `pnpm ios:build:production` |
-| macOS | `pnpm macos`, or `./scripts/build-mac-dmg.sh` for a signed DMG uploaded to R2 |
-| Web | `pnpm --filter=@zero/web build`, `pnpm --filter=@zero/web deploy`, `pnpm dev` (dev server) |
-| Backend | `pnpm deploy:backend`, `pnpm dev` (dev server) |
-| Database | `pnpm docker:db:up`, `pnpm db:generate`, `pnpm db:migrate`, `pnpm db:push`, `pnpm db:studio` |
+| iOS | `bun ios` (open Xcode project), `bun ios:simulator`, `bun ios:build:preview`, `bun ios:build:production` |
+| macOS | `bun macos`, or `./scripts/build-mac-dmg.sh` for a signed DMG uploaded to R2 |
+| Web | `bun run --filter=@zero/web build`, `bun run --filter=@zero/web deploy`, `bun dev` (dev server) |
+| Backend | `bun deploy:backend`, `bun dev` (dev server) |
+| Database | `bun docker:db:up`, `bun db:generate`, `bun db:migrate`, `bun db:push`, `bun db:studio` |
 
 `apps/macos/TodusMac.xcodeproj` is checked in directly — no `xcodegen` step needed.
 

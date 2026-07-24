@@ -5,15 +5,15 @@
 1. Deploy web + backend and share URL immediately:
 
 ```bash
-pnpm deploy:frontend
-pnpm deploy:backend
+bun deploy:frontend
+bun deploy:backend
 ```
 
 2. iPhone app via TestFlight:
 
 ```bash
-pnpm ios:build:production
-pnpm --filter=@zero/ios submit:ios
+bun ios:build:production
+bun run --filter=@zero/ios submit:ios
 ```
 
 Then in App Store Connect:
@@ -40,6 +40,6 @@ To return from Google auth back into app instead of staying in browser:
 4. Redeploy backend + frontend after auth config changes:
 
 ```bash
-pnpm deploy:backend
-pnpm deploy:frontend
+bun deploy:backend
+bun deploy:frontend
 ```
