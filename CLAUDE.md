@@ -109,7 +109,7 @@ bun run test -- -t "test name"     # Single test
 - Use `bun ios:simulator` for simulator debugging, but `bun ios` is the lighter app-start command.
 - Use `bun macos` for the native macOS app; the old Electron flow is obsolete.
 - When adding schema changes, keep the order `db:generate` → review migration → `db:migrate` or `db:push` as appropriate.
-- Keep progress docs current: update `CHANGELOG.md`, `TASK.md`, `PLANNING.md`, or `ROADMAP.md` when work changes behavior or architecture.
+- Keep progress docs current: add a `changelog/entries/unreleased/` entry in the same commit, and file remaining work in `backlog/` (code) or `user-tasks/` (human action). See the Team workflow section at the end of this file.
 
 ## Architecture: `apps/web` (Active Frontend)
 
@@ -221,12 +221,70 @@ Local dev: use a `.env` file at root (loaded via `dotenv-cli`).
 `.md` files to keep current when making architectural changes:
 - `AGENT_CONTEXT.md` — canonical agent reference (this file's mirror, broader audience)
 - `AGENTS.md` — agent-agnostic mirror
-- `CHANGELOG.md` — log all significant changes (append to `[Unreleased]`)
-- `TASK.md` — current sprint task status
+- `changelog/entries/unreleased/` — one file per shipped item, written in the same commit (`CHANGELOG.md` is now a pointer stub)
+- `backlog/tasks/open/` — code follow-ups (`TASK.md` and `CODE_REVIEW_BACKLOG.md` are now pointer stubs)
+- `user-tasks/tasks/open/` — work only the owner can do
+- `docs/agent-memory/` — durable gotchas + `active-work.md` file claims + `regressions.md`
 - `PRD.md` — product requirements (user flows, screens, empty states)
 - `APPS_ARCHITECTURE.md` — canonical app surface (update when adding/removing apps)
 - `DESIGN_SYSTEM.md` / `DESIGN_SYSTEM_INCONSISTENCIES.md` — design tokens + drift
-- `CODE_REVIEW_BACKLOG.md` — deferred fixes
 - `PLANNING.md` / `ROADMAP.md` — feature planning (mostly historical)
 
 See [AGENT_CONTEXT.md §10](AGENT_CONTEXT.md#10-documentation-map) for the full doc map and which files to ignore.
+
+---
+
+## Team workflow (agent operating system)
+
+Several agents and humans share this repo, this working tree, and one branch. The
+structure below exists so that work is never lost and never silently duplicated.
+
+| What | Where | Who acts |
+|------|-------|----------|
+| Code / agent follow-ups, bugs, nits, deferred work | [`backlog/`](backlog/README.md) | an agent, autonomously |
+| Work outside the codebase (env vars, dashboards, signing, accounts, live verification) | [`user-tasks/`](user-tasks/README.md) | the owner |
+| History — what shipped | [`changelog/`](changelog/README.md) | written at commit time |
+| Durable shared facts, gotchas, coordination | [`docs/agent-memory/`](docs/agent-memory/README.md) | anyone who learns one |
+
+Plans are intent · feature docs are reality · backlog is remaining work · Git is history.
+Never conflate them, and never keep two canonical docs for one topic.
+
+1. **Branch policy.** Work on `main`. **Never create or switch branches unless the owner
+   asks.** Verify with `git rev-parse --abbrev-ref HEAD` before committing.
+
+2. **Stay in your lane.** Touch only the files your task needs; never reformat unrelated
+   code. **Never `git add .` or `git add -A`** — stage owned paths explicitly. Claim your
+   files in [`docs/agent-memory/active-work.md`](docs/agent-memory/active-work.md) and
+   scan it for overlap before you start. If pending changes conflict with yours, stop and
+   report.
+
+3. **Document as you go.** After any meaningful change, update the canonical doc for it
+   (`AGENT_CONTEXT.md`, `FEATURES.md`, `DESIGN_SYSTEM.md`, the `docs/` reference set).
+   Any new doc must be registered in [`docs/README.md`](docs/README.md). Plans live only
+   in `docs/plans/{open,doing,done,archive}/`.
+
+4. **Review before push.** Self-review the diff. Spawn a reviewer subagent for anything
+   touching auth, payments, schema, webhooks, security, or 3+ files.
+
+5. **Commit + changelog together.** One entry file per meaningful item in
+   `changelog/entries/unreleased/`, written in the **same commit** as the change. Get the
+   id from `bun changelog:check` — never by eye.
+
+6. **Track follow-ups.** Code work → `backlog/`. Human hands → `user-tasks/`. Scope,
+   priority and risk decisions → ask the owner. **Never bury a human action item in
+   `backlog/`.** Closing an item means moving it to `tasks/done/`, flipping `status`, and
+   appending a dated note with **evidence** — what you observed, not what should be true.
+
+7. **Verify before finishing.** Run what your change touched:
+
+   ```bash
+   bun run test                          # vitest (packages/testing)
+   bun run --filter=@zero/server test:ai # backend AI tests
+   npx eslint <file>                     # per-file — never bun lint / bun check
+   npx prettier --write <file>           # per-file — never bun format
+   bun run --filter=@zero/web build      # the real frontend build
+   bun agent-ops:check                   # backlog / user-tasks / changelog / docs integrity
+   ```
+
+   iOS: `bun ios:simulator`. macOS: `bun macos`. Never run repo-wide lint or format, and
+   don't start a heavy gate another session is already running.

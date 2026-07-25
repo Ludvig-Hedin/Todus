@@ -4,7 +4,7 @@ import AppKit
 // MARK: - MacGroupChatView
 
 /// macOS group chat view using HSplitView — member list on left, messages + composer on right.
-/// TODO(realtime): Replace polling (5s refetch) with URLSessionWebSocketTask Durable Object
+/// TODO(realtime, backlog 0465): Replace polling (5s refetch) with URLSessionWebSocketTask Durable Object
 /// subscription when DO group rooms are available.
 struct MacGroupChatView: View {
     let groupId: String

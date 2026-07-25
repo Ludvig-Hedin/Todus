@@ -16,7 +16,32 @@
 | [deployment.md](deployment.md) | Cloudflare deploy (web + backend), DB migrations, macOS DMG→R2, iOS/TestFlight, CI/CD |
 | [mcp.md](mcp.md) | The MCP server the app **provides** (ZeroMCP / ThinkingMCP) + how to connect |
 | [agents.md](agents.md) | How AI coding agents should work in this repo — rules, gotchas, verification |
-| [changelog.md](changelog.md) | Pointer to the canonical [`../CHANGELOG.md`](../CHANGELOG.md) |
+| [changelog.md](changelog.md) | Pointer to the canonical [`../changelog/`](../changelog/README.md) entry folder |
+
+## Governed folders
+
+Added 2026-07-25. **Any new doc must be registered in this file.**
+
+| Folder | Holds |
+|--------|-------|
+| [agent-memory/](agent-memory/README.md) | Durable repo gotchas, `active-work.md` file claims, `regressions.md`. Outranked by the canonical docs and the code. |
+| [plans/](plans/README.md) | Plans, moving `open/ → doing/ → done/<year>/ → archive/`. The only plans folder — do not create a second one. |
+| [`../backlog/`](../backlog/README.md) | Code / agent follow-ups, one file per item |
+| [`../user-tasks/`](../user-tasks/README.md) | Work only the repo owner can do, outside the codebase |
+| [`../changelog/`](../changelog/README.md) | Shipped history, one file per entry |
+
+Structural validator: `bun docs:check` (report-only — registration gaps, plan-lifecycle
+drift, broken relative links, empty lifecycle folders).
+
+## Other registered docs
+
+| Doc | Covers |
+|-----|--------|
+| [ios-followup-tasks.md](ios-followup-tasks.md) | Agent-ready specs for the iOS follow-up work from the 2026-07-07/08 triple audit |
+| [testflight-checklist.md](testflight-checklist.md) | TestFlight submission checklist |
+| [agent-ops-system-setup-prompt.md](agent-ops-system-setup-prompt.md) | The portable prompt that created `backlog/`, `user-tasks/`, `changelog/`, `docs/agent-memory/` and the governance rules |
+| [audits/](audits/) | Dated audit evidence (performance, UX). Historical once resolved. |
+| [voice/](voice/) | Voice assistant phase docs |
 
 ## Native apps
 

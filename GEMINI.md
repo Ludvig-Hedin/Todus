@@ -104,5 +104,5 @@ bun db:generate / db:migrate / db:push / db:studio
 - `APPS_ARCHITECTURE.md` — runtime target map
 - `DESIGN_SYSTEM.md` + `DESIGN_SYSTEM_INCONSISTENCIES.md` — tokens + drift
 - `PRD.md` — product requirements (user flows, screens)
-- `CHANGELOG.md` — append to `[Unreleased]`
+- `changelog/entries/unreleased/` — one entry file per item, same commit as the change (`CHANGELOG.md` is a pointer stub)
 - `SELF_HOSTING.md`, `SECURITY.md`, `MCP.md`, `SCRIPTS_GUIDE.md` — operational

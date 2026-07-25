@@ -68,7 +68,7 @@ const messageSendRateLimiter = createRateLimiterMiddleware({
 // Called via ctx.c.executionCtx.waitUntil — runs as a background micro-task
 // after the sendMessage response is already sent back to the client.
 //
-// TODO(realtime): When Durable Object rooms are added for group chat, move this
+// TODO(realtime, backlog 0465): When Durable Object rooms are added for group chat, move this
 // trigger into the DO so it can broadcast the AI reply immediately via WebSocket
 // instead of waiting for clients to poll.
 
@@ -345,7 +345,7 @@ export const groupsRouter = router({
           // Background task — response appears when clients next poll.
           // generateGroupAIResponse opens its own DB connection so the connection
           // closed in our finally block below doesn't affect it.
-          // TODO(realtime): switch to Durable Object WebSocket broadcast here
+          // TODO(realtime, backlog 0465): switch to Durable Object WebSocket broadcast here
           ctx.c.executionCtx.waitUntil(
             generateGroupAIResponse(input.groupId, g.name),
           );

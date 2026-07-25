@@ -613,7 +613,7 @@ export const mailRouter = router({
         ids: z.string().array(),
       }),
     )
-    // TODO: Add batching
+    // TODO (backlog 0463): Add batching
     .mutation(async ({ input, ctx }) => {
       const { activeConnection } = ctx;
       return Promise.all(

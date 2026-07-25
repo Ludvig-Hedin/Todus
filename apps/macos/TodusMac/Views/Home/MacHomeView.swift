@@ -575,7 +575,7 @@ struct MacHomeView: View {
         .help(tooltip)
     }
 
-    // TODO(bug-hunt): Dead code — assistantPriorityStrip is never called. Was part of an older
+    // TODO(bug-hunt, backlog 0467): Dead code — assistantPriorityStrip is never called. Was part of an older
     // three-card priority strip UI replaced by macTodayRow. Safe to delete.
     private func assistantPriorityStrip(_ briefing: AssistantBriefing) -> some View {
         HStack(spacing: MacTheme.spacing8) {
@@ -613,7 +613,7 @@ struct MacHomeView: View {
         )
     }
 
-    // TODO(bug-hunt): Dead code — assistantQueueColumn and macBriefingRowCard are never called.
+    // TODO(bug-hunt, backlog 0467): Dead code — assistantQueueColumn and macBriefingRowCard are never called.
     // Remnants of the previous three-column briefing layout. Safe to delete both.
     private func assistantQueueColumn(title: String, rows: [MacBriefingRow]) -> some View {
         VStack(alignment: .leading, spacing: MacTheme.spacing8) {

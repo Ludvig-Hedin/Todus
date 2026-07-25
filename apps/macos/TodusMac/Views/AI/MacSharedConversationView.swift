@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - MacSharedConversationView
 //
-// TODO(integration): Present this view as a `.sheet` from MacRootView (or any
+// TODO(integration, backlog 0469): Present this view as a `.sheet` from MacRootView (or any
 // long-lived presenter) by observing `Notification.Name.todusOpenSharedConversation`,
 // which is broadcast from `TodusMacApp.dispatchValidatedURL` when the user opens a
 // `todus://share?slug=...` deep link. Minimal wiring inside MacRootView:

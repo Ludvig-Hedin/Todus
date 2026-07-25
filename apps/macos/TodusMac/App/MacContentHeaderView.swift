@@ -21,15 +21,15 @@ struct MacContentHeaderView: View {
 
             Spacer(minLength: 0)
 
-            // TODO: wire to real actions
+            // TODO (backlog 0466): wire to real actions
             HeaderIconButton(systemImage: "bell", help: "Notifications", accessibilityLabel: "Notifications") {}
             HeaderMenuButton()
-            // TODO: wire to real actions
+            // TODO (backlog 0466): wire to real actions
             HeaderIconButton(systemImage: "square.and.pencil", help: "Compose", accessibilityLabel: "Compose") {}
 
-            // TODO: wire to real search
+            // TODO (backlog 0466): wire to real search
             Button {
-                // TODO: open the global search UI
+                // TODO (backlog 0466): open the global search UI
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
@@ -89,7 +89,7 @@ private struct HeaderIconButton: View {
 
 private struct HeaderMenuButton: View {
     var body: some View {
-        // TODO: wire to real actions
+        // TODO (backlog 0466): wire to real actions
         Menu {
             Button("More Actions") {}
             Button("Share") {}

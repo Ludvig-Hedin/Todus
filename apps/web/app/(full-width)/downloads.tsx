@@ -9,7 +9,7 @@ const AppleIcon = Apple as any;
 const ArrowLeftIcon = ArrowLeft as any;
 const GlobeIcon = Globe as any;
 
-// TODO: Replace REPLACE_WITH_HASH with the actual hash from:
+// TODO (backlog 0461): Replace REPLACE_WITH_HASH with the actual hash from:
 // `cd apps/server && npx wrangler r2 bucket dev-url get todus-releases`
 const MAC_DMG_URL = 'https://pub-REPLACE_WITH_HASH.r2.dev/mac/Todus-1.0.dmg';
 

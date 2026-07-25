@@ -40,7 +40,7 @@ export function GroupChatView({ groupId }: Props) {
   // while the tab is hidden by default (refetchIntervalInBackground is false),
   // so this doesn't hammer the backend in the background.
   //
-  // TODO(realtime): true push requires a new Group Durable Object (rooms with
+  // TODO(realtime, backlog 0465): true push requires a new Group Durable Object (rooms with
   // WebSocket hibernation + broadcast on new message), a `wrangler.jsonc` DO
   // binding, server `sendMessage` triggering the DO broadcast, and a client WS
   // subscription here that writes incoming messages straight into the React

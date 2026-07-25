@@ -1,8 +1,14 @@
 # Changelog
 
-The authoritative change log lives at the repo root: **[`../CHANGELOG.md`](../CHANGELOG.md)**.
+The authoritative change log lives at **[`../changelog/`](../changelog/README.md)** — one
+file per entry under `entries/{unreleased,released,archived}/`.
 
-Append new entries to its `[Unreleased]` section. This pointer exists only so the `docs/` reference set is complete — do **not** duplicate change history here (the root file is the single source of truth and is kept current per [`../AGENT_CONTEXT.md`](../AGENT_CONTEXT.md) §10).
+Write a new entry as `changelog/entries/unreleased/NNNN-<slug>.md` in the **same commit**
+as the change; get the id from `bun changelog:check`. The root `../CHANGELOG.md` is now a
+pointer stub — do not append to it.
+
+This pointer exists only so the `docs/` reference set is complete; do **not** duplicate
+change history here.
 
 Related historical records:
 - `docs/superpowers/plans/` and `docs/superpowers/specs/` — approved specs + post-approval implementation plans.

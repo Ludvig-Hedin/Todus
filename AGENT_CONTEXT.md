@@ -334,9 +334,11 @@ Every `.md` file in the root, what it's for, and whether to trust it:
 | `FEATURE_TEST_PLAN.md` | Companion to `FEATURES.md` — per-feature test checklists. |
 | `DESIGN_SYSTEM.md` | Canonical design tokens across all three platforms. |
 | `DESIGN_SYSTEM_INCONSISTENCIES.md` | Drift tracker for resolved + open cross-platform mismatches. |
-| `CHANGELOG.md` | Running log of significant changes. Append to `[Unreleased]`. |
-| `TASK.md` | Sprint-level task tracking. Currently focused on iOS hardening + parity. |
-| `CODE_REVIEW_BACKLOG.md` | Deferred fixes flagged during bug hunts / reviews. |
+| `changelog/` | Change log — one file per entry under `entries/{unreleased,released,archived}/`, written in the same commit. `CHANGELOG.md` is a pointer stub. |
+| `backlog/` | Code / agent follow-ups and deferred review findings, one file per item under `tasks/{open,done}/`. `TASK.md` and `CODE_REVIEW_BACKLOG.md` are pointer stubs. |
+| `user-tasks/` | Work only the repo owner can do (env vars, dashboards, signing, accounts). |
+| `docs/agent-memory/` | Durable repo gotchas, `active-work.md` file claims, `regressions.md`. Outranked by canonical docs and the code. |
+| `docs/plans/` | Plans, moving through `open/ → doing/ → done/<year>/ → archive/`. |
 | `PRD.md` | Product requirements: user flows, screens, empty states, notifications. |
 | `SELF_HOSTING.md` | Self-hosting setup guide (prereqs, env vars, OAuth setup). |
 | `SECURITY.md` | Secret handling, vulnerability reporting. |
@@ -374,7 +376,7 @@ Every `.md` file in the root, what it's for, and whether to trust it:
 
 ## 11. Recent shipped work (last ~14 days)
 
-For an authoritative log, read `CHANGELOG.md`. High-impact items so the next agent has context:
+For an authoritative log, read `changelog/entries/`. High-impact items so the next agent has context:
 
 - **macOS DMG distribution** wired end to end — `scripts/build-mac-dmg.sh` archives + signs + uploads to Cloudflare R2; `/downloads` page serves the DMG.
 - **Local MLX inference (iOS + macOS)** — `mlx-swift-examples` SPM dependency wired into both Xcode targets. Settings → Local Models now scans both the in-app HF cache and the user's `~/.cache/huggingface/hub`. New `HuggingFaceCacheConnector` on macOS surfaces externally-pulled `mlx-community/*` models.
@@ -396,7 +398,7 @@ For an authoritative log, read `CHANGELOG.md`. High-impact items so the next age
 3. **No new git branches** unless the user asks. Commit on the existing branch.
 4. **Never edit `apps/mail/`** — archive only. All frontend changes go in `apps/web/`.
 5. **Never edit `apps/archived/`** — reference only.
-6. **Update the relevant doc when you change behavior** — `CHANGELOG.md`, and one of `TASK.md` / `PLANNING.md` / `PRD.md` / `APPS_ARCHITECTURE.md` depending on scope.
+6. **Update the relevant doc when you change behavior** — a `changelog/entries/unreleased/` entry in the same commit, remaining work in `backlog/` or `user-tasks/`, and `PRD.md` / `APPS_ARCHITECTURE.md` when scope or the app surface changes.
 7. **Design system tokens** — update web + iOS + macOS sources + `DESIGN_SYSTEM.md` together. Never one in isolation.
 8. **Native API calls** use `URLSession`, never `WKWebView` fetch.
 9. **For cross-platform features**, mirror Services/ folder layout: iOS and macOS Services/ should keep matching names and shapes.

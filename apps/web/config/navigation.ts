@@ -149,6 +149,13 @@ export const navigationConfig: Record<string, NavConfig> = {
             icon: FileText,
             shortcut: 'g + d',
           },
+          {
+            id: 'chat',
+            title: 'Chat',
+            url: '/mail/chat',
+            icon: MessageSquareIcon,
+            shortcut: 'cmd + 6',
+          },
         ],
       },
     ],
@@ -175,7 +182,7 @@ export const navigationConfig: Record<string, NavConfig> = {
             shortcut: 'g + s',
           },
           {
-            // TODO(i18n): Replace the English fallback once locale catalogs add this key.
+            // TODO(i18n, backlog 0471): Replace the English fallback once locale catalogs add this key.
             title: m['navigation.settings.ai'](),
             url: '/settings/ai',
             icon: Cpu,
@@ -196,7 +203,7 @@ export const navigationConfig: Record<string, NavConfig> = {
             icon: LockIcon,
           },
           {
-            // TODO(i18n): Replace the English fallback once locale catalogs add this key.
+            // TODO(i18n, backlog 0471): Replace the English fallback once locale catalogs add this key.
             title: m['navigation.settings.billing'](),
             url: '/settings/billing',
             icon: CreditCard,

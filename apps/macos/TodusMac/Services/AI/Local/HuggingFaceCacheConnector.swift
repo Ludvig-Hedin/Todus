@@ -224,7 +224,7 @@ final class HuggingFaceCacheConnector {
             // "MLX keeps re-downloading multi-GB weights" support ticket
             // can be diagnosed at the right layer instead of looking like
             // an inference bug.
-            // TODO(bug-hunt): Non-atomic symlink replace. bridgeIntoAppCacheIfPossible
+            // TODO(bug-hunt, backlog 0468): Non-atomic symlink replace. bridgeIntoAppCacheIfPossible
             // is nonisolated static with no serialization, so two concurrent refresh()
             // calls (or a concurrent real download) can interleave between this
             // removeItem and the createSymbolicLink below, leaving a missing/stale link

@@ -2572,7 +2572,7 @@ private struct MessageBubble: View {
             .disabled(!canCopy)
             .accessibilityLabel(didCopy ? "Copied" : "Copy message")
 
-            // TODO(P4): Wire thumbs up/down to a chat-feedback endpoint. The
+            // TODO(P4, backlog 0470): Wire thumbs up/down to a chat-feedback endpoint. The
             // existing `assistant.recordFeedback` tRPC route is for the morning
             // assistant surface — not for AI chat messages — and shipping local
             // no-op toggles fools users into thinking their rating was recorded.

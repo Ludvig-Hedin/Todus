@@ -9,7 +9,7 @@
 3. **No project-wide lint/format.** `bun check` / `bun lint` / `bun format` sweep the whole monorepo. Only lint/format files you touched (`npx eslint <file>`, `npx prettier --write <file>`).
 4. **No new git branches** unless asked; commit on the existing branch. Only commit files you intentionally changed — never bundle unrelated working-tree changes.
 5. **Verify, don't assume.** If unsure a path/symbol exists, read it. Code is the source of truth; if a doc disagrees, the code wins (and fix the doc).
-6. **Update docs when behavior/architecture changes** — `CHANGELOG.md` plus the relevant reference (`PRD.md` / `TASK.md` / `APPS_ARCHITECTURE.md` / this `docs/` set).
+6. **Update docs when behavior/architecture changes** — a `changelog/entries/unreleased/` entry plus the relevant reference (`PRD.md` / `APPS_ARCHITECTURE.md` / this `docs/` set). Remaining work goes to `backlog/` (code) or `user-tasks/` (human action).
 7. **Design tokens change in all three platforms together** — `apps/web/app/globals.css` + `apps/ios/.../AppTheme.swift` + `apps/macos/.../MacTheme.swift` + [`../DESIGN_SYSTEM.md`](../DESIGN_SYSTEM.md). Canonical dark bg `#1c1c1e`. Contrast bugs are functional bugs.
 
 ## Gotchas that waste time
