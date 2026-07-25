@@ -4,15 +4,28 @@
  * Sections: Today's Events (Calendar CTA) → Due Tasks → Recent Emails.
  */
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
   ArrowRight,
   CheckCircle2,
+  Clock,
   Inbox,
+  MoreHorizontal,
   Plus,
   CalendarDays,
   CheckSquare2,
   Mail,
   ExternalLink,
   Sparkles,
+  XCircle,
 } from 'lucide-react';
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow, isToday, format, startOfDay, endOfDay } from 'date-fns';
@@ -30,7 +43,7 @@ import { TaskItemCompact } from '@/components/tasks/task-item';
 import type { Route } from './+types/page';
 import { Link, redirect } from 'react-router';
 import { cn } from '@/lib/utils';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 type CalendarEvent = Outputs['calendar']['events']['events'][number];
@@ -460,7 +473,175 @@ function CalendarEventRow({ event }: { event: CalendarEvent }) {
   return content;
 }
 
+// ─── Briefing trust loop ──────────────────────────────────────────────────────
+// Mirrors iOS `HomeView.briefingRowActionMenu` + `EmailService` dismiss/snooze/
+// complete helpers. Rows the AI got wrong must be removable, otherwise a bad
+// suggestion sits in the briefing forever and the classifier never learns.
+
+type BriefingItemKind = 'open_loop' | 'prepared_action';
+
+const SNOOZE_PRESETS: Array<{ label: string; at: () => Date }> = [
+  {
+    label: 'Later today',
+    at: () => new Date(Date.now() + 4 * 60 * 60 * 1000),
+  },
+  {
+    label: 'Tomorrow morning',
+    at: () => {
+      const d = new Date();
+      d.setDate(d.getDate() + 1);
+      d.setHours(9, 0, 0, 0);
+      return d;
+    },
+  },
+  {
+    label: 'Next week',
+    at: () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+  },
+];
+
+function useBriefingRowActions() {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  // Optimistic hide keyed by `${kind}:${id}` so the row disappears on click and
+  // the next briefing refresh reconciles.
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
+
+  const snoozeOpenLoop = useMutation(trpc.assistant.snoozeOpenLoop.mutationOptions());
+  const dismissOpenLoop = useMutation(trpc.assistant.dismissOpenLoop.mutationOptions());
+  const dismissPreparedAction = useMutation(
+    trpc.assistant.dismissPreparedAction.mutationOptions(),
+  );
+  const recordFeedback = useMutation(trpc.assistant.recordFeedback.mutationOptions());
+
+  const hide = (kind: BriefingItemKind, id: string) =>
+    setHidden((prev) => new Set(prev).add(`${kind}:${id}`));
+
+  const isHidden = (kind: BriefingItemKind, id: string) => hidden.has(`${kind}:${id}`);
+
+  const refreshBriefing = () =>
+    void queryClient.invalidateQueries(trpc.assistant.getBriefing.queryFilter());
+
+  /** "Not a reply" / "Not a draft I want" — removes the row and trains the classifier. */
+  const dismiss = async (kind: BriefingItemKind, id: string) => {
+    hide(kind, id);
+    try {
+      if (kind === 'open_loop') await dismissOpenLoop.mutateAsync({ openLoopId: id });
+      else await dismissPreparedAction.mutateAsync({ actionId: id });
+      await recordFeedback.mutateAsync({ targetType: kind, targetId: id, feedback: 'wrong' });
+      toast.success('Removed from your briefing');
+    } catch (error) {
+      console.error('Failed to dismiss briefing item:', error);
+      toast.error("Couldn't remove that item");
+    } finally {
+      refreshBriefing();
+    }
+  };
+
+  /**
+   * "Mark done" — the user handled it elsewhere, so record `completed` rather
+   * than `wrong`. Prepared actions have no done state server-side; iOS treats
+   * that as a soft dismiss with `completed` feedback, and so do we.
+   */
+  const markDone = async (kind: BriefingItemKind, id: string) => {
+    hide(kind, id);
+    try {
+      if (kind === 'prepared_action') await dismissPreparedAction.mutateAsync({ actionId: id });
+      await recordFeedback.mutateAsync({ targetType: kind, targetId: id, feedback: 'completed' });
+      toast.success('Marked done');
+    } catch (error) {
+      console.error('Failed to complete briefing item:', error);
+      toast.error("Couldn't mark that done");
+    } finally {
+      refreshBriefing();
+    }
+  };
+
+  /**
+   * Snooze until a preset. Prepared actions have no backend snooze — iOS falls
+   * back to a dismiss with `helpful` feedback so the suggestion isn't
+   * downweighted; same behavior here.
+   */
+  const snooze = async (kind: BriefingItemKind, id: string, until: Date) => {
+    hide(kind, id);
+    try {
+      if (kind === 'open_loop') {
+        await snoozeOpenLoop.mutateAsync({ openLoopId: id, until });
+      } else {
+        await dismissPreparedAction.mutateAsync({ actionId: id });
+        await recordFeedback.mutateAsync({ targetType: kind, targetId: id, feedback: 'helpful' });
+      }
+      toast.success('Snoozed');
+    } catch (error) {
+      console.error('Failed to snooze briefing item:', error);
+      toast.error("Couldn't snooze that item");
+    } finally {
+      refreshBriefing();
+    }
+  };
+
+  return { isHidden, dismiss, markDone, snooze };
+}
+
+function BriefingRowMenu({
+  kind,
+  id,
+  actions,
+}: {
+  kind: BriefingItemKind;
+  id: string;
+  actions: ReturnType<typeof useBriefingRowActions>;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          // The row itself is a Link; stop the click from navigating.
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          aria-label="Briefing item actions"
+          className="text-muted-foreground hover:text-foreground focus-visible:ring-ring -mr-1 shrink-0 rounded p-1 focus-visible:outline-none focus-visible:ring-1"
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" onClick={(e) => e.preventDefault()}>
+        <DropdownMenuItem onSelect={() => void actions.markDone(kind, id)}>
+          <CheckCircle2 className="mr-2 h-3.5 w-3.5" /> Mark done
+        </DropdownMenuItem>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <Clock className="mr-2 h-3.5 w-3.5" /> Snooze
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            {SNOOZE_PRESETS.map((preset) => (
+              <DropdownMenuItem
+                key={preset.label}
+                onSelect={() => void actions.snooze(kind, id, preset.at())}
+              >
+                {preset.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          className="text-destructive focus:text-destructive"
+          onSelect={() => void actions.dismiss(kind, id)}
+        >
+          <XCircle className="mr-2 h-3.5 w-3.5" />
+          {kind === 'prepared_action' ? "Not a draft I want" : 'Not a reply'}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function AssistantBriefingBlock({ briefing }: { briefing: AssistantBriefing }) {
+  const rowActions = useBriefingRowActions();
   const priorityCards = [
     briefing.today.urgentReply
       ? {
@@ -487,11 +668,41 @@ function AssistantBriefingBlock({ briefing }: { briefing: AssistantBriefing }) {
       : null,
   ].filter(Boolean) as Array<{ title: string; detail: string; href: string | null }>;
 
-  const groupedQueues = [
-    { title: 'Needs You', items: briefing.needsYou, empty: 'No reply or decision blockers right now.' },
-    { title: 'Waiting On', items: briefing.waitingOn, empty: 'Nothing currently tracked as waiting on someone else.' },
-    { title: 'Prepared', items: briefing.prepared, empty: 'No prepared drafts or actions waiting for approval.' },
+  type BriefingQueueItem =
+    | AssistantBriefing['needsYou'][number]
+    | AssistantBriefing['prepared'][number];
+
+  const queueSources: Array<{
+    title: string;
+    kind: BriefingItemKind;
+    items: BriefingQueueItem[];
+    empty: string;
+  }> = [
+    {
+      title: 'Needs You',
+      kind: 'open_loop',
+      items: briefing.needsYou,
+      empty: 'No reply or decision blockers right now.',
+    },
+    {
+      title: 'Waiting On',
+      kind: 'open_loop',
+      items: briefing.waitingOn,
+      empty: 'Nothing currently tracked as waiting on someone else.',
+    },
+    {
+      title: 'Prepared',
+      kind: 'prepared_action',
+      items: briefing.prepared,
+      empty: 'No prepared drafts or actions waiting for approval.',
+    },
   ];
+
+  // Rows the user just actioned stay hidden until the refetch lands.
+  const groupedQueues = queueSources.map((section) => ({
+    ...section,
+    items: section.items.filter((item) => !rowActions.isHidden(section.kind, item.id)),
+  }));
 
   return (
     <div className="space-y-4">
@@ -544,22 +755,29 @@ function AssistantBriefingBlock({ briefing }: { briefing: AssistantBriefing }) {
                       : 'meetingId' in item && item.meetingId
                         ? `/mail/meetings/${item.meetingId}`
                         : null;
-                  const content = (
-                    <div className="rounded-lg border border-border/60 bg-muted/15 px-3 py-3">
-                      <p className="text-[13px] font-medium tracking-[-0.01em] text-foreground">
-                        {item.title}
-                      </p>
-                      <p className="text-muted-foreground mt-1 text-[12px] leading-5">
-                        {item.summary}
-                      </p>
-                    </div>
+                  const body = (
+                    <>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13px] font-medium tracking-[-0.01em] text-foreground">
+                          {item.title}
+                        </p>
+                        <p className="text-muted-foreground mt-1 text-[12px] leading-5">
+                          {item.summary}
+                        </p>
+                      </div>
+                      <BriefingRowMenu kind={section.kind} id={item.id} actions={rowActions} />
+                    </>
                   );
+                  const className =
+                    'flex items-start gap-2 rounded-lg border border-border/60 bg-muted/15 px-3 py-3';
                   return href ? (
-                    <Link key={item.id} to={href} className="block">
-                      {content}
+                    <Link key={item.id} to={href} className={className}>
+                      {body}
                     </Link>
                   ) : (
-                    <div key={item.id}>{content}</div>
+                    <div key={item.id} className={className}>
+                      {body}
+                    </div>
                   );
                 })}
               </div>

@@ -23,6 +23,7 @@ import {
   Tag,
   Plus,
   Trash,
+  FolderIcon,
 } from 'lucide-react';
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
 import { LabelDialog } from '@/components/labels/label-dialog';
@@ -33,7 +34,7 @@ import { type ThreadDestination } from '@/lib/thread-actions';
 import { useThread, useThreads } from '@/hooks/use-threads';
 import { useMemo, type ReactNode, useState, useCallback } from 'react';
 import { useTRPC } from '@/providers/query-provider';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useLabels } from '@/hooks/use-labels';
 import { FOLDERS, LABELS } from '@/lib/utils';
 import { useMail } from '../mail/use-mail';
@@ -63,6 +64,78 @@ interface EmailContextMenuProps {
   isBin?: boolean;
   refreshCallback?: () => void;
 }
+
+/**
+ * Bookmarks a thread into a task folder — parity with the iOS/macOS
+ * `AddToFolderSheet`, which lets a folder hold emails/events/docs alongside
+ * its tasks. Writes through `folders.addItem`; the subject/sender are cached
+ * as metadata because Gmail lives outside our DB and `listContents` renders
+ * from that cache.
+ */
+const SaveToFolderList = ({ threadId, bulkSelected }: { threadId: string; bulkSelected: string[] }) => {
+  const trpc = useTRPC();
+  const { data: foldersData } = useQuery(trpc.folders.list.queryOptions());
+  const { data: thread } = useThread(threadId);
+  const addItem = useMutation(trpc.folders.addItem.mutationOptions());
+
+  const folders = foldersData?.folders ?? [];
+  const targetThreadIds = bulkSelected.length > 0 ? bulkSelected : [threadId];
+
+  if (folders.length === 0) {
+    return (
+      <ContextMenuItem disabled className="font-normal">
+        No folders yet
+      </ContextMenuItem>
+    );
+  }
+
+  const handleSave = async (folderId: string, folderName: string) => {
+    const latest = thread?.latest;
+    try {
+      await Promise.all(
+        targetThreadIds.map((id) =>
+          addItem.mutateAsync({
+            folderId,
+            itemType: 'email',
+            itemId: id,
+            // Only the right-clicked thread has loaded metadata; bulk rows fall
+            // back to the id, which `listContents` renders as the title.
+            metadata:
+              id === threadId && latest
+                ? {
+                    title: latest.subject ?? id,
+                    subtitle: latest.sender?.name || latest.sender?.email || null,
+                  }
+                : {},
+          }),
+        ),
+      );
+      toast.success(
+        targetThreadIds.length === 1
+          ? `Saved to ${folderName}`
+          : `${targetThreadIds.length} threads saved to ${folderName}`,
+      );
+    } catch (error) {
+      console.error('Failed to save thread to folder:', error);
+      toast.error('Could not save to that folder');
+    }
+  };
+
+  return (
+    <>
+      {folders.map((folder) => (
+        <ContextMenuItem
+          key={folder.id}
+          className="font-normal"
+          onClick={() => void handleSave(folder.id, folder.name)}
+        >
+          <FolderIcon className="mr-2 h-4 w-4 opacity-60" />
+          {folder.name}
+        </ContextMenuItem>
+      ))}
+    </>
+  );
+};
 
 const LabelsList = ({ threadId, bulkSelected, onCreateLabel }: { threadId: string; bulkSelected: string[]; onCreateLabel: () => void }) => {
   const { userLabels: labels } = useLabels();
@@ -596,6 +669,16 @@ export function ThreadContextMenu({
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className="dark:bg-panelDark max-h-[520px] w-48 overflow-y-auto bg-white">
               <LabelsList threadId={threadId} bulkSelected={mail.bulkSelected} onCreateLabel={handleOpenCreateLabel} />
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+
+          <ContextMenuSub>
+            <ContextMenuSubTrigger className="font-normal">
+              <FolderIcon className="mr-2.5 h-4 w-4 opacity-60" />
+              Save to folder
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent className="dark:bg-panelDark max-h-[520px] w-48 overflow-y-auto bg-white">
+              <SaveToFolderList threadId={threadId} bulkSelected={mail.bulkSelected} />
             </ContextMenuSubContent>
           </ContextMenuSub>
 

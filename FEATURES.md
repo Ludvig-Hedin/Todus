@@ -184,7 +184,7 @@ Manifest backing the design-system page: [apps/web/app/(routes)/settings/design-
 | --- | --- | --- |
 | [components/settings/](apps/web/components/settings/) | `primitives.tsx`, `settings-card.tsx` | Settings UI primitives |
 | [components/calendar/](apps/web/components/calendar/) | `calendar-grid.tsx` | Calendar grid view |
-| [components/tasks/](apps/web/components/tasks/) | `task-item.tsx` | Task row component |
+| [components/tasks/](apps/web/components/tasks/) | `task-item.tsx`, `organize-dialog.tsx`, `folder-contents.tsx` | Task row component; AI folder-triage review (`tasks.organize`, iOS `OrganizeReviewSheet` parity); folder's non-task members (`folders.listContents`, iOS `FolderDetailView` parity) |
 | [components/docs/](apps/web/components/docs/) | `doc-tree.tsx` | Document hierarchy tree |
 | [components/connection/](apps/web/components/connection/) | `add.tsx`, `connection-wrapper.tsx` | Add / wrap email connection |
 | [components/labels/](apps/web/components/labels/) | `label-dialog.tsx` | Create / edit label modal |

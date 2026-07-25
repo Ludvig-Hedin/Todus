@@ -40,6 +40,9 @@ export default [
         route('/home', '(routes)/mail/home/page.tsx'),
         route('/tasks', '(routes)/mail/tasks/page.tsx'),
         route('/calendar', '(routes)/mail/calendar/page.tsx'),
+        // Full-page AI chat (iOS AIChatView / macOS MacAssistantPanel parity).
+        // Must stay above `/:folder` or it resolves as a mail folder named "chat".
+        route('/chat', '(routes)/mail/chat/page.tsx'),
         route('/search', '(routes)/mail/search/page.tsx'),
         route('/create', '(routes)/mail/create/page.tsx'),
         route('/compose', '(routes)/mail/compose/page.tsx'),

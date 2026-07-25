@@ -28,6 +28,7 @@ import {
   ArrowUpDown,
   FolderIcon,
   FolderPlus,
+  Sparkles,
   X,
   List,
   LayoutGrid,
@@ -85,6 +86,8 @@ import { CSS } from '@dnd-kit/utilities';
 import { cn } from '@/lib/utils';
 import { parseNaturalLanguage } from '@/lib/nlp/parse-natural-language';
 import { CalendarGrid } from '@/components/calendar/calendar-grid';
+import { OrganizeDialog } from '@/components/tasks/organize-dialog';
+import { FolderContents } from '@/components/tasks/folder-contents';
 
 type Task = Outputs['tasks']['list']['tasks'][number];
 type Folder = Outputs['folders']['list']['folders'][number];
@@ -227,6 +230,9 @@ export default function TasksPage() {
   const [folderName, setFolderName] = useState('');
   const [editingFolder, setEditingFolder] = useState<Folder | null>(null);
 
+  // AI organize review (iOS OrganizeReviewSheet parity)
+  const [organizeOpen, setOrganizeOpen] = useState(false);
+
   // NLP quick-add mode preference (stored in localStorage inside NlpQuickAdd)
 
   // Board drag state
@@ -239,6 +245,22 @@ export default function TasksPage() {
     }),
   );
   const folders = foldersData?.folders ?? [];
+
+  // Per-folder item counts across all member types (tasks + chats + saved
+  // emails/events/docs) — the number the iOS/macOS folder cards show.
+  const { data: folderSummary } = useQuery(
+    trpc.folders.summary.queryOptions(void 0, {
+      staleTime: 1000 * 60,
+      refetchOnMount: false,
+    }),
+  );
+  const folderCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const entry of folderSummary?.folders ?? []) {
+      map.set(entry.folder.id, entry.itemCount);
+    }
+    return map;
+  }, [folderSummary]);
 
   // For board mode we need all statuses; otherwise filter
   const boardMode = viewMode === 'board';
@@ -325,7 +347,10 @@ export default function TasksPage() {
   );
   const createFolderMutation = useMutation({
     ...trpc.folders.create.mutationOptions(),
-    onSuccess: () => void queryClient.invalidateQueries(trpc.folders.list.queryFilter()),
+    onSuccess: () => {
+      void queryClient.invalidateQueries(trpc.folders.list.queryFilter());
+      void queryClient.invalidateQueries(trpc.folders.summary.queryFilter());
+    },
   });
   const updateFolderMutation = useMutation({
     ...trpc.folders.update.mutationOptions(),
@@ -537,6 +562,17 @@ export default function TasksPage() {
             </DropdownMenu>
           )}
 
+          {/* AI folder triage — parity with the iOS "Organize" bar */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={() => setOrganizeOpen(true)}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Organize
+          </Button>
+
           <Button onClick={() => openCreate()} size="sm" className="h-8 gap-1.5 text-xs">
             <Plus className="h-3.5 w-3.5" />
             New task
@@ -576,6 +612,11 @@ export default function TasksPage() {
                 >
                   <FolderIcon className="h-3 w-3" />
                   {folder.name}
+                  {folderCounts.get(folder.id) ? (
+                    <span className="text-muted-foreground tabular-nums text-[11px]">
+                      {folderCounts.get(folder.id)}
+                    </span>
+                  ) : null}
                 </button>
                 {/* Hover manage icon */}
                 <DropdownMenu>
@@ -615,6 +656,7 @@ export default function TasksPage() {
                           {
                             onSuccess: () => {
                               void queryClient.invalidateQueries(trpc.folders.list.queryFilter());
+                              void queryClient.invalidateQueries(trpc.folders.summary.queryFilter());
                               if (activeFolderId === folder.id) setActiveFolderId(null);
                               if (editingFolder?.id === folder.id) setEditingFolder(null);
                             },
@@ -649,6 +691,9 @@ export default function TasksPage() {
             </button>
         </div>
       </div>
+
+      {/* ── Non-task members of the selected folder (saved emails/events/docs/chats) ── */}
+      {activeFolderId ? <FolderContents folderId={activeFolderId} /> : null}
 
       {/* ── Search + Filter Bar (List / Table only) ── */}
       {viewMode !== 'board' && viewMode !== 'dates' && (
@@ -883,6 +928,25 @@ export default function TasksPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── Organize review (AI folder triage) ── */}
+      <OrganizeDialog
+        open={organizeOpen}
+        onOpenChange={setOrganizeOpen}
+        folders={folders.map((f) => ({ id: f.id, name: f.name }))}
+        onCreateFolder={async (name) => {
+          const { folder } = await createFolderMutation.mutateAsync({ name });
+          return folder.id;
+        }}
+        onMoveTask={async (taskId, folderId) => {
+          await updateMutation.mutateAsync({ id: taskId, data: { folderId } });
+        }}
+        onApplied={() => {
+          void queryClient.invalidateQueries(trpc.tasks.list.queryFilter());
+          void queryClient.invalidateQueries(trpc.folders.list.queryFilter());
+          void queryClient.invalidateQueries(trpc.folders.summary.queryFilter());
+        }}
+      />
     </div>
   );
 }

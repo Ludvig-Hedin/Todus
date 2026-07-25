@@ -1,3 +1,11 @@
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowUpRight, CreditCard, Loader2, Sparkles, X } from 'lucide-react';
 import { SettingsCard } from '@/components/settings/settings-card';
@@ -5,6 +13,7 @@ import { useTRPC } from '@/providers/query-provider';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router';
+import { useState } from 'react';
 import { toast } from 'sonner';
 
 const PLAN_INCLUDES: Record<string, string[]> = {
@@ -94,6 +103,21 @@ export default function BillingSettingsPage() {
     }),
   );
 
+  // In-app cancellation (iOS `BillingSettingsView.performCancel` parity). The
+  // hosted portal stays available for payment-method / invoice changes, but
+  // cancelling shouldn't require leaving the app.
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const cancelSubscription = useMutation(
+    trpc.subscription.cancel.mutationOptions({
+      onSuccess: () => {
+        setShowCancelConfirm(false);
+        toast.success('Subscription cancelled');
+        void queryClient.invalidateQueries({ queryKey: trpc.subscription.getStatus.queryKey() });
+      },
+      onError: (error) => toast.error(error.message ?? 'Failed to cancel subscription'),
+    }),
+  );
+
   const status = statusQuery.data;
   const plan = status?.plan ?? 'free';
   const planKey = getPlanKey(plan);
@@ -165,15 +189,15 @@ export default function BillingSettingsPage() {
                     size="sm"
                     variant="ghost"
                     className="text-destructive hover:text-destructive"
-                    disabled={openPortal.isPending}
-                    onClick={() => openPortal.mutate({})}
+                    disabled={cancelSubscription.isPending}
+                    onClick={() => setShowCancelConfirm(true)}
                   >
-                    {openPortal.isPending ? (
+                    {cancelSubscription.isPending ? (
                       <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                     ) : (
                       <X className="mr-1.5 h-3.5 w-3.5" />
                     )}
-                    Cancel in portal
+                    Cancel subscription
                   </Button>
                 </div>
               )}
@@ -258,6 +282,40 @@ export default function BillingSettingsPage() {
           </div>
         )}
       </SettingsCard>
+
+      <Dialog open={showCancelConfirm} onOpenChange={setShowCancelConfirm}>
+        <DialogContent showOverlay className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cancel your {planLabel(planKey)} subscription?</DialogTitle>
+            <DialogDescription>
+              You keep {planLabel(planKey)} features until the end of the current billing period,
+              then move to the Free plan.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setShowCancelConfirm(false)}
+              disabled={cancelSubscription.isPending}
+            >
+              Keep {planLabel(planKey)}
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={cancelSubscription.isPending || !status?.productId}
+              onClick={() => {
+                if (!status?.productId) return;
+                cancelSubscription.mutate({ productId: status.productId });
+              }}
+            >
+              {cancelSubscription.isPending && (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              )}
+              Cancel subscription
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

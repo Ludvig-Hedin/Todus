@@ -42,6 +42,7 @@ export function NavigationHotkeys() {
   useHotkeys('meta+3, ctrl+3', navIfNotEditing('/mail/inbox'), { enableOnFormTags: false, preventDefault: true });
   useHotkeys('meta+4, ctrl+4', navIfNotEditing('/mail/calendar'), { enableOnFormTags: false, preventDefault: true });
   useHotkeys('meta+5, ctrl+5', navIfNotEditing('/mail/meetings'), { enableOnFormTags: false, preventDefault: true });
+  useHotkeys('meta+6, ctrl+6', navIfNotEditing('/mail/chat'), { enableOnFormTags: false, preventDefault: true });
 
   return null;
 }
