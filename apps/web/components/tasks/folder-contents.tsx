@@ -58,6 +58,9 @@ export function FolderContents({ folderId }: { folderId: string }) {
     ...trpc.folders.removeItem.mutationOptions(),
     onSuccess: () => {
       void queryClient.invalidateQueries(trpc.folders.listContents.queryFilter({ folderId }));
+      // The folder pill count comes from `folders.summary`, which counts this
+      // item too — without this it keeps showing the pre-removal number.
+      void queryClient.invalidateQueries(trpc.folders.summary.queryFilter());
     },
     onError: (error) => {
       console.error('Failed to remove folder item:', error);

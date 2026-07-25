@@ -231,11 +231,14 @@ export function OrganizeDialog({
     if (accepted.length === 0) return;
 
     setIsApplying(true);
+    // Counted outside the try: the loop moves tasks one at a time, so a failure
+    // halfway through still leaves earlier tasks filed on the server. The
+    // caller has to refetch either way or the list keeps showing them unfiled.
+    let moved = 0;
     try {
       // Get-or-create by lowercased name so two proposals sharing a name land
       // in one folder (iOS `createdByName`).
       const createdByName = new Map<string, string>();
-      let moved = 0;
 
       for (const proposal of accepted) {
         let folderId: string;
@@ -260,7 +263,12 @@ export function OrganizeDialog({
       toast.success(moved === 1 ? '1 task filed' : `${moved} tasks filed`);
     } catch (error) {
       console.error('Failed to apply organize proposals:', error);
-      toast.error('Could not file every task. Please try again.');
+      if (moved > 0) onApplied(moved);
+      toast.error(
+        moved > 0
+          ? `Filed ${moved} of ${accepted.length} tasks — the rest failed.`
+          : 'Could not file every task. Please try again.',
+      );
     } finally {
       setIsApplying(false);
     }
