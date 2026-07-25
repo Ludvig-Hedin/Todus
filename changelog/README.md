@@ -63,6 +63,7 @@ project has never tagged a version, so nothing qualified as `released`.
 
 | id | category | date | title |
 | --- | --- | --- | --- |
+| 0326 | Added | — | [Web reaches native parity on chat, task organize, folder contents, briefing actions and cancellation](entries/unreleased/0326-added-web-native-feature-parity-pass.md) |
 | 0325 | Added | 2026-07-25 | [Added — agent operating system: backlog, user-tasks, changelog and agent memory](entries/unreleased/0325-added-agent-operating-system-backlog-user-tasks-changelog-agent-memory.md) |
 | 0324 | Fixed | 2026-07-24 | [Fixed — native AI and task-save review follow-up](entries/unreleased/0324-fixed-native-ai-and-task-save-review-follow-up.md) |
 | 0323 | Fixed | 2026-07-24 | [Changed — Bun workspace migration and release hardening](entries/unreleased/0323-changed-bun-workspace-migration-and-release-hardening.md) |

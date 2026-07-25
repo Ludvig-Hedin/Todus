@@ -100,6 +100,7 @@ routing rules were applied and are worth knowing before you trust a `done`:
 | 0466 | P2 | macos, todo-sweep, ux | [macOS content header buttons are wired to nothing](tasks/open/0466-macos-content-header-buttons-are-wired-to-nothing.md) |
 | 0468 | P2 | macos, todo-sweep, local-ai | [HuggingFace cache bridge replaces the symlink non-atomically](tasks/open/0468-huggingface-cache-bridge-replaces-the-symlink-non-atomically.md) |
 | 0469 | P2 | macos, todo-sweep, sharing | [todus://share deep link has no presenter on macOS](tasks/open/0469-todus-share-deep-link-has-no-presenter-on-macos.md) |
+| 0474 | P2 | web, tooling, dx | [apps/web cannot be typechecked whole-program — tsc OOMs at 11 GB heap](tasks/open/0474-apps-web-whole-program-typecheck-oom.md) |
 | 0005 | P3 | ios, performance, code-review-backlog | [PERF-6 — tasksChangeDigest/boardChangeDigest walk allTasks O(n) on every body eval (they're the .onChange comp](tasks/open/0005-perf-6-taskschangedigest-boardchangedigest-walk-alltasks-o-n.md) |
 | 0006 | P3 | ios, performance, code-review-backlog | [PERF-7 — Per-SSE-line Task.detached decode (hundreds of hops/reply) and full-markdown reparse on every 80ms to](tasks/open/0006-perf-7-per-sse-line-task-detached-decode-hundreds-of-hops-re.md) |
 | 0007 | P3 | ios, bug-hunt, ux, code-review-backlog | [iOS UX assessment + polish + bug hunt — 2026-07-07 (apps/ios)](tasks/open/0007-ios-ux-assessment-polish-bug-hunt-2026-07-07-apps-ios.md) |
